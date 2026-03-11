@@ -6338,6 +6338,26 @@
   }
 
   function initTabs() {
+    const titleEl = document.getElementById("aboutNavTitle");
+    if (titleEl) {
+      titleEl.style.cursor = "pointer";
+      titleEl.setAttribute("role", "button");
+      titleEl.setAttribute("tabindex", "0");
+      titleEl.setAttribute("aria-label", "Go to About page");
+      titleEl.addEventListener("click", () => {
+        state.tab = "about";
+        save();
+        renderAll();
+      });
+      titleEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          state.tab = "about";
+          save();
+          renderAll();
+        }
+      });
+    }
     document.querySelectorAll(".tab").forEach((btn) => {
       btn.addEventListener("click", () => {
         const t = btn.dataset.tab;

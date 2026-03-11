@@ -303,6 +303,11 @@ body {
   font-weight: 700;
   color: var(--text);
   cursor: pointer;
+  transition: color 0.15s;
+}
+
+.sidebar-brand .title:hover {
+  color: var(--accent);
 }
 
 .sidebar-label {
