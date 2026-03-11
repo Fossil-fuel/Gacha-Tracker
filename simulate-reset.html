@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset Logic Simulator</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 720px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      background: #1a1a1a;
+      color: #e0e0e0;
+    }
+    h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1rem; color: #888; margin: 1.5rem 0 0.5rem; }
+    .card {
+      background: #252525;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; margin-bottom: 0.75rem; }
+    label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: #aaa; }
+    input, select {
+      padding: 0.5rem;
+      border: 1px solid #444;
+      border-radius: 4px;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      font-size: 0.9rem;
+    }
+    input[type="number"] { width: 4rem; }
+    input[type="datetime-local"] { min-width: 12rem; }
+    .result {
+      background: #1e3a1e;
+      border: 1px solid #2d5a2d;
+      border-radius: 4px;
+      padding: 1rem;
+      margin-top: 1rem;
+      font-family: ui-monospace, monospace;
+      font-size: 0.9rem;
+    }
+    .result.error { background: #3a1e1e; border-color: #5a2d2d; }
+    .result strong { color: #7fdb7f; }
+    .result .date { color: #ffb86c; }
+    .btn {
+      padding: 0.5rem 1rem;
+      background: #444;
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn:hover { background: #555; }
+    .btn-primary { background: #0d7377; }
+    .btn-primary:hover { background: #0e8488; }
+    p { margin: 0.5rem 0; font-size: 0.9rem; color: #aaa; }
+  </style>
+</head>
+<body>
+  <h1>Reset Logic Simulator</h1>
+  <p>Change the values below and see which calendar date a completion is recorded for.</p>
+
+  <div class="card">
+    <h2>1. Completion time</h2>
+    <p>When did you mark the daily as complete?</p>
+    <div class="row">
+      <label>
+        Date & time
+        <input type="datetime-local" id="completeTime" value="2025-03-08T02:59">
+      </label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. Game reset time</h2>
+    <p>When does the daily reset? (e.g. 3 = 3:00 AM, 23 = 11:00 PM)</p>
+    <div class="row">
+      <label>
+        Hour (0–23)
+        <input type="number" id="resetHour" min="0" max="23" value="3">
+      </label>
+      <label>
+        Minute
+        <input type="number" id="resetMinute" min="0" max="59" value="0">
+      </label>
+    </div>
+  </div>
+
+  <div class="card">
+    <button class="btn btn-primary" id="runBtn">Run simulation</button>
+    <div class="result" id="result"></div>
+  </div>
+
+  <div class="card">
+    <h2>Quick presets</h2>
+    <div class="row" style="gap: 0.5rem;">
+      <button class="btn" data-preset="259-3am">2:59am Mar 8, 3am reset</button>
+      <button class="btn" data-preset="300-3am">3:00am Mar 8, 3am reset</button>
+      <button class="btn" data-preset="2259-11pm">10:59pm Mar 8, 11pm reset</button>
+      <button class="btn" data-preset="2300-11pm">11:00pm Mar 8, 11pm reset</button>
+    </div>
+  </div>
+
+  <script>
+    function getDateStr(d) {
+      const date = d || new Date();
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return y + "-" + m + "-" + day;
+    }
+
+    function getDailyPeriodDateStr(game, now) {
+      const n = now || new Date();
+      const hour = Number.isFinite(game?.resetHour) ? game.resetHour : 3;
+      const minute = Number.isFinite(game?.resetMinute) ? game.resetMinute : 0;
+      const todayReset = new Date(n.getFullYear(), n.getMonth(), n.getDate(), hour, minute, 0, 0);
+      if (n < todayReset) {
+        const yesterday = new Date(n);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return getDateStr(yesterday);
+      }
+      return getDateStr(n);
+    }
+
+    function run() {
+      const completeTimeInput = document.getElementById("completeTime");
+      const resetHourInput = document.getElementById("resetHour");
+      const resetMinuteInput = document.getElementById("resetMinute");
+      const resultEl = document.getElementById("result");
+
+      const completeTime = new Date(completeTimeInput.value);
+      const game = {
+        resetHour: parseInt(resetHourInput.value, 10) || 3,
+        resetMinute: parseInt(resetMinuteInput.value, 10) || 0,
+      };
+
+      const periodDate = getDailyPeriodDateStr(game, completeTime);
+      const calendarDate = completeTime.getDate();
+      const calendarMonth = completeTime.getMonth() + 1;
+      const calendarYear = completeTime.getFullYear();
+      const timeStr = completeTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+      const resetStr = (game.resetHour === 0 ? "12" : game.resetHour > 12 ? game.resetHour - 12 : game.resetHour) +
+        ":" + String(game.resetMinute).padStart(2, "0") +
+        (game.resetHour < 12 ? "am" : "pm");
+
+      const [py, pm, pd] = periodDate.split("-");
+      const periodDisplay = `${pm}/${pd}/${py}`;
+
+      resultEl.className = "result";
+      resultEl.innerHTML = `
+        <strong>Completion time:</strong> ${calendarMonth}/${calendarDate}/${calendarYear} at ${timeStr}<br>
+        <strong>Reset time:</strong> ${resetStr}<br>
+        <br>
+        <strong>→ Recorded on calendar as:</strong> <span class="date">${periodDisplay}</span> (${periodDate})<br>
+        <br>
+        <small>So when you view the Attendance calendar, the cell for ${periodDisplay} will show this completion.</small>
+      `;
+    }
+
+    document.getElementById("runBtn").addEventListener("click", run);
+    document.getElementById("completeTime").addEventListener("change", run);
+    document.getElementById("resetHour").addEventListener("input", run);
+    document.getElementById("resetMinute").addEventListener("input", run);
+
+    document.querySelectorAll("[data-preset]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const p = btn.dataset.preset;
+        const completeTime = document.getElementById("completeTime");
+        const resetHour = document.getElementById("resetHour");
+        const resetMinute = document.getElementById("resetMinute");
+        if (p === "259-3am") {
+          completeTime.value = "2025-03-08T02:59";
+          resetHour.value = "3";
+          resetMinute.value = "0";
+        } else if (p === "300-3am") {
+          completeTime.value = "2025-03-08T03:00";
+          resetHour.value = "3";
+          resetMinute.value = "0";
+        } else if (p === "2259-11pm") {
+          completeTime.value = "2025-03-08T22:59";
+          resetHour.value = "23";
+          resetMinute.value = "0";
+        } else if (p === "2300-11pm") {
+          completeTime.value = "2025-03-08T23:00";
+          resetHour.value = "23";
+          resetMinute.value = "0";
+        }
+        run();
+      });
+    });
+
+    // Run on load
+    run();
+  </script>
+</body>
+</html>

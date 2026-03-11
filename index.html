@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="purple">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gacha Tracker</title>
+  <meta name="description" content="Track completion and currency earned through checklists and manual inputs." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar-left">
+      <div class="sidebar-brand">
+        <h1 class="title" id="aboutNavTitle">Gacha Tracker</h1>
+      </div>
+      <nav class="sidebar-nav" role="tablist">
+        <span class="sidebar-label">Quick Access</span>
+        <button class="tab active" data-tab="home" role="tab" aria-selected="true">Home</button>
+        <button class="tab" data-tab="extracurricular" role="tab" aria-selected="false">Extracurricular</button>
+        <div class="sidebar-sub-nav" id="sidebarExtracurricularSubNav" aria-label="Extracurricular sub-pages">
+          <button type="button" class="tab tab-sub" data-tab="extracurricular" data-extracurricular-view-mode="history" id="sidebarTabExtracurricularHistory">History</button>
+        </div>
+        <button class="tab" data-tab="dailies" role="tab" aria-selected="false">Dailies</button>
+        <button class="tab" data-tab="weeklies" role="tab" aria-selected="false">Weeklies</button>
+        <button class="tab" data-tab="endgame" role="tab" aria-selected="false">Endgame</button>
+        <button class="tab" data-tab="attendance" role="tab" aria-selected="false">Attendance</button>
+        <div class="sidebar-sub-nav" id="sidebarAttendanceSubNav" aria-label="Attendance sub-pages">
+          <button type="button" class="tab tab-sub" data-tab="attendance" data-attendance-view="history" id="sidebarTabHistory">History</button>
+        </div>
+      </nav>
+      <div class="sidebar-data-wrap">
+        <span class="sidebar-label">Data</span>
+        <div id="sidebarDataList" class="sidebar-data-list" role="list"></div>
+      </div>
+      <div class="sidebar-games-wrap">
+        <span class="sidebar-label">Games</span>
+        <div id="sidebarGamesList" class="sidebar-games-list" role="list"></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <nav class="breadcrumb-bar" aria-label="Breadcrumb">
+        <div class="breadcrumb">
+          <span class="breadcrumb-item">Gacha Tracker</span>
+          <span class="breadcrumb-sep" aria-hidden="true">›</span>
+          <span class="breadcrumb-current" id="breadcrumbCurrent">Home</span>
+        </div>
+        <div class="top-bar-actions">
+          <a href="https://discord.gg/XYGvTuReXz" class="btn btn-ghost btn-sm top-bar-btn" target="_blank" rel="noopener noreferrer">
+            <svg class="top-bar-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+            Discord
+          </a>
+          <a href="https://github.com/Fossil-fuel/Gacha-Tracker" class="btn btn-ghost btn-sm top-bar-btn" target="_blank" rel="noopener noreferrer">
+            <svg class="top-bar-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            GitHub
+          </a>
+          <a href="https://ko-fi.com/fossilcorps" class="btn btn-ghost btn-sm top-bar-btn" target="_blank" rel="noopener noreferrer">
+            <svg class="top-bar-icon top-bar-icon-kofi" viewBox="0 0 24 24" aria-hidden="true">
+              <path class="kofi-mug" d="M5 5.5h9.5c1 0 1.8.8 1.8 1.8v7.4c0 1-.8 1.8-1.8 1.8H5c-1 0-1.8-.8-1.8-1.8V7.3c0-1 .8-1.8 1.8-1.8z" fill="white" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path class="kofi-handle" d="M15.5 6.5h3.2c.5 0 .9.4.9.9v4.7c0 .5-.4.9-.9.9h-3.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path class="kofi-heart" transform="translate(5, 6) scale(0.4)" d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="#E85D4C"/>
+            </svg>
+            Support me on Ko-fi
+          </a>
+        </div>
+      </nav>
+      <div class="content-card">
+        <section id="panel-about" class="panel" role="tabpanel" hidden>
+          <div class="panel-header">
+            <h2>About</h2>
+            <p class="panel-desc">Gacha Tracker is a browser-based app for tracking daily and weekly tasks across multiple gacha games. It's fully manual — no game APIs or accounts — and stores data locally in your browser.</p>
+            <p class="panel-desc panel-desc-note">Nothing here is automatic or connected to game accounts. Everything is manual on purpose so it stays safe, flexible, and ban‑free.</p>
+            <div class="panel-separator"></div>
+          </div>
+          <div class="panel-about-body">
+            <section class="about-section">
+              <h3 class="about-section-title">Core Features</h3>
+              <ul class="about-feature-list">
+                <li><strong>Home</strong> — Overview of today's progress with progress bars for Dailies, Weeklies, and Endgame, plus a checklist ordered by due date.</li>
+                <li><strong>Dailies</strong> — Track daily tasks (e.g. commissions) per game, with server reset times and optional currency tracking.</li>
+                <li><strong>Weeklies</strong> — Track weekly content (e.g. Divergent Universe, Hollow Zero) with configurable reset schedules.</li>
+                <li><strong>Endgame</strong> — Track endgame modes (Memory of Chaos, Tower of Adversity, etc.) with partial credit and currency earned per completion.</li>
+                <li><strong>Extracurricular</strong> — Custom tasks for events, story, or other reminders with start/end dates.</li>
+                <li><strong>Attendance</strong> — Weekly participation view and history with pie charts.</li>
+                <li><strong>Data</strong> — Breakdown of currency earned across games and task types.</li>
+                <li><strong>Games</strong> — Add, edit, or remove games. Start from presets or build custom.</li>
+              </ul>
+            </section>
+            <section class="about-section">
+              <h3 class="about-section-title">Other Features</h3>
+              <ul class="about-feature-list about-feature-list-compact">
+                <li>Server regions (America, Asia, Europe) and DST handling for reset times</li>
+                <li>Custom themes (presets and custom colors)</li>
+                <li>Export/import data as JSON</li>
+                <li>Optional 30-day simulation for testing</li>
+                <li>List and grid views for tasks</li>
+              </ul>
+            </section>
+            <section class="about-section">
+              <h3 class="about-section-title">Supported Games (Presets)</h3>
+              <p class="about-presets">Honkai Star Rail · Zenless Zone Zero · Honkai Impact 3rd · Wuthering Waves · Arknights: Endfield</p>
+            </section>
+            <section class="about-section">
+              <h3 class="about-section-title">How Time Works</h3>
+              <p class="about-time-intro">Reset times and dates are based on your chosen timezone and each game's server region. Here's what you need to know:</p>
+              <ul class="about-feature-list">
+                <li><strong>Display timezone</strong> — In Settings → Time, choose your timezone. This controls the date and time shown in the sidebar, when the calendar shows "today," and how reset times are displayed. You can use your device's local time or pick a fixed timezone.</li>
+                <li><strong>Server regions</strong> — Each game has a server (America, Asia, or Europe). Reset times follow that server's clock. For example, if a game resets at 4:00 AM server time, it resets at 4:00 AM in that region.</li>
+                <li><strong>Daylight Saving Time</strong> — For America and Europe servers, the tracker can adjust reset times when DST changes (e.g. 4:00 AM during DST, 3:00 AM when DST ends). Asia has no DST. You can turn this on or off per task or in settings.</li>
+                <li><strong>What counts as "today"</strong> — A daily period runs from one reset to the next. So if dailies reset at 3:00 AM, then 2:59 AM still belongs to yesterday's tasks; 3:00 AM starts today's.</li>
+                <li><strong>Weeklies</strong> — Each weekly task has a start day (e.g. Monday) and time. The week runs from that moment for 7 days. The "time remaining" shows how long until the current week ends.</li>
+                <li><strong>Endgame</strong> — Endgame tasks use cycles (e.g. every 2 weeks). Each cycle has a deadline. Time remaining is until the end of the current cycle.</li>
+              </ul>
+              <p class="about-time-hint">The sidebar shows your current time, the next reset countdown, and a comparison of reset times with and without DST. Check Settings → Time to sync your timezone or change how dates and times are displayed.</p>
+            </section>
+            <section class="about-section about-section-note">
+              <h3 class="about-section-title">Note from the Creator</h3>
+              <p>This website is very barebones. I'm new to doing anything in this field and I'm open to help — whether that's feedback, suggestions, or contributions!</p>
+            </section>
+          </div>
+        </section>
+
+        <section id="panel-home" class="panel active" role="tabpanel">
+          <div class="panel-header">
+            <h2>Home</h2>
+            <p class="panel-desc">Anyone play too many Gacha games? Anyone got a pea-brain that can't keep track of anything? Anyone miss having school attendances? Well, look no further! Here is a tracker for your Gacha homework and attendance that no one asked for! Only for the low price of FREE.99!</p>
+            <p class="panel-desc panel-desc-note">Please note that this is a manual tracker. Although it is pretty customizable, it cannot be made to be automatic because most Gacha games have a problem with third-party APIs (bannable offense).</p>
+            <div class="panel-separator"></div>
+          </div>
+          <div id="homeContainer"></div>
+        </section>
+
+        <section id="panel-dailies" class="panel" role="tabpanel" hidden>
+          <div class="panel-header">
+            <div class="panel-header-row">
+              <div>
+                <h2>Daily Tasks</h2>
+                <p class="panel-desc">Just your daily homework assignment. Be careful, we take attendance here, and its GRADED!</p>
+              </div>
+              <div class="panel-format-toggle" id="format-toggle-dailies" role="group" aria-label="View format">
+                <button type="button" class="format-btn format-btn-list active" data-panel="dailies" data-format="list" aria-label="List view" title="List"></button>
+                <button type="button" class="format-btn format-btn-grid" data-panel="dailies" data-format="grid" aria-label="Grid view" title="Grid"></button>
+              </div>
+            </div>
+            <div class="panel-separator"></div>
+          </div>
+          <div id="dailies-content"></div>
+        </section>
+
+        <section id="panel-weeklies" class="panel" role="tabpanel" hidden>
+          <div class="panel-header">
+            <div class="panel-header-row">
+              <div>
+                <h2>Weekly Tasks</h2>
+                <p class="panel-desc">Once a week is not too bleak. This also counts for attendance, so keep up to prevent a week (weak) grade.</p>
+              </div>
+              <div class="panel-format-toggle" id="format-toggle-weeklies" role="group" aria-label="View format">
+                <button type="button" class="format-btn format-btn-list active" data-panel="weeklies" data-format="list" aria-label="List view" title="List"></button>
+                <button type="button" class="format-btn format-btn-grid" data-panel="weeklies" data-format="grid" aria-label="Grid view" title="Grid"></button>
+              </div>
+            </div>
+            <div class="panel-separator"></div>
+          </div>
+          <div id="weeklies-content"></div>
+        </section>
+
+        <section id="panel-endgame" class="panel" role="tabpanel" hidden>
+          <div class="panel-header">
+            <div class="panel-header-row">
+              <div>
+                <h2>Endgame Content</h2>
+                <p class="panel-desc">A large burst of currency is from these tasks. Don't worry if you're not able to complete them, it's not the END, we take partial credit!</p>
+              </div>
+              <div class="panel-format-toggle" id="format-toggle-endgame" role="group" aria-label="View format">
+                <button type="button" class="format-btn format-btn-list active" data-panel="endgame" data-format="list" aria-label="List view" title="List"></button>
+                <button type="button" class="format-btn format-btn-grid" data-panel="endgame" data-format="grid" aria-label="Grid view" title="Grid"></button>
+              </div>
+            </div>
+            <div class="panel-separator"></div>
+          </div>
+          <div id="endgame-content"></div>
+        </section>
+
+        <section id="panel-attendance" class="panel" role="tabpanel" hidden>
+          <div class="panel-header">
+            <h2>Attendance</h2>
+            <p class="panel-desc">Sit down class, let's have a look at your career participation and earnings!</p>
+            <div class="panel-separator"></div>
+          </div>
+          <div id="attendanceContainer"></div>
+        </section>
+
+        <section id="panel-extracurricular" class="panel" role="tabpanel" hidden>
+          <div class="panel-header panel-header-extracurricular">
+            <div class="panel-format-toggle panel-format-toggle-float" id="format-toggle-extracurricular" role="group" aria-label="View format">
+              <button type="button" class="format-btn format-btn-list active" data-panel="extracurricular" data-format="list" aria-label="List view" title="List"></button>
+              <button type="button" class="format-btn format-btn-grid" data-panel="extracurricular" data-format="grid" aria-label="Grid view" title="Grid"></button>
+            </div>
+            <h2>Extracurricular</h2>
+            <p class="panel-desc">So all the homework wasn't enough, huh? Here is more work for you! Nothing in this page is automatic, you can enter it all yourself! Its mainly here for manual tracking of Events, Story, and other remainders you want to keep track off.</p>
+            <div class="panel-separator"></div>
+          </div>
+          <div id="extracurricularContent"></div>
+        </section>
+
+        <section id="panel-data" class="panel" role="tabpanel" hidden>
+          <div class="panel-header">
+            <h2>Data</h2>
+            <div class="panel-separator"></div>
+          </div>
+          <div id="dataContainer"></div>
+        </section>
+
+        <section id="panel-games" class="panel" role="tabpanel" hidden>
+          <div class="panel-header">
+            <h2>Games</h2>
+            <div class="panel-separator"></div>
+          </div>
+          <div id="gamesContainer"></div>
+        </section>
+      </div>
+    </main>
+
+    <aside class="sidebar-right">
+      <div class="sidebar-right-inner">
+        <div class="sidebar-right-header">
+          <span class="sidebar-label">Today</span>
+          <div class="sidebar-right-header-actions">
+            <button type="button" class="icon-btn" id="sidebarSettingsBtn" aria-label="Settings" title="Settings">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="date-bar date-bar-vertical">
+          <span class="date-text" id="currentDate"></span>
+        </div>
+        <div class="sidebar-time" id="currentTime"></div>
+        <div class="sidebar-timezone" id="sidebarTimezone" aria-label="Display timezone"></div>
+        <div class="sidebar-countdown" id="resetCountdown"></div>
+        <div class="sidebar-reset-compare" id="sidebarResetCompare" aria-label="Reset times W/ DST and W/O DST"></div>
+        <p class="sidebar-hint" id="sidebarHint">Dailies reset time. Data saved in this browser.</p>
+        <div class="sidebar-dst-dates" id="sidebarDstDates" aria-label="DST transition dates"></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Task create/edit modal -->
+  <div id="taskModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+      <div class="modal-header">
+        <h3 id="taskModalTitle" class="modal-title">Task</h3>
+        <button type="button" class="icon-btn" id="taskModalClose" aria-label="Close">×</button>
+      </div>
+
+      <form id="taskModalForm" class="modal-body">
+        <div class="task-menu-grid" role="group" aria-label="Task schedule settings">
+          <!-- Row 1: Task name -->
+          <div class="task-menu-cell span-7 task-menu-name">
+            <input id="taskNameInput" type="text" placeholder="Task Name" autocomplete="off" />
+          </div>
+
+          <!-- Row 2: Sun-Sat -->
+          <div class="task-menu-cell day-cell" data-day="0">Sun</div>
+          <div class="task-menu-cell day-cell" data-day="1">Mon</div>
+          <div class="task-menu-cell day-cell" data-day="2">Tue</div>
+          <div class="task-menu-cell day-cell" data-day="3">Wed</div>
+          <div class="task-menu-cell day-cell" data-day="4">Thu</div>
+          <div class="task-menu-cell day-cell" data-day="5">Fri</div>
+          <div class="task-menu-cell day-cell" data-day="6">Sat</div>
+
+          <!-- Row 3: Time of Reset -->
+          <div class="task-menu-cell span-2 task-menu-label">Time of Reset</div>
+          <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-note">
+            <input id="taskResetTime" type="time" step="60" />
+            <span class="task-menu-note">Reset timers do not account for DST.</span>
+          </div>
+
+          <!-- Row 3b: DST toggle -->
+          <div class="task-menu-cell span-2 task-menu-label">Adjust for DST</div>
+          <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-desc">
+            <input id="taskAdjustForDST" type="checkbox" class="dst-toggle" checked aria-label="Adjust reset time for daylight saving" />
+            <span class="task-menu-desc">When on, displayed reset time shifts by 1 hour during DST.</span>
+          </div>
+
+          <!-- Row 4: Reset frequency -->
+          <div class="task-menu-cell span-5 task-menu-label">
+            <span>Reset frequency: Every:</span>
+            <input id="taskFrequencyEvery" type="number" min="1" step="1" value="1" />
+          </div>
+          <button type="button" class="task-menu-cell toggle-cell" id="taskFrequencyUnitDay" data-unit="day">Day</button>
+          <button type="button" class="task-menu-cell toggle-cell" id="taskFrequencyUnitWeek" data-unit="week">Week</button>
+
+          <!-- Row 5: Time limit -->
+          <div class="task-menu-cell span-5 task-menu-label">
+            <span>Time Limit to complete task:</span>
+            <input id="taskTimeLimitEvery" type="number" min="1" step="1" value="1" />
+          </div>
+          <button type="button" class="task-menu-cell toggle-cell" id="taskTimeLimitUnitDay" data-unit="day">Day</button>
+          <button type="button" class="task-menu-cell toggle-cell" id="taskTimeLimitUnitWeek" data-unit="week">Week</button>
+        </div>
+
+        <div id="taskModalExtra" class="task-menu-extra"></div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="taskModalCancel">Cancel</button>
+          <button type="submit" class="btn btn-add" id="taskModalSave">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Daily task (configure dailies) modal -->
+  <div id="dailyTaskModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="dailyTaskModalTitle">
+      <div class="modal-header">
+        <h3 id="dailyTaskModalTitle" class="modal-title">Daily task</h3>
+        <button type="button" class="icon-btn" id="dailyTaskModalClose" aria-label="Close">×</button>
+      </div>
+      <form id="dailyTaskModalForm" class="modal-body">
+        <div class="endgame-currency-rows">
+          <div class="endgame-currency-row">
+            <label for="dailyTaskName">Task name</label>
+            <input id="dailyTaskName" type="text" placeholder="e.g. Commissions" autocomplete="off" />
+          </div>
+          <div class="endgame-currency-row endgame-currency-row-with-note">
+            <label for="dailyTaskResetTime">Daily reset time</label>
+            <div class="endgame-currency-row-inner">
+              <input id="dailyTaskResetTime" type="time" step="60" />
+              <span class="endgame-currency-note">Reset timers do not account for DST.</span>
+            </div>
+          </div>
+          <div class="endgame-currency-row endgame-currency-row-with-desc">
+            <label>Adjust for DST</label>
+            <div class="endgame-currency-row-inner">
+              <input id="dailyTaskAdjustForDST" type="checkbox" class="dst-toggle" checked aria-label="Adjust reset time for daylight saving" />
+              <span class="endgame-currency-desc">When on, displayed reset time shifts by 1 hour during DST.</span>
+            </div>
+          </div>
+          <div class="endgame-currency-row">
+            <label>Daily currency (potential)</label>
+            <input id="dailyTaskCurrency" type="number" min="0" placeholder="0" />
+          </div>
+          <div class="endgame-currency-row games-changer-row">
+            <label>Completed amount:</label>
+            <input id="dailyTaskCompleted" type="number" min="0" placeholder="0" />
+          </div>
+          <div class="endgame-currency-row games-changer-row">
+            <label>Amount attempted:</label>
+            <input id="dailyTaskAttempted" type="number" min="0" placeholder="0" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="dailyTaskModalCancel">Cancel</button>
+          <button type="submit" class="btn btn-add" id="dailyTaskModalSave">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Calendar day edit modal -->
+  <div id="calendarDayModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog modal-dialog-calendar" role="dialog" aria-modal="true" aria-labelledby="calendarDayModalTitle">
+      <div class="modal-header">
+        <h3 id="calendarDayModalTitle" class="modal-title">Edit day</h3>
+        <button type="button" class="icon-btn" id="calendarDayModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="calendarDayModalTasks" class="calendar-day-modal-tasks"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="calendarDayModalCancel">Cancel</button>
+          <button type="button" class="btn btn-add" id="calendarDayModalSave">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Extracurricular task add/edit modal -->
+  <div id="extracurricularTaskModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="extracurricularTaskModalTitle">
+      <div class="modal-header">
+        <h3 id="extracurricularTaskModalTitle" class="modal-title">Add task</h3>
+        <button type="button" class="icon-btn" id="extracurricularTaskModalClose" aria-label="Close">×</button>
+      </div>
+      <form id="extracurricularTaskModalForm" class="modal-body">
+        <div class="form-row">
+          <label for="extracurricularTaskName">Task name</label>
+          <input id="extracurricularTaskName" type="text" placeholder="Task name" autocomplete="off" required />
+        </div>
+        <div class="form-row">
+          <label for="extracurricularTaskStartDate">Start date</label>
+          <input id="extracurricularTaskStartDate" type="date" required />
+        </div>
+        <div class="form-row">
+          <label class="task-menu-checkbox-label">
+            <input id="extracurricularTaskEndDateTBD" type="checkbox" />
+            <span>End date TBD</span>
+          </label>
+        </div>
+        <div class="form-row extracurricular-end-date-row">
+          <label for="extracurricularTaskEndDate">End date</label>
+          <input id="extracurricularTaskEndDate" type="date" />
+        </div>
+        <div class="form-row extracurricular-time-remaining-row" id="extracurricularTimeRemainingRow">
+          <label for="extracurricularTimeRemainingInput">Time remaining</label>
+          <input id="extracurricularTimeRemainingInput" type="text" class="task-time-remaining-input" placeholder="e.g. 6d 7hr" aria-label="Time remaining (input to set end date)" />
+          <span class="task-time-remaining-hint">Enter to apply</span>
+        </div>
+        <div class="form-row">
+          <label for="extracurricularTaskDescription">Description (optional)</label>
+          <textarea id="extracurricularTaskDescription" rows="3" placeholder="Optional description"></textarea>
+        </div>
+        <div class="form-row">
+          <label for="extracurricularTaskGame">Associated game (optional)</label>
+          <select id="extracurricularTaskGame">
+            <option value="">— None —</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label for="extracurricularTaskCurrency">Currency (optional, for Data tab)</label>
+          <input id="extracurricularTaskCurrency" type="number" min="0" placeholder="0" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="extracurricularTaskModalCancel">Cancel</button>
+          <button type="submit" class="btn btn-add" id="extracurricularTaskModalSave">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Game add modal -->
+  <div id="gameModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="gameModalTitle">
+      <div class="modal-header">
+        <h3 id="gameModalTitle" class="modal-title">Add Game</h3>
+        <button type="button" class="icon-btn" id="gameModalClose" aria-label="Close">×</button>
+      </div>
+
+      <form id="gameModalForm" class="modal-body">
+        <div class="game-add-options" role="group" aria-label="Add game">
+          <button type="button" class="game-add-option" data-preset="custom" aria-pressed="true">
+            <span class="game-add-title">Custom</span>
+            <span class="game-add-sub">Start empty and configure tasks yourself.</span>
+          </button>
+          <button type="button" class="game-add-option" data-preset="hsr" aria-pressed="false">
+            <span class="game-add-title">Honkai Star Rail</span>
+            <span class="game-add-sub">Divergent Universe, Currency Wars, Apocalyptic Shadow, Anomaly Arbitration, Memory of Chaos, Pure Fiction.</span>
+          </button>
+          <button type="button" class="game-add-option" data-preset="zzz" aria-pressed="false">
+            <span class="game-add-title">Zenless Zone Zero</span>
+            <span class="game-add-sub">Weekly Ridu, Hollow Zero, Deadly Assault, Shiyu Defense.</span>
+          </button>
+          <button type="button" class="game-add-option" data-preset="hi3" aria-pressed="false">
+            <span class="game-add-title">Honkai Impact 3rd</span>
+            <span class="game-add-sub">Memorial Arena, Abyss (Superstring).</span>
+          </button>
+          <button type="button" class="game-add-option" data-preset="ww" aria-pressed="false">
+            <span class="game-add-title">Wuthering Waves</span>
+            <span class="game-add-sub">Thousand Gateways, Tower of Adversity, Whimpering Wastes. Doubled Pawns Matrix as extracurricular (resets are version/update dependent).</span>
+          </button>
+          <button type="button" class="game-add-option" data-preset="akendfield" aria-pressed="false">
+            <span class="game-add-title">Arknights: Endfield</span>
+            <span class="game-add-sub">Weekly Routine.</span>
+          </button>
+        </div>
+
+        <div class="form-row">
+          <label for="gameNameInput">Game name</label>
+          <input id="gameNameInput" type="text" placeholder="New game" autocomplete="off" />
+        </div>
+        <div class="form-row">
+          <label for="gameServerSelect">Server</label>
+          <select id="gameServerSelect" class="settings-select" aria-describedby="game-server-desc">
+            <option value="america">America (UTC-5)</option>
+            <option value="asia">Asia (UTC+8)</option>
+            <option value="europe">Europe (UTC+1)</option>
+          </select>
+          <span id="game-server-desc" class="settings-hint">Server region determines reset time base. Reset is 4am server time (3am when DST inactive).</span>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="gameModalCancel">Cancel</button>
+          <button type="submit" class="btn btn-add" id="gameModalCreate">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Endgame earnings per completion modal -->
+  <div id="earningsModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog modal-dialog-earnings" role="dialog" aria-modal="true" aria-labelledby="earningsModalTitle">
+      <div class="modal-header">
+        <h3 id="earningsModalTitle" class="modal-title">Completion History</h3>
+        <button type="button" class="icon-btn" id="earningsModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="earningsModalList" class="earnings-modal-list"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="earningsModalCancel">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settingsModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog modal-dialog-settings" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+      <div class="modal-header">
+        <h3 id="settingsModalTitle" class="modal-title">Settings</h3>
+        <button type="button" class="icon-btn" id="settingsModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="settings-body">
+        <nav class="settings-sidebar" aria-label="Settings sections">
+          <button type="button" class="settings-nav-item" data-settings-section="account">Account</button>
+          <button type="button" class="settings-nav-item active" data-settings-section="appearance" aria-current="page">Appearance</button>
+          <button type="button" class="settings-nav-item" data-settings-section="time">Time</button>
+          <button type="button" class="settings-nav-item" data-settings-section="data">Data</button>
+          <button type="button" class="settings-nav-item" data-settings-section="display">Display</button>
+          <button type="button" class="settings-nav-item" data-settings-section="behavior">Behavior</button>
+        </nav>
+        <div class="settings-content">
+          <section id="settings-section-account" class="settings-section" aria-labelledby="settings-account-heading">
+            <h4 id="settings-account-heading" class="settings-section-title">Account &amp; Cloud Sync</h4>
+            <div class="account-placeholder-note">
+              <p>This feature is currently not available, this is here as a placeholder. I am not going to set-up this until I understand how this feature works. For now, information will be stored in your browser's local storage.</p>
+              <p>If you know more and wish to educate and/or help me, please reach out through the Discord!</p>
+            </div>
+            <div id="accountStatus" class="account-status" aria-live="polite" hidden></div>
+            <div id="accountLoginButtons" class="account-login-buttons" hidden>
+              <button type="button" class="btn btn-account btn-google" id="accountLoginGoogle" aria-label="Sign in with Google">
+                <span class="account-btn-icon">G</span>
+                <span>Google</span>
+              </button>
+              <button type="button" class="btn btn-account btn-facebook" id="accountLoginFacebook" aria-label="Sign in with Facebook">
+                <span class="account-btn-icon">f</span>
+                <span>Facebook</span>
+              </button>
+              <button type="button" class="btn btn-account btn-twitter" id="accountLoginTwitter" aria-label="Sign in with Twitter">
+                <span class="account-btn-icon">𝕏</span>
+                <span>Twitter</span>
+              </button>
+            </div>
+            <div id="accountLogoutRow" class="settings-row" hidden>
+              <button type="button" class="btn btn-ghost" id="accountLogoutBtn">Sign out</button>
+            </div>
+          </section>
+          <section id="settings-section-appearance" class="settings-section active" aria-labelledby="settings-appearance-heading">
+            <h4 id="settings-appearance-heading" class="settings-section-title">Appearance</h4>
+            <div class="settings-color-tabs" role="tablist" aria-label="Color selection mode">
+              <button type="button" class="settings-tab-btn active" data-color-tab="standard" role="tab" aria-selected="true">Standard</button>
+              <button type="button" class="settings-tab-btn" data-color-tab="custom" role="tab" aria-selected="false">Custom</button>
+            </div>
+            <div id="settings-color-standard" class="settings-color-panel active" role="tabpanel">
+              <label class="settings-label">Preset themes</label>
+              <div id="settings-preset-grid" class="settings-preset-grid" role="group" aria-label="Preset color themes"></div>
+            </div>
+            <div id="settings-color-custom" class="settings-color-panel" role="tabpanel" hidden>
+              <div class="settings-custom-presets-row">
+                <label class="settings-label">Saved custom themes</label>
+                <div id="settings-saved-presets" class="settings-saved-presets"></div>
+              </div>
+              <div class="settings-save-delete-row">
+                <button type="button" class="btn btn-ghost btn-sm" id="settings-save-preset-btn">Save current as preset</button>
+                <button type="button" class="btn btn-ghost btn-sm btn-danger-sm" id="settings-delete-preset-btn" title="Delete selected saved preset">Delete selected</button>
+              </div>
+              <label class="settings-label">Customize each color layer</label>
+              <p class="settings-custom-hint">Click a swatch to open the color wheel.</p>
+              <div id="settings-custom-layers" class="settings-custom-layers"></div>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsTextSize">Text size</label>
+              <select id="settingsTextSize" class="settings-select" aria-describedby="settings-text-size-desc">
+                <option value="small">Small</option>
+                <option value="medium" selected>Medium</option>
+                <option value="large">Large</option>
+              </select>
+              <span id="settings-text-size-desc" class="settings-hint">Controls font size across the app</span>
+            </div>
+          </section>
+          <section id="settings-section-time" class="settings-section" aria-labelledby="settings-time-heading">
+            <h4 id="settings-time-heading" class="settings-section-title">Time</h4>
+            <div class="settings-row">
+              <p class="settings-hint" id="settings-reset-hour-desc">Default server reset time is 4am. When DST is inactive (after the first Sunday of November for America/Europe), reset shifts to 3am.</p>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsPrimaryServer">Primary server</label>
+              <select id="settingsPrimaryServer" class="settings-select" aria-describedby="settings-primary-server-desc">
+                <option value="america">America (UTC-5)</option>
+                <option value="asia">Asia (UTC+8)</option>
+                <option value="europe">Europe (UTC+1)</option>
+              </select>
+              <span id="settings-primary-server-desc" class="settings-hint">Used for sidebar reset info and for preset games when added. Does not change existing games.</span>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsDefaultResetTimezone">Display timezone</label>
+              <select id="settingsDefaultResetTimezone" class="settings-select" aria-describedby="settings-reset-tz-desc">
+                <!-- Options populated by JS -->
+              </select>
+              <span id="settings-reset-tz-desc" class="settings-hint">Your timezone for calendar and displayed reset times. Server time (America UTC-5, Asia UTC+8, Europe UTC+1) is the base.</span>
+            </div>
+            <div class="settings-row">
+              <button type="button" class="btn btn-ghost" id="settingsSyncLocalTimezoneBtn">Sync with local timezone</button>
+              <span class="settings-hint">Match timezone to your device's current offset</span>
+            </div>
+          </section>
+          <section id="settings-section-data" class="settings-section" aria-labelledby="settings-data-heading">
+            <h4 id="settings-data-heading" class="settings-section-title">Data &amp; Backup</h4>
+            <div class="settings-row">
+              <button type="button" class="btn btn-ghost" id="settingsExportBtn">Export data</button>
+              <span class="settings-hint">Download your data as a JSON file</span>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsImportInput">Import data</label>
+              <input type="file" id="settingsImportInput" accept=".json,application/json" class="settings-file-input" />
+              <span class="settings-hint">Replace current data with imported file</span>
+            </div>
+            <div class="settings-row">
+              <button type="button" class="btn btn-ghost" id="settingsSimulateBtn">Run 30-day simulation</button>
+              <span class="settings-hint">Populate random DWE completions for the past 30 days</span>
+            </div>
+            <div class="settings-row" id="settingsUndoSimulationRow" hidden>
+              <button type="button" class="btn btn-ghost" id="settingsUndoSimulationBtn">Undo simulation</button>
+              <span class="settings-hint">Revert to state before the last simulation</span>
+            </div>
+            <div class="settings-row">
+              <button type="button" class="btn btn-ghost btn-danger-sm" id="settingsClearDataBtn">Clear all data</button>
+              <span class="settings-hint">Reset to empty state (cannot be undone)</span>
+            </div>
+          </section>
+          <section id="settings-section-display" class="settings-section" aria-labelledby="settings-display-heading">
+            <h4 id="settings-display-heading" class="settings-section-title">Display &amp; Format</h4>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsDateFormat">Date format</label>
+              <select id="settingsDateFormat" class="settings-select">
+                <option value="mdy">MM/DD/YYYY</option>
+                <option value="dmy">DD/MM/YYYY</option>
+                <option value="ymd">YYYY-MM-DD</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsTimeFormat">Time format</label>
+              <select id="settingsTimeFormat" class="settings-select">
+                <option value="12h">12-hour</option>
+                <option value="24h">24-hour</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsFirstDayOfWeek">First day of week</label>
+              <select id="settingsFirstDayOfWeek" class="settings-select">
+                <option value="0">Sunday</option>
+                <option value="1">Monday</option>
+              </select>
+            </div>
+            <div class="settings-row settings-row-toggle">
+              <label class="settings-label" for="settingsCompactMode">Compact mode</label>
+              <input type="checkbox" id="settingsCompactMode" class="settings-toggle" />
+            </div>
+          </section>
+          <section id="settings-section-behavior" class="settings-section" aria-labelledby="settings-behavior-heading">
+            <h4 id="settings-behavior-heading" class="settings-section-title">Behavior</h4>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsDefaultTab">Default tab on open</label>
+              <select id="settingsDefaultTab" class="settings-select">
+                <option value="about">About</option>
+                <option value="home">Home</option>
+                <option value="dailies">Dailies</option>
+                <option value="weeklies">Weeklies</option>
+                <option value="endgame">Endgame</option>
+                <option value="attendance">Attendance</option>
+                <option value="extracurricular">Extracurricular</option>
+                <option value="data">Data</option>
+                <option value="games">Games</option>
+              </select>
+            </div>
+            <div class="settings-row settings-row-toggle">
+              <label class="settings-label" for="settingsShowResetCountdown">Show reset countdown in sidebar</label>
+              <input type="checkbox" id="settingsShowResetCountdown" class="settings-toggle" checked />
+            </div>
+            <div class="settings-row settings-row-toggle">
+              <label class="settings-label" for="settingsConfirmBeforeDelete">Confirm before delete</label>
+              <input type="checkbox" id="settingsConfirmBeforeDelete" class="settings-toggle" checked />
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Color wheel picker modal (appears when editing a color) -->
+  <div id="colorWheelModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="colorWheelModal"></div>
+    <div class="modal-dialog modal-dialog-color-wheel" role="dialog" aria-modal="true" aria-labelledby="colorWheelModalTitle">
+      <div class="modal-header">
+        <h3 id="colorWheelModalTitle" class="modal-title">Pick color</h3>
+        <button type="button" class="icon-btn" id="colorWheelModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="settings-color-picker-popover" class="settings-color-picker-popover settings-color-picker-modal">
+          <div class="settings-picker-header">
+            <span id="settings-picker-layer-name">Color</span>
+            <button type="button" class="icon-btn settings-picker-close" aria-label="Close picker">×</button>
+          </div>
+          <div class="settings-color-wheel-wrap">
+            <canvas id="settings-color-wheel" class="settings-color-wheel" width="200" height="200" role="application" aria-label="Color wheel"></canvas>
+            <div id="settings-wheel-marker" class="settings-wheel-marker"></div>
+          </div>
+          <div class="settings-hue-row">
+            <label>Lightness</label>
+            <input type="range" id="settings-lightness-slider" class="settings-hue-slider" min="0" max="100" value="50" aria-label="Lightness" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save preset modal -->
+  <div id="savePresetModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="savePresetModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="savePresetModalTitle">
+      <div class="modal-header">
+        <h3 id="savePresetModalTitle" class="modal-title">Save preset</h3>
+        <button type="button" class="icon-btn" id="savePresetModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label for="savePresetNameInput">Preset name</label>
+          <input id="savePresetNameInput" type="text" placeholder="My theme" autocomplete="off" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="savePresetCancel">Cancel</button>
+          <button type="button" class="btn btn-add" id="savePresetConfirm">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete preset confirmation modal -->
+  <div id="deletePresetModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="deletePresetModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="deletePresetModalTitle">
+      <div class="modal-header">
+        <h3 id="deletePresetModalTitle" class="modal-title">Delete preset</h3>
+        <button type="button" class="icon-btn" id="deletePresetModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="deletePresetMessage">Are you sure you want to delete this preset? This cannot be undone.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="deletePresetCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="deletePresetConfirm">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clear all data confirmation modal -->
+  <div id="clearDataModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="clearDataModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="clearDataModalTitle">
+      <div class="modal-header">
+        <h3 id="clearDataModalTitle" class="modal-title">Clear all data</h3>
+        <button type="button" class="icon-btn" id="clearDataModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="clearDataMessage">Are you sure you want to clear all data? This cannot be undone.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="clearDataCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="clearDataConfirm">Clear all</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clear game data confirmation modal -->
+  <div id="clearGameDataModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="clearGameDataModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="clearGameDataModalTitle">
+      <div class="modal-header">
+        <h3 id="clearGameDataModalTitle" class="modal-title">Clear data</h3>
+        <button type="button" class="icon-btn" id="clearGameDataModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="clearGameDataMessage">Are you sure? This will reset all attempts and completions for this game to zero. Calendar history for this game will also be cleared. This cannot be undone.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="clearGameDataCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="clearGameDataConfirm">Clear data</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game delete confirmation modal -->
+  <div id="deleteGameModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="deleteGameModalTitle">
+      <div class="modal-header">
+        <h3 id="deleteGameModalTitle" class="modal-title">Delete game</h3>
+        <button type="button" class="icon-btn" id="deleteGameModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="deleteGameMessage">Are you sure you want to delete this game? This cannot be undone.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="deleteGameCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="deleteGameConfirm">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
