@@ -4,7 +4,7 @@ A manual tracker for gacha games, built to help you manage daily, weekly, and en
 
 **Website:** [Gacha Tracker](https://fossil-fuel.github.io/Gacha-Tracker/)
 
-#Contact
+# Contact
 
 Drop by the Discord server for ideas, bugs, questions, or just to hang out: https://discord.gg/XYGvTuReXz
 
