@@ -3,7 +3,7 @@ A manual tracker for gacha games, built to help you manage daily, weekly, and en
 
 **Website:** [Gacha Tracker](https://fossil-fuel.github.io/Gacha-Tracker/)
 
-Current Presets Available
+Current Presets Available (These are the games I play, if you want to help add more games or have any advice current presets, please contact me through discord)
 - Honkai Star Rail
 - Zenless Zone Zero
 - Honkai Impact 3rd
