@@ -1,0 +1,166 @@
+/**
+ * Mobile styles - only apply at viewport <= 768px.
+ * PC display/format is unaffected.
+ */
+
+/* Hide mobile-only elements on desktop */
+@media (min-width: 769px) {
+  .mobile-hamburger,
+  .mobile-settings-btn,
+  .mobile-sidebar-overlay {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .app {
+    flex-wrap: wrap;
+  }
+
+  /* Left sidebar: off-canvas, slides in when open */
+  .sidebar-left {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 85vw;
+    min-width: 0;
+    z-index: 1001;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+    box-shadow: none;
+  }
+
+  body.mobile-sidebar-open .sidebar-left {
+    transform: translateX(0);
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Overlay behind sidebar when open */
+  .mobile-sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+  }
+
+  body.mobile-sidebar-open .mobile-sidebar-overlay {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  /* Hamburger button - visible on mobile only */
+  .mobile-hamburger {
+    display: inline-flex !important;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex-shrink: 0;
+  }
+
+  /* Mobile settings button in top bar */
+  .mobile-settings-btn {
+    display: inline-flex !important;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex-shrink: 0;
+  }
+
+  /* Right sidebar: hidden on mobile */
+  .sidebar-right {
+    display: none !important;
+  }
+
+  /* Main content: full width */
+  .content {
+    flex: 1 1 100%;
+    min-width: 0;
+    padding: 0.75rem 1rem;
+  }
+
+  .content-card {
+    padding: 1rem;
+  }
+
+  /* Breadcrumb bar: ensure hamburger + content fit */
+  .breadcrumb-bar {
+    gap: 0.5rem;
+  }
+
+  .top-bar-actions .top-bar-btn {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  /* Settings modal: stack sidebar on mobile */
+  .modal-dialog-settings {
+    max-height: calc(100vh - 2rem);
+  }
+
+  .settings-body {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    min-width: 0;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 0.5rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    gap: 0.25rem;
+  }
+
+  .settings-nav-item {
+    padding: 0.5rem 0.75rem;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+
+  .settings-nav-item.active,
+  .settings-nav-item[aria-current="page"] {
+    border-left-color: transparent;
+    border-bottom-color: var(--accent);
+  }
+
+  /* Task menu grid: stack day cells on mobile */
+  .task-menu-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .task-menu-cell.span-2,
+  .task-menu-cell.span-5,
+  .task-menu-cell.span-7 {
+    grid-column: span 2;
+  }
+
+  .task-menu-cell.day-cell {
+    padding: 0.5rem 0.35rem;
+    font-size: 0.8rem;
+  }
+
+  /* Home DWE bars: stack vertically on narrow mobile */
+  .home-dwe-bars {
+    flex-direction: column;
+  }
+
+  /* Touch-friendly minimum sizes */
+  .tab,
+  .sidebar-data-item,
+  .sidebar-game-item {
+    min-height: 44px;
+    padding: 0.75rem 1rem;
+  }
+
+  .btn,
+  .icon-btn {
+    min-height: 44px;
+  }
+}

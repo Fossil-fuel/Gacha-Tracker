@@ -22,6 +22,7 @@ const files = [
   "10-page-games.js",
   "11-page-home.js",
   "12-main.js",
+  "mobile-integration.js",
 ];
 
 const parts = files.map((f) => {
