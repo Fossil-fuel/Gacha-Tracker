@@ -3,6 +3,13 @@ A manual tracker for gacha games, built to help you manage daily, weekly, and en
 
 **Website:** [Gacha Tracker](https://fossil-fuel.github.io/Gacha-Tracker/)
 
+Current Presets Available
+- Honkai Star Rail
+- Zenless Zone Zero
+- Honkai Impact 3rd
+- Wuthering Waves
+- Arknights: Endfield
+
 # Contact
 
 Drop by the Discord server for ideas, bugs, questions, or just to hang out: https://discord.gg/XYGvTuReXz
