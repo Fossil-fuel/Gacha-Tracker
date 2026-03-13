@@ -1,8 +1,8 @@
   function getHistoryDWEForDate(dateStr) {
     const available = getTasksAvailableOnDate(dateStr);
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
-    const wCompleted = (available.weeklies || []).filter((item) => isWeeklyCompletedInCurrentCycle(item.key, dateStr)).length;
-    const eCompleted = (available.endgame || []).filter((item) => isEndgameCompletedInCurrentCycle(item.key, dateStr)).length;
+    const wCompleted = (available.weeklies || []).filter((item) => (dayData.weeklies || []).includes(item.key)).length;
+    const eCompleted = (available.endgame || []).filter((item) => (dayData.endgame || []).includes(item.key)).length;
     return {
       dCompleted: (dayData.dailies || []).length,
       dTotal: (available.dailies || []).length,
@@ -21,7 +21,7 @@
       const game = getGame(gameId);
       labels.dailies.push(game ? game.name : gameId);
     });
-    (available.weeklies || []).filter((item) => isWeeklyCompletedInCurrentCycle(item.key, dateStr)).forEach((item) => {
+    (available.weeklies || []).filter((item) => (dayData.weeklies || []).includes(item.key)).forEach((item) => {
       const key = item.key;
       const dot = key.indexOf(".");
       const gId = dot >= 0 ? key.slice(0, dot) : key;
@@ -30,7 +30,7 @@
       const task = (game?.weeklies || []).find((t) => (t.id || t.label) === tId);
       labels.weeklies.push(task ? task.label : tId);
     });
-    (available.endgame || []).filter((item) => isEndgameCompletedInCurrentCycle(item.key, dateStr)).forEach((item) => {
+    (available.endgame || []).filter((item) => (dayData.endgame || []).includes(item.key)).forEach((item) => {
       const key = item.key;
       const dot = key.indexOf(".");
       const gId = dot >= 0 ? key.slice(0, dot) : key;
@@ -365,8 +365,8 @@
       const dateStr = getDateStr(d);
       const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
       const available = getTasksAvailableOnDate(dateStr);
-      const wDone = (available.weeklies || []).filter((item) => isWeeklyCompletedInCurrentCycle(item.key, dateStr)).length;
-      const eDone = (available.endgame || []).filter((item) => isEndgameCompletedInCurrentCycle(item.key, dateStr)).length;
+      const wDone = (available.weeklies || []).filter((item) => (dayData.weeklies || []).includes(item.key)).length;
+      const eDone = (available.endgame || []).filter((item) => (dayData.endgame || []).includes(item.key)).length;
       const completedCount = (dayData.dailies || []).length + wDone + eDone;
       const isFuture = dateStr > todayStr;
       const dayEl = document.createElement("div");
@@ -396,7 +396,7 @@
           const game = getGame(gameId);
           addPart(game ? game.name : gameId, "dailies");
         });
-        (available.weeklies || []).filter((item) => isWeeklyCompletedInCurrentCycle(item.key, dateStr)).forEach((item) => {
+        (available.weeklies || []).filter((item) => (dayData.weeklies || []).includes(item.key)).forEach((item) => {
           const dot = item.key.indexOf(".");
           const gId = dot >= 0 ? item.key.slice(0, dot) : item.key;
           const tId = dot >= 0 ? item.key.slice(dot + 1) : "";
@@ -404,7 +404,7 @@
           const task = (game?.weeklies || []).find((t) => (t.id || t.label) === tId);
           addPart(task ? task.label : tId, "weeklies");
         });
-        (available.endgame || []).filter((item) => isEndgameCompletedInCurrentCycle(item.key, dateStr)).forEach((item) => {
+        (available.endgame || []).filter((item) => (dayData.endgame || []).includes(item.key)).forEach((item) => {
           const dot = item.key.indexOf(".");
           const gId = dot >= 0 ? item.key.slice(0, dot) : item.key;
           const tId = dot >= 0 ? item.key.slice(dot + 1) : "";

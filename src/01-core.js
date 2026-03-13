@@ -1091,6 +1091,8 @@
     return state.endgameCompletionDates[key] || [];
   }
 
+  /** Updates display dates for a completion (earnings modal). Does NOT touch completionByDate.
+   * Editing prior completion dates cannot affect current-cycle completion logic. */
   function setEndgameCompletionDate(gameId, taskId, index, start, end) {
     const key = gameId + "." + taskId;
     if (!state.endgameCompletionDates[key]) state.endgameCompletionDates[key] = [];
@@ -1318,7 +1320,13 @@
   }
 
   function unrecordCompletion(dateStr, type, key, skipTimestamp) {
-    const datesToRemove = (type === "weeklies" || type === "endgame") ? getAllDatesInPeriod(type, key, dateStr) : [dateStr];
+    let datesToRemove;
+    if (type === "weeklies" || type === "endgame") {
+      const completionDate = type === "weeklies" ? getWeeklyCompletionDateInCurrentCycle(key, dateStr) : getEndgameCompletionDateInCurrentCycle(key, dateStr);
+      datesToRemove = completionDate ? getRemainingDatesInPeriod(type, key, completionDate) : getAllDatesInPeriod(type, key, dateStr);
+    } else {
+      datesToRemove = [dateStr];
+    }
     datesToRemove.forEach((ds) => {
       if (!state.completionByDate[ds]) return;
       const arr = state.completionByDate[ds][type];
@@ -1380,13 +1388,16 @@
         let lastProcessed = lastStr;
         while (getDateStr(d) <= todayStr) {
           const dateStr = getDateStr(d);
+          const periodStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute, 0, 0);
           const periodEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, hour, minute, 0, 0);
-          if (now >= periodEnd) {
+          if (now >= periodStart) {
             didChange = true;
             state.dailiesAttempted[gameId] = getAttemptedAmount(state.dailiesAttempted, gameId) + 1;
-            const dayData = state.completionByDate[dateStr] || { dailies: [] };
-            if ((dayData.dailies || []).includes(gameId)) {
-              state.dailiesCompleted[gameId] = getCompletedAmount(state.dailiesCompleted, gameId) + 1;
+            if (now >= periodEnd) {
+              const dayData = state.completionByDate[dateStr] || { dailies: [] };
+              if ((dayData.dailies || []).includes(gameId)) {
+                state.dailiesCompleted[gameId] = getCompletedAmount(state.dailiesCompleted, gameId) + 1;
+              }
             }
             lastProcessed = dateStr;
           }
@@ -1417,19 +1428,21 @@
           cycleStartMs = lastMs;
         }
         const nowMs = now.getTime();
-        while (cycleStartMs + timeLimitMs <= nowMs) {
-          const cycleEndMs = cycleStartMs + timeLimitMs;
+        while (cycleStartMs <= nowMs) {
           didChange = true;
           state.weekliesAttempted[key] = getAttemptedAmount(state.weekliesAttempted, key) + 1;
-          const cycleStart = new Date(cycleStartMs);
-          const cycleEnd = new Date(cycleEndMs);
-          let completed = false;
-          for (let d = new Date(cycleStart); d < cycleEnd; d.setDate(d.getDate() + 1)) {
-            const dateStr = getDateStr(d);
-            const dayData = state.completionByDate[dateStr] || { weeklies: [] };
-            if ((dayData.weeklies || []).includes(key)) { completed = true; break; }
+          if (cycleStartMs + timeLimitMs <= nowMs) {
+            const cycleEndMs = cycleStartMs + timeLimitMs;
+            const cycleStart = new Date(cycleStartMs);
+            const cycleEnd = new Date(cycleEndMs);
+            let completed = false;
+            for (let d = new Date(cycleStart); d < cycleEnd; d.setDate(d.getDate() + 1)) {
+              const dateStr = getDateStr(d);
+              const dayData = state.completionByDate[dateStr] || { weeklies: [] };
+              if ((dayData.weeklies || []).includes(key)) { completed = true; break; }
+            }
+            if (completed) state.weekliesCompleted[key] = getCompletedAmount(state.weekliesCompleted, key) + 1;
           }
-          if (completed) state.weekliesCompleted[key] = getCompletedAmount(state.weekliesCompleted, key) + 1;
           cycleStartMs += intervalMs;
         }
         state.lastProcessedResets.weeklies[key] = cycleStartMs;
@@ -1457,19 +1470,21 @@
           cycleStartMs = lastMs;
         }
         const nowMs = now.getTime();
-        while (cycleStartMs + timeLimitMs <= nowMs) {
-          const cycleEndMs = cycleStartMs + timeLimitMs;
+        while (cycleStartMs <= nowMs) {
           didChange = true;
           state.endgameAttempted[key] = getAttemptedAmount(state.endgameAttempted, key) + 1;
-          const cycleStart = new Date(cycleStartMs);
-          const cycleEnd = new Date(cycleEndMs);
-          let completed = false;
-          for (let d = new Date(cycleStart); d < cycleEnd; d.setDate(d.getDate() + 1)) {
-            const dateStr = getDateStr(d);
-            const dayData = state.completionByDate[dateStr] || { endgame: [] };
-            if ((dayData.endgame || []).includes(key)) { completed = true; break; }
+          if (cycleStartMs + timeLimitMs <= nowMs) {
+            const cycleEndMs = cycleStartMs + timeLimitMs;
+            const cycleStart = new Date(cycleStartMs);
+            const cycleEnd = new Date(cycleEndMs);
+            let completed = false;
+            for (let d = new Date(cycleStart); d < cycleEnd; d.setDate(d.getDate() + 1)) {
+              const dateStr = getDateStr(d);
+              const dayData = state.completionByDate[dateStr] || { endgame: [] };
+              if ((dayData.endgame || []).includes(key)) { completed = true; break; }
+            }
+            if (completed) state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
           }
-          if (completed) state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
           cycleStartMs += intervalMs;
         }
         ensureEndgameEarnedArrayLength(game.id, task.id || task.label, getCompletedAmount(state.endgameCompleted, key));
@@ -1571,12 +1586,15 @@
     return null;
   }
 
-  /** Whether this endgame task was completed on any day within its current cycle. */
+  /** Whether this endgame task was completed on any day within its current cycle.
+   * Uses completionByDate only. endgameCompletionDates (edited in earnings modal) is for display
+   * and does NOT affect this—editing prior completion dates cannot make the current cycle show as complete. */
   function isEndgameCompletedInCurrentCycle(key, todayStr) {
     return getEndgameCompletionDateInCurrentCycle(key, todayStr) != null;
   }
 
-  /** Returns the dateStr where this endgame was completed in the current cycle, or null. */
+  /** Returns the dateStr where this endgame was completed in the current cycle, or null.
+   * Uses completionByDate only; endgameCompletionDates is never consulted here. */
   function getEndgameCompletionDateInCurrentCycle(key, todayStr) {
     const dot = key.indexOf(".");
     if (dot <= 0) return null;

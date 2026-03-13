@@ -125,8 +125,8 @@
       const isCompleted = type === "dailies"
         ? dayData.dailies.includes(item.key)
         : type === "weeklies"
-          ? isWeeklyCompletedInCurrentCycle(item.key, dateStr)
-          : isEndgameCompletedInCurrentCycle(item.key, dateStr);
+          ? (dayData.weeklies || []).includes(item.key)
+          : (dayData.endgame || []).includes(item.key);
       const label = document.createElement("label");
       label.className = "calendar-day-modal-task calendar-day-modal-task-" + type;
       const check = document.createElement("input");
@@ -269,8 +269,8 @@
       const wasCompleted = type === "dailies"
         ? (dayData.dailies || []).includes(key)
         : type === "weeklies"
-          ? isWeeklyCompletedInCurrentCycle(key, dateStr)
-          : isEndgameCompletedInCurrentCycle(key, dateStr);
+          ? (dayData.weeklies || []).includes(key)
+          : (dayData.endgame || []).includes(key);
       const nowCompleted = check.checked;
       if (nowCompleted) recordCompletion(dateStr, type, key);
       else unrecordCompletion(dateStr, type, key);
