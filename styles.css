@@ -2969,6 +2969,172 @@ input[type="date"] {
   text-align: center;
 }
 
+/* Timestamps page */
+.timestamps-bar-graph {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 2px;
+  min-height: 120px;
+  align-items: end;
+  padding: 0.5rem 0;
+}
+
+.timestamps-bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.timestamps-bar {
+  width: 100%;
+  min-height: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: height 0.2s ease;
+}
+
+.timestamps-bar-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.timestamps-hour-stacked .timestamps-hour-stack {
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.timestamps-bar-segment {
+  flex-shrink: 0;
+}
+
+.timestamps-hour-stacked {
+  position: relative;
+}
+
+.timestamps-hour-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-0.5rem);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s, visibility 0.15s;
+  z-index: 10;
+}
+
+.timestamps-hour-stacked:hover .timestamps-hour-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.timestamps-table th,
+.timestamps-table td {
+  padding: 0.5rem 0.75rem;
+}
+
+.timestamps-game-selector label {
+  cursor: pointer;
+  user-select: none;
+}
+
+.timestamps-game-pill {
+  padding: 0.4rem 0.85rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.timestamps-game-pill:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.timestamps-game-pill.filled,
+.timestamps-game-pill[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.timestamps-game-pill.filled:hover,
+.timestamps-game-pill[aria-pressed="true"]:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.timestamps-weeklies-bar-graph {
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.timestamps-line-graph {
+  margin-bottom: 1.5rem;
+}
+
+.timestamps-line-graph svg {
+  overflow: visible;
+}
+
+.timestamps-endgame-pill {
+  font-size: 0.85rem;
+}
+
+.timestamps-weeklies-bar-graph .timestamps-bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.timestamps-weeklies-bar-graph .timestamps-bar-col .timestamps-bar {
+  width: 100%;
+  min-height: 4px;
+}
+
+.timestamps-bar-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.clear-time-trends-games {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.time-trends-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.time-trends-detail-list-item {
+  font-size: 0.9rem;
+  color: var(--text);
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.time-trends-detail-list-item:last-child {
+  border-bottom: none;
+}
+
 .modal-header {
   display: flex;
   align-items: center;

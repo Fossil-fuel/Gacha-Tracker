@@ -267,10 +267,13 @@
     endgameCurrencyEarned: {},
     endgameCompletionDates: {}, // { "gameId.taskId": [{ start: "YYYY-MM-DD", end: "YYYY-MM-DD" }, ...] }
     completionByDate: {}, // { "YYYY-MM-DD": { dailies: [gameId], weeklies: ["gameId.taskId"], endgame: ["gameId.taskId"] } }
+    completionTimestamps: [], // [{ dateStr, hour, gameId, taskType, taskId, taskLabel }] - when tasks were completed (for trend)
     lastProcessedResets: { dailies: {}, weeklies: {}, endgame: {} }, // last period we processed for each task
     attendancePieInclude: {},
     dataPieInclude: {}, // { gameId: { dailies, weeklies, endgame, extracurricular } } - true = include in total/pie
-    attendanceView: "weekly", // "weekly" | "history"
+    attendanceView: "weekly", // "weekly" | "history" | "timestamps"
+    timestampsSelectedGameIds: {}, // { gameId: true } - which games to show in timestamps page; empty = all
+    timestampsSelectedEndgameTasks: {}, // { "gameId.taskId": true } - which endgame tasks to show; empty = all
     historyMonth: null,
     historyYear: null,
     extracurricularTasks: [],
@@ -700,6 +703,9 @@
           });
         }
         if (parsed.completionByDate) state.completionByDate = parsed.completionByDate;
+        if (Array.isArray(parsed.completionTimestamps)) state.completionTimestamps = parsed.completionTimestamps;
+        if (parsed.timestampsSelectedGameIds && typeof parsed.timestampsSelectedGameIds === "object") state.timestampsSelectedGameIds = parsed.timestampsSelectedGameIds;
+        if (parsed.timestampsSelectedEndgameTasks && typeof parsed.timestampsSelectedEndgameTasks === "object") state.timestampsSelectedEndgameTasks = parsed.timestampsSelectedEndgameTasks;
         if (parsed.lastProcessedResets) state.lastProcessedResets = parsed.lastProcessedResets;
         if (parsed.dataSelectedGameId != null) state.dataSelectedGameId = parsed.dataSelectedGameId;
         if (parsed.gamesSelectedId != null) state.gamesSelectedId = parsed.gamesSelectedId;
@@ -708,7 +714,7 @@
         if (parsed.endgameView === "grid" || parsed.endgameView === "list") state.endgameView = parsed.endgameView;
         if (parsed.attendancePieInclude && typeof parsed.attendancePieInclude === "object") state.attendancePieInclude = parsed.attendancePieInclude;
         if (parsed.dataPieInclude && typeof parsed.dataPieInclude === "object") state.dataPieInclude = parsed.dataPieInclude;
-        if (parsed.attendanceView === "weekly" || parsed.attendanceView === "history") state.attendanceView = parsed.attendanceView;
+        if (parsed.attendanceView === "weekly" || parsed.attendanceView === "history" || parsed.attendanceView === "timestamps") state.attendanceView = parsed.attendanceView;
         if (parsed.historyMonth != null && parsed.historyMonth >= 0 && parsed.historyMonth <= 11) state.historyMonth = parsed.historyMonth;
         if (parsed.historyYear != null && Number.isFinite(parsed.historyYear)) state.historyYear = parsed.historyYear;
         if (Array.isArray(parsed.extracurricularTasks)) state.extracurricularTasks = parsed.extracurricularTasks;
@@ -749,6 +755,9 @@
     } catch (_) {}
     if (state.games.length === 0) ensureTestGame();
     if (!state.completionByDate) state.completionByDate = {};
+    if (!state.completionTimestamps) state.completionTimestamps = [];
+    if (!state.timestampsSelectedGameIds) state.timestampsSelectedGameIds = {};
+    if (!state.timestampsSelectedEndgameTasks) state.timestampsSelectedEndgameTasks = {};
     if (!state.lastProcessedResets) state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
@@ -837,6 +846,9 @@
       attendancePieInclude: state.attendancePieInclude,
       dataPieInclude: state.dataPieInclude,
       attendanceView: state.attendanceView,
+      timestampsSelectedGameIds: state.timestampsSelectedGameIds,
+      timestampsSelectedEndgameTasks: state.timestampsSelectedEndgameTasks,
+      completionTimestamps: state.completionTimestamps,
       historyMonth: state.historyMonth,
       historyYear: state.historyYear,
       extracurricularTasks: state.extracurricularTasks,
@@ -1330,16 +1342,55 @@
     return dates.length ? dates : [dateStr];
   }
 
-  function recordCompletion(dateStr, type, key) {
+  function recordCompletion(dateStr, type, key, skipTimestamp) {
     const datesToRecord = (type === "weeklies" || type === "endgame") ? getRemainingDatesInPeriod(type, key, dateStr) : [dateStr];
     datesToRecord.forEach((ds) => {
       if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
       const arr = state.completionByDate[ds][type];
       if (!arr.includes(key)) arr.push(key);
     });
+    if (!skipTimestamp) recordCompletionTimestamp(type, key);
   }
 
-  function unrecordCompletion(dateStr, type, key) {
+  function recordCompletionTimestamp(type, key) {
+    if (!state.completionTimestamps) state.completionTimestamps = [];
+    const now = new Date();
+    const tz = getAppTimezone ? getAppTimezone() : Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const parts = getDatePartsInTimezone ? getDatePartsInTimezone(now, tz) : { year: now.getFullYear(), month: now.getMonth(), day: now.getDate(), weekday: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][now.getDay()], hour: now.getHours(), minute: now.getMinutes() };
+    const dateStr = String(parts.year) + "-" + String(parts.month + 1).padStart(2, "0") + "-" + String(parts.day).padStart(2, "0");
+    let gameId = key, taskId = "", taskLabel = "";
+    if (type !== "dailies") {
+      const dot = key.indexOf(".");
+      gameId = dot >= 0 ? key.slice(0, dot) : key;
+      taskId = dot >= 0 ? key.slice(dot + 1) : "";
+      const game = getGame(gameId);
+      const task = type === "weeklies" ? (game?.weeklies || []).find((t) => (t.id || t.label) === taskId) : (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
+      taskLabel = task ? (task.label || taskId) : taskId;
+    } else {
+      const game = getGame(gameId);
+      taskLabel = game ? game.name : gameId;
+    }
+    state.completionTimestamps.push({ dateStr, hour: parts.hour, gameId, taskType: type, taskId, taskLabel });
+  }
+
+  function unrecordCompletionTimestamp(type, key) {
+    if (!state.completionTimestamps || state.completionTimestamps.length === 0) return;
+    let gameId = key, taskId = "";
+    if (type !== "dailies") {
+      const dot = key.indexOf(".");
+      gameId = dot >= 0 ? key.slice(0, dot) : key;
+      taskId = dot >= 0 ? key.slice(dot + 1) : "";
+    }
+    for (let i = state.completionTimestamps.length - 1; i >= 0; i--) {
+      const t = state.completionTimestamps[i];
+      if (t.gameId === gameId && t.taskType === type && (type === "dailies" || t.taskId === taskId)) {
+        state.completionTimestamps.splice(i, 1);
+        return;
+      }
+    }
+  }
+
+  function unrecordCompletion(dateStr, type, key, skipTimestamp) {
     const datesToRemove = (type === "weeklies" || type === "endgame") ? getAllDatesInPeriod(type, key, dateStr) : [dateStr];
     datesToRemove.forEach((ds) => {
       if (!state.completionByDate[ds]) return;
@@ -1347,6 +1398,7 @@
       const idx = arr.indexOf(key);
       if (idx >= 0) arr.splice(idx, 1);
     });
+    if (!skipTimestamp) unrecordCompletionTimestamp(type, key);
   }
 
   function freezeTalliesOnTimezoneChange() {
@@ -1839,6 +1891,10 @@
       if (dayData.endgame) dayData.endgame = dayData.endgame.filter((k) => !String(k).startsWith(gameId + "."));
     });
 
+    if (state.completionTimestamps) {
+      state.completionTimestamps = state.completionTimestamps.filter((t) => t.gameId !== gameId);
+    }
+
     save();
     renderAll();
   }
@@ -1867,6 +1923,7 @@
 
     state.lastSimulationSnapshot = JSON.parse(JSON.stringify({
       completionByDate: state.completionByDate,
+      completionTimestamps: state.completionTimestamps,
       dailiesCompleted: state.dailiesCompleted,
       weekliesCompleted: state.weekliesCompleted,
       endgameCompleted: state.endgameCompleted,
@@ -1886,13 +1943,13 @@
       const available = getTasksAvailableOnDate(dateStr);
 
       (available.dailies || []).forEach((item) => {
-        if (Math.random() < 0.75) recordCompletion(dateStr, "dailies", item.key);
+        if (Math.random() < 0.75) recordCompletion(dateStr, "dailies", item.key, true);
       });
       (available.weeklies || []).forEach((item) => {
-        if (Math.random() < 0.55) recordCompletion(dateStr, "weeklies", item.key);
+        if (Math.random() < 0.55) recordCompletion(dateStr, "weeklies", item.key, true);
       });
       (available.endgame || []).forEach((item) => {
-        if (Math.random() < 0.45) recordCompletion(dateStr, "endgame", item.key);
+        if (Math.random() < 0.45) recordCompletion(dateStr, "endgame", item.key, true);
       });
     }
 
@@ -1919,6 +1976,7 @@
     const snap = state.lastSimulationSnapshot;
     if (!snap) return;
     state.completionByDate = snap.completionByDate || {};
+    state.completionTimestamps = snap.completionTimestamps || [];
     state.dailiesCompleted = snap.dailiesCompleted || {};
     state.weekliesCompleted = snap.weekliesCompleted || {};
     state.endgameCompleted = snap.endgameCompleted || {};
@@ -2022,6 +2080,7 @@
     state.endgameCurrencyEarned = {};
     state.endgameCompletionDates = {};
     state.completionByDate = {};
+    state.completionTimestamps = [];
     state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     state.lastSimulationSnapshot = null;
     state.attendancePieInclude = {};
@@ -2590,6 +2649,156 @@
     document.addEventListener("keydown", (e) => {
       if (!clearGameDataModalGameId) return;
       if (e.key === "Escape") closeClearGameDataModal();
+    });
+  }
+
+  let clearTimeTrendsModalOpen = false;
+  function openClearTimeTrendsModal() {
+    const modal = qs("clearTimeTrendsModal");
+    const container = qs("clearTimeTrendsModalGames");
+    if (!modal || !container) return;
+    clearTimeTrendsModalOpen = true;
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    container.innerHTML = "";
+    container.className = "clear-time-trends-games timestamps-game-selector";
+    container.style.display = "flex";
+    container.style.flexWrap = "wrap";
+    container.style.gap = "0.5rem";
+    const games = getAllGames();
+    const gameIdsWithData = new Set((state.completionTimestamps || []).map((t) => t.gameId));
+    const selected = new Set(gameIdsWithData);
+    games.forEach((game) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "timestamps-game-pill clear-time-trends-pill";
+      btn.textContent = game.name + (gameIdsWithData.has(game.id) ? " (" + (state.completionTimestamps || []).filter((t) => t.gameId === game.id).length + ")" : "");
+      btn.dataset.gameId = game.id;
+      btn.setAttribute("aria-pressed", selected.has(game.id) ? "true" : "false");
+      if (selected.has(game.id)) btn.classList.add("filled");
+      btn.addEventListener("click", () => {
+        if (selected.has(game.id)) {
+          selected.delete(game.id);
+          btn.classList.remove("filled");
+          btn.setAttribute("aria-pressed", "false");
+        } else {
+          selected.add(game.id);
+          btn.classList.add("filled");
+          btn.setAttribute("aria-pressed", "true");
+        }
+      });
+      container.appendChild(btn);
+    });
+    if (games.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty-state";
+      p.textContent = "No games to clear.";
+      container.appendChild(p);
+    }
+  }
+  function closeClearTimeTrendsModal() {
+    const modal = qs("clearTimeTrendsModal");
+    if (modal) {
+      clearTimeTrendsModalOpen = false;
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+      if (!settingsModalOpen && !clearDataModalOpen && !timeTrendsDetailModalOpen) document.body.style.overflow = "";
+    }
+  }
+  function confirmClearTimeTrends() {
+    const container = qs("clearTimeTrendsModalGames");
+    if (!container) return;
+    const selectedIds = new Set();
+    container.querySelectorAll('.clear-time-trends-pill.filled, .clear-time-trends-pill[aria-pressed="true"]').forEach((btn) => {
+      selectedIds.add(btn.dataset.gameId);
+    });
+    if (selectedIds.size > 0 && state.completionTimestamps) {
+      state.completionTimestamps = state.completionTimestamps.filter((t) => !selectedIds.has(t.gameId));
+      const selected = state.timestampsSelectedGameIds || {};
+      selectedIds.forEach((id) => delete selected[id]);
+      if (Object.keys(selected).length === 0) state.timestampsSelectedGameIds = {};
+      const endgameSelected = state.timestampsSelectedEndgameTasks || {};
+      Object.keys(endgameSelected).forEach((k) => {
+        if (selectedIds.has(k.split(".")[0])) delete endgameSelected[k];
+      });
+      if (Object.keys(endgameSelected).length === 0) state.timestampsSelectedEndgameTasks = {};
+    }
+    save();
+    renderAll();
+    closeClearTimeTrendsModal();
+  }
+
+  let timeTrendsDetailModalOpen = false;
+  function openTimeTrendsDetailModal(title, items) {
+    const modal = qs("timeTrendsDetailModal");
+    if (!modal) return;
+    timeTrendsDetailModalOpen = true;
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    const titleEl = qs("timeTrendsDetailModalTitle");
+    if (titleEl) titleEl.textContent = title;
+    const listEl = qs("timeTrendsDetailModalList");
+    if (listEl) {
+      listEl.innerHTML = "";
+      if (!items || items.length === 0) {
+        const p = document.createElement("p");
+        p.className = "empty-state";
+        p.textContent = "No completions in this period.";
+        listEl.appendChild(p);
+      } else {
+        items.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "time-trends-detail-list-item";
+          const gameName = item.gameName || item.gameId || "?";
+          const taskLabel = item.taskLabel || "";
+          const typeLabel = item.taskType ? " (" + item.taskType.charAt(0).toUpperCase() + item.taskType.slice(1) + ")" : "";
+          const datePart = item.dateStr ? " — " + item.dateStr : "";
+          row.textContent = gameName + (taskLabel ? " – " + taskLabel : "") + typeLabel + datePart;
+          listEl.appendChild(row);
+        });
+      }
+    }
+  }
+  function closeTimeTrendsDetailModal() {
+    const modal = qs("timeTrendsDetailModal");
+    if (modal) {
+      timeTrendsDetailModalOpen = false;
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+      if (!settingsModalOpen && !clearDataModalOpen) document.body.style.overflow = "";
+    }
+  }
+  function initTimeTrendsDetailModal() {
+    const modalEl = qs("timeTrendsDetailModal");
+    const closeBtn = qs("timeTrendsDetailModalClose");
+    if (!modalEl) return;
+    modalEl.addEventListener("click", (e) => {
+      if (e.target.classList.contains("modal-backdrop") || e.target.getAttribute("data-close") === "timeTrendsDetailModal") closeTimeTrendsDetailModal();
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeTimeTrendsDetailModal);
+    document.addEventListener("keydown", (e) => {
+      if (!timeTrendsDetailModalOpen) return;
+      if (e.key === "Escape") closeTimeTrendsDetailModal();
+    });
+  }
+
+  function initClearTimeTrendsModal() {
+    const modalEl = qs("clearTimeTrendsModal");
+    const closeBtn = qs("clearTimeTrendsModalClose");
+    const cancelBtn = qs("clearTimeTrendsCancel");
+    const confirmBtn = qs("clearTimeTrendsConfirm");
+    if (!modalEl) return;
+    modalEl.addEventListener("click", (e) => {
+      if (e.target.classList.contains("modal-backdrop") || e.target.getAttribute("data-close") === "clearTimeTrendsModal") closeClearTimeTrendsModal();
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeClearTimeTrendsModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeClearTimeTrendsModal);
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmClearTimeTrends);
+    document.addEventListener("keydown", (e) => {
+      if (!clearTimeTrendsModalOpen) return;
+      if (e.key === "Escape") closeClearTimeTrendsModal();
     });
   }
 
@@ -3978,7 +4187,10 @@
   function renderTabs() {
     const current = document.getElementById("breadcrumbCurrent");
     const tabNames = { about: "About", home: "Home", dailies: "Dailies", weeklies: "Weeklies", endgame: "Endgame", attendance: "Attendance", extracurricular: "Extracurricular", data: "Data", games: "Games" };
-    if (current) current.textContent = tabNames[state.tab] || state.tab;
+    let label = tabNames[state.tab] || state.tab;
+    if (state.tab === "attendance" && state.attendanceView === "timestamps") label = "Time Trends";
+    else if (state.tab === "attendance" && state.attendanceView === "history") label = "History";
+    if (current) current.textContent = label;
 
     document.querySelectorAll(".tab").forEach((btn) => {
       const t = btn.dataset.tab;
@@ -4538,7 +4750,19 @@
       save();
       renderAll();
     });
+    const timestampsBtn = document.createElement("button");
+    timestampsBtn.type = "button";
+    timestampsBtn.className = "btn btn-ghost";
+    timestampsBtn.textContent = "Time Trends";
+    timestampsBtn.style.marginTop = "0.5rem";
+    timestampsBtn.style.marginLeft = "0.5rem";
+    timestampsBtn.addEventListener("click", () => {
+      state.attendanceView = "timestamps";
+      save();
+      renderAll();
+    });
     header.appendChild(weeklyBtn);
+    header.appendChild(timestampsBtn);
     container.appendChild(header);
 
     const grid = document.createElement("div");
@@ -4646,6 +4870,10 @@
     }
     if (state.attendanceView === "history") {
       renderAttendanceHistory(container);
+      return;
+    }
+    if (state.attendanceView === "timestamps") {
+      renderAttendanceTimestamps(container);
       return;
     }
     let dTotal = 0, dDone = 0, wTotal = 0, wDone = 0, eTotal = 0, eDone = 0;
@@ -4763,7 +4991,17 @@
       save();
       renderAll();
     });
+    const timestampsBtn = document.createElement("button");
+    timestampsBtn.type = "button";
+    timestampsBtn.className = "btn btn-ghost";
+    timestampsBtn.textContent = "Time Trends";
+    timestampsBtn.addEventListener("click", () => {
+      state.attendanceView = "timestamps";
+      save();
+      renderAll();
+    });
     calHeader.appendChild(historyBtn);
+    calHeader.appendChild(timestampsBtn);
     calendarSection.appendChild(calHeader);
     const calGrid = document.createElement("div");
     calGrid.className = "attendance-calendar-grid";
@@ -4831,6 +5069,454 @@
     });
     calendarSection.appendChild(calGrid);
     container.appendChild(calendarSection);
+  }
+
+  function renderAttendanceTimestamps(container) {
+    const games = getAllGames();
+    const selected = state.timestampsSelectedGameIds || {};
+    const showAll = Object.keys(selected).length === 0;
+    const timestamps = (state.completionTimestamps || []).filter((t) => showAll || selected[t.gameId]);
+
+    const header = document.createElement("div");
+    header.className = "history-header";
+    const title = document.createElement("h3");
+    title.className = "data-section-label";
+    title.textContent = "Completion time trends";
+    header.appendChild(title);
+    const clearTrendsBtn = document.createElement("button");
+    clearTrendsBtn.type = "button";
+    clearTrendsBtn.className = "btn btn-ghost";
+    clearTrendsBtn.textContent = "Clear Time Trends data";
+    clearTrendsBtn.title = "Remove all completion timestamps (keeps other data)";
+    clearTrendsBtn.style.marginLeft = "0.5rem";
+    clearTrendsBtn.addEventListener("click", () => openClearTimeTrendsModal());
+    header.appendChild(clearTrendsBtn);
+    const weeklyBtn = document.createElement("button");
+    weeklyBtn.type = "button";
+    weeklyBtn.className = "btn btn-ghost";
+    weeklyBtn.textContent = "← Weekly";
+    weeklyBtn.style.marginLeft = "0.5rem";
+    weeklyBtn.addEventListener("click", () => {
+      state.attendanceView = "weekly";
+      save();
+      renderAll();
+    });
+    header.appendChild(weeklyBtn);
+    container.appendChild(header);
+
+    const gameLabel = document.createElement("h4");
+    gameLabel.className = "data-section-label";
+    gameLabel.textContent = "Show games";
+    gameLabel.style.marginTop = "1rem";
+    container.appendChild(gameLabel);
+    const gameWrap = document.createElement("div");
+    gameWrap.className = "timestamps-game-selector";
+    gameWrap.style.display = "flex";
+    gameWrap.style.flexWrap = "wrap";
+    gameWrap.style.gap = "0.5rem";
+    gameWrap.style.marginBottom = "1rem";
+    games.forEach((game) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "timestamps-game-pill";
+      btn.textContent = game.name;
+      btn.setAttribute("aria-pressed", (showAll || selected[game.id]) ? "true" : "false");
+      const isSelected = showAll || selected[game.id];
+      if (isSelected) btn.classList.add("filled");
+      btn.addEventListener("click", () => {
+        if (showAll || selected[game.id]) {
+          if (showAll) {
+            const others = games.filter((g) => g.id !== game.id).map((g) => g.id);
+            state.timestampsSelectedGameIds = {};
+            others.forEach((id) => { state.timestampsSelectedGameIds[id] = true; });
+          } else {
+            delete state.timestampsSelectedGameIds[game.id];
+          }
+          if (Object.keys(state.timestampsSelectedGameIds).length === 0) state.timestampsSelectedGameIds = {};
+        } else {
+          state.timestampsSelectedGameIds[game.id] = true;
+          if (Object.keys(state.timestampsSelectedGameIds).length === games.length) state.timestampsSelectedGameIds = {};
+        }
+        save();
+        renderAll();
+      });
+      gameWrap.appendChild(btn);
+    });
+    container.appendChild(gameWrap);
+
+    const hourCountsByType = { dailies: Array(24).fill(0), weeklies: Array(24).fill(0), endgame: Array(24).fill(0) };
+    const hourDetails = Array(24).fill(null).map(() => []);
+    timestamps.forEach((t) => {
+      const h = Number(t.hour);
+      if (h >= 0 && h <= 23 && hourCountsByType[t.taskType]) {
+        hourCountsByType[t.taskType][h]++;
+        const game = getGame(t.gameId);
+        hourDetails[h].push({ gameName: game ? game.name : t.gameId, taskType: t.taskType, taskLabel: t.taskLabel, dateStr: t.dateStr });
+      }
+    });
+    const hourTotals = Array(24).fill(0).map((_, h) =>
+      hourCountsByType.dailies[h] + hourCountsByType.weeklies[h] + hourCountsByType.endgame[h]
+    );
+    const maxCount = Math.max(1, ...hourTotals);
+
+    const barLabel = document.createElement("h4");
+    barLabel.className = "data-section-label";
+    barLabel.textContent = "Completions by hour (rounded)";
+    barLabel.style.marginTop = "1.5rem";
+    container.appendChild(barLabel);
+    const hourLegend = document.createElement("div");
+    hourLegend.className = "timestamps-hour-legend";
+    hourLegend.style.display = "flex";
+    hourLegend.style.gap = "1rem";
+    hourLegend.style.marginBottom = "0.5rem";
+    hourLegend.style.fontSize = "0.8rem";
+    ["dailies", "weeklies", "endgame"].forEach((type) => {
+      const item = document.createElement("span");
+      item.style.display = "inline-flex";
+      item.style.alignItems = "center";
+      item.style.gap = "0.35rem";
+      const dot = document.createElement("span");
+      dot.style.width = "10px";
+      dot.style.height = "10px";
+      dot.style.borderRadius = "2px";
+      dot.style.background = "var(--pie-" + type + ")";
+      item.appendChild(dot);
+      item.appendChild(document.createTextNode(type.charAt(0).toUpperCase() + type.slice(1)));
+      hourLegend.appendChild(item);
+    });
+    container.appendChild(hourLegend);
+    const barWrap = document.createElement("div");
+    barWrap.className = "timestamps-bar-graph";
+    barWrap.style.display = "grid";
+    barWrap.style.gridTemplateColumns = "repeat(24, 1fr)";
+    barWrap.style.gap = "2px";
+    barWrap.style.marginBottom = "1.5rem";
+    barWrap.style.minHeight = "120px";
+    barWrap.style.alignItems = "end";
+    for (let h = 0; h < 24; h++) {
+      const col = document.createElement("div");
+      col.className = "timestamps-bar-col timestamps-hour-stacked";
+      col.style.display = "flex";
+      col.style.flexDirection = "column";
+      col.style.alignItems = "stretch";
+      col.style.justifyContent = "flex-end";
+      col.style.gap = "0";
+      const stack = document.createElement("div");
+      stack.className = "timestamps-hour-stack";
+      stack.style.display = "flex";
+      stack.style.flexDirection = "column-reverse";
+      stack.style.flex = "1";
+      stack.style.minHeight = "60px";
+      ["dailies", "weeklies", "endgame"].forEach((type) => {
+        const count = hourCountsByType[type][h];
+        if (count > 0) {
+          const seg = document.createElement("div");
+          seg.className = "timestamps-bar-segment";
+          seg.style.height = (count / maxCount) * 100 + "px";
+          seg.style.minHeight = "2px";
+          seg.style.background = "var(--pie-" + type + ")";
+          seg.style.borderRadius = "1px";
+          seg.title = type + ": " + count;
+          stack.appendChild(seg);
+        }
+      });
+      col.appendChild(stack);
+      const lbl = document.createElement("span");
+      lbl.className = "timestamps-bar-label";
+      lbl.style.fontSize = "0.7rem";
+      lbl.style.color = "var(--text-muted)";
+      lbl.textContent = h;
+      col.appendChild(lbl);
+      const total = hourCountsByType.dailies[h] + hourCountsByType.weeklies[h] + hourCountsByType.endgame[h];
+      col.title = h + ":00 – Dailies: " + hourCountsByType.dailies[h] + ", Weeklies: " + hourCountsByType.weeklies[h] + ", Endgame: " + hourCountsByType.endgame[h];
+      col.style.cursor = "pointer";
+      col.addEventListener("click", () => {
+        openTimeTrendsDetailModal(h + ":00 completions", hourDetails[h] || []);
+      });
+      barWrap.appendChild(col);
+      const tooltip = document.createElement("div");
+      tooltip.className = "timestamps-hour-tooltip";
+      tooltip.textContent = h + ":00 – Dailies: " + hourCountsByType.dailies[h] + ", Weeklies: " + hourCountsByType.weeklies[h] + ", Endgame: " + hourCountsByType.endgame[h];
+      col.appendChild(tooltip);
+    }
+    container.appendChild(barWrap);
+
+    const weekliesOnly = timestamps.filter((t) => t.taskType === "weeklies");
+    const dayCounts = [0, 0, 0, 0, 0, 0, 0];
+    const dayDetails = [[], [], [], [], [], [], []];
+    weekliesOnly.forEach((t) => {
+      const d = new Date(t.dateStr + "T12:00:00");
+      const day = d.getDay();
+      dayCounts[day]++;
+      const game = getGame(t.gameId);
+      dayDetails[day].push({ gameName: game ? game.name : t.gameId, taskLabel: t.taskLabel, dateStr: t.dateStr });
+    });
+
+    const weekliesLabel = document.createElement("h4");
+    weekliesLabel.className = "data-section-label";
+    weekliesLabel.textContent = "Weeklies completed by day of week";
+    weekliesLabel.style.marginTop = "1.5rem";
+    container.appendChild(weekliesLabel);
+    const maxDayCount = Math.max(1, ...dayCounts);
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const weekliesBarWrap = document.createElement("div");
+    weekliesBarWrap.className = "timestamps-bar-graph timestamps-weeklies-bar-graph";
+    weekliesBarWrap.style.gridTemplateColumns = "repeat(7, 1fr)";
+    weekliesBarWrap.style.minHeight = "120px";
+    weekliesBarWrap.style.alignItems = "end";
+    for (let i = 0; i < 7; i++) {
+      const col = document.createElement("div");
+      col.className = "timestamps-bar-col";
+      col.style.display = "flex";
+      col.style.flexDirection = "column";
+      col.style.justifyContent = "flex-end";
+      col.style.alignItems = "center";
+      col.style.gap = "2px";
+      const spacer = document.createElement("div");
+      spacer.style.flex = "1";
+      spacer.style.minHeight = "0";
+      col.appendChild(spacer);
+      const bar = document.createElement("div");
+      bar.className = "timestamps-bar";
+      bar.style.height = maxDayCount > 0 ? (dayCounts[i] / maxDayCount) * 100 + "px" : "4px";
+      bar.style.background = "var(--pie-weeklies)";
+      col.appendChild(bar);
+      const lbl = document.createElement("span");
+      lbl.className = "timestamps-bar-label";
+      lbl.textContent = dayNames[i];
+      col.appendChild(lbl);
+      const countLbl = document.createElement("span");
+      countLbl.className = "timestamps-bar-count";
+      countLbl.textContent = dayCounts[i];
+      countLbl.style.fontSize = "0.75rem";
+      countLbl.style.fontWeight = "600";
+      countLbl.style.color = "var(--text)";
+      col.appendChild(countLbl);
+      col.title = dayNames[i] + " – " + dayCounts[i] + " completion(s)";
+      col.style.cursor = "pointer";
+      col.addEventListener("click", () => {
+        openTimeTrendsDetailModal(dayNames[i] + " completions", dayDetails[i] || []);
+      });
+      weekliesBarWrap.appendChild(col);
+    }
+    container.appendChild(weekliesBarWrap);
+
+    const endgameOnly = timestamps.filter((t) => t.taskType === "endgame");
+    const allEndgameTasks = [];
+    games.forEach((game) => {
+      if (!showAll && !selected[game.id]) return;
+      (game.endgame || []).forEach((task) => {
+        const key = game.id + "." + (task.id || task.label);
+        allEndgameTasks.push({ key, gameId: game.id, taskId: task.id || task.label, gameName: game.name, taskLabel: task.label || task.id });
+      });
+    });
+
+    const endgameTaskSelected = state.timestampsSelectedEndgameTasks || {};
+    const showAllEndgameTasks = Object.keys(endgameTaskSelected).length === 0;
+
+    const endgameTaskLabel = document.createElement("h4");
+    endgameTaskLabel.className = "data-section-label";
+    endgameTaskLabel.textContent = "Endgame tasks";
+    endgameTaskLabel.style.marginTop = "1.5rem";
+    container.appendChild(endgameTaskLabel);
+    const endgameTaskWrap = document.createElement("div");
+    endgameTaskWrap.className = "timestamps-game-selector";
+    endgameTaskWrap.style.display = "flex";
+    endgameTaskWrap.style.flexWrap = "wrap";
+    endgameTaskWrap.style.gap = "0.5rem";
+    endgameTaskWrap.style.marginBottom = "0.75rem";
+    allEndgameTasks.forEach(({ key, gameName, taskLabel }) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "timestamps-game-pill timestamps-endgame-pill";
+      btn.textContent = taskLabel + (games.length > 1 ? " (" + gameName + ")" : "");
+      btn.setAttribute("aria-pressed", (showAllEndgameTasks || endgameTaskSelected[key]) ? "true" : "false");
+      if (showAllEndgameTasks || endgameTaskSelected[key]) btn.classList.add("filled");
+      btn.addEventListener("click", () => {
+        if (showAllEndgameTasks || endgameTaskSelected[key]) {
+          if (showAllEndgameTasks) {
+            const others = allEndgameTasks.filter((et) => et.key !== key).map((et) => et.key);
+            state.timestampsSelectedEndgameTasks = {};
+            others.forEach((k) => { state.timestampsSelectedEndgameTasks[k] = true; });
+          } else {
+            delete state.timestampsSelectedEndgameTasks[key];
+          }
+          if (Object.keys(state.timestampsSelectedEndgameTasks).length === 0) state.timestampsSelectedEndgameTasks = {};
+        } else {
+          state.timestampsSelectedEndgameTasks[key] = true;
+          if (Object.keys(state.timestampsSelectedEndgameTasks).length === allEndgameTasks.length) state.timestampsSelectedEndgameTasks = {};
+        }
+        save();
+        renderAll();
+      });
+      endgameTaskWrap.appendChild(btn);
+    });
+    container.appendChild(endgameTaskWrap);
+
+    const filteredEndgame = endgameOnly.filter((t) => {
+      const key = t.gameId + "." + t.taskId;
+      return showAllEndgameTasks || endgameTaskSelected[key];
+    });
+    const taskPoints = {};
+    [...filteredEndgame].sort((a, b) => {
+      const da = a.dateStr + "T" + String(a.hour).padStart(2, "0") + ":00";
+      const db = b.dateStr + "T" + String(b.hour).padStart(2, "0") + ":00";
+      return da.localeCompare(db);
+    }).forEach((t) => {
+      const key = t.gameId + "." + t.taskId;
+      const game = getGame(t.gameId);
+      const task = (game?.endgame || []).find((et) => (et.id || et.label) === t.taskId);
+      if (!game || !task) return;
+      const cycleStart = getCycleStartForDate(task, t.dateStr, game);
+      const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
+      const hasExplicitLimit = task.timeLimitEvery != null || task.timeLimitUnit != null;
+      const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
+      const cycleEndMs = cycleStart.getTime() + timeLimitMs;
+      const completionMs = new Date(t.dateStr + "T" + String(t.hour).padStart(2, "0") + ":00:00").getTime();
+      const cycleLen = cycleEndMs - cycleStart.getTime();
+      if (cycleLen <= 0) return;
+      let pct = ((cycleEndMs - completionMs) / cycleLen) * 100;
+      pct = Math.max(0, Math.min(100, pct));
+      if (!taskPoints[key]) taskPoints[key] = { label: t.taskLabel, points: [] };
+      taskPoints[key].points.push(pct);
+    });
+
+    const endgameLabel = document.createElement("h4");
+    endgameLabel.className = "data-section-label";
+    endgameLabel.textContent = "Endgame trend: completion # vs % time remaining (100% = start of cycle, 0% = deadline)";
+    endgameLabel.style.marginTop = "1rem";
+    container.appendChild(endgameLabel);
+    const lineGraphWrap = document.createElement("div");
+    lineGraphWrap.className = "timestamps-line-graph";
+    const graphWidth = 400;
+    const graphHeight = 200;
+    const padding = { top: 20, right: 20, bottom: 40, left: 45 };
+    const plotWidth = graphWidth - padding.left - padding.right;
+    const plotHeight = graphHeight - padding.top - padding.bottom;
+    const maxX = Math.max(1, ...Object.values(taskPoints).map((tp) => tp.points.length));
+    const xDivisor = maxX > 1 ? maxX - 1 : 1;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 " + graphWidth + " " + graphHeight);
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "auto");
+    svg.style.maxWidth = graphWidth + "px";
+    svg.style.display = "block";
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const colors = ["var(--pie-endgame)", "var(--pie-dailies)", "var(--pie-weeklies)", "#f472b6", "#fbbf24"];
+    Object.keys(taskPoints).forEach((key, idx) => {
+      const tp = taskPoints[key];
+      if (tp.points.length === 0) return;
+      const pathD = tp.points.map((pct, i) => {
+        const x = padding.left + (i / xDivisor) * plotWidth;
+        const y = padding.top + plotHeight - (pct / 100) * plotHeight;
+        return (i === 0 ? "M" : "L") + x + "," + y;
+      }).join(" ");
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", pathD);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", colors[idx % colors.length]);
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      svg.appendChild(path);
+      tp.points.forEach((pct, i) => {
+        const x = padding.left + (i / xDivisor) * plotWidth;
+        const y = padding.top + plotHeight - (pct / 100) * plotHeight;
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", x);
+        circle.setAttribute("cy", y);
+        circle.setAttribute("r", "4");
+        circle.setAttribute("fill", colors[idx % colors.length]);
+        circle.setAttribute("stroke", "var(--bg)");
+        circle.setAttribute("stroke-width", "1");
+        svg.appendChild(circle);
+      });
+    });
+    const yAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    yAxis.setAttribute("x1", padding.left);
+    yAxis.setAttribute("y1", padding.top);
+    yAxis.setAttribute("x2", padding.left);
+    yAxis.setAttribute("y2", padding.top + plotHeight);
+    yAxis.setAttribute("stroke", "var(--border)");
+    yAxis.setAttribute("stroke-width", "1");
+    svg.insertBefore(yAxis, svg.firstChild);
+    const xAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    xAxis.setAttribute("x1", padding.left);
+    xAxis.setAttribute("y1", padding.top + plotHeight);
+    xAxis.setAttribute("x2", padding.left + plotWidth);
+    xAxis.setAttribute("y2", padding.top + plotHeight);
+    xAxis.setAttribute("stroke", "var(--border)");
+    xAxis.setAttribute("stroke-width", "1");
+    svg.insertBefore(xAxis, svg.firstChild);
+    for (let p = 0; p <= 100; p += 25) {
+      const y = padding.top + plotHeight - (p / 100) * plotHeight;
+      const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      tick.setAttribute("x1", padding.left - 4);
+      tick.setAttribute("y1", y);
+      tick.setAttribute("x2", padding.left);
+      tick.setAttribute("y2", y);
+      tick.setAttribute("stroke", "var(--border)");
+      svg.insertBefore(tick, svg.firstChild);
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", padding.left - 8);
+      label.setAttribute("y", y + 4);
+      label.setAttribute("text-anchor", "end");
+      label.setAttribute("fill", "var(--text-muted)");
+      label.setAttribute("font-size", "10");
+      label.textContent = p + "%";
+      svg.insertBefore(label, svg.firstChild);
+    }
+    for (let i = 1; i <= maxX; i += Math.max(1, Math.floor(maxX / 5))) {
+      const x = padding.left + ((i - 1) / xDivisor) * plotWidth;
+      const tick = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      tick.setAttribute("x1", x);
+      tick.setAttribute("y1", padding.top + plotHeight);
+      tick.setAttribute("x2", x);
+      tick.setAttribute("y2", padding.top + plotHeight + 4);
+      tick.setAttribute("stroke", "var(--border)");
+      svg.insertBefore(tick, svg.firstChild);
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", x);
+      label.setAttribute("y", padding.top + plotHeight + 16);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("fill", "var(--text-muted)");
+      label.setAttribute("font-size", "10");
+      label.textContent = i;
+      svg.insertBefore(label, svg.firstChild);
+    }
+    const legendWrap = document.createElement("div");
+    legendWrap.className = "timestamps-line-legend";
+    legendWrap.style.display = "flex";
+    legendWrap.style.flexWrap = "wrap";
+    legendWrap.style.gap = "1rem";
+    legendWrap.style.marginTop = "0.5rem";
+    legendWrap.style.fontSize = "0.85rem";
+    Object.keys(taskPoints).forEach((key, idx) => {
+      const tp = taskPoints[key];
+      if (tp.points.length === 0) return;
+      const item = document.createElement("span");
+      item.style.display = "inline-flex";
+      item.style.alignItems = "center";
+      item.style.gap = "0.35rem";
+      const dot = document.createElement("span");
+      dot.style.width = "10px";
+      dot.style.height = "10px";
+      dot.style.borderRadius = "50%";
+      dot.style.background = colors[idx % colors.length];
+      item.appendChild(dot);
+      item.appendChild(document.createTextNode(escapeHtml(tp.label)));
+      legendWrap.appendChild(item);
+    });
+    lineGraphWrap.appendChild(svg);
+    if (Object.keys(taskPoints).length > 0) lineGraphWrap.appendChild(legendWrap);
+    if (Object.keys(taskPoints).length === 0) {
+      const empty = document.createElement("p");
+      empty.style.color = "var(--text-muted)";
+      empty.style.fontSize = "0.9rem";
+      empty.textContent = "No endgame completion data. Complete endgame tasks to see the trend.";
+      lineGraphWrap.appendChild(empty);
+    }
+    container.appendChild(lineGraphWrap);
   }
 
   function escapeHtml(s) {
@@ -6370,6 +7056,8 @@
           const now = new Date();
           if (state.historyMonth == null) state.historyMonth = now.getMonth();
           if (state.historyYear == null) state.historyYear = now.getFullYear();
+        } else if (view === "timestamps") {
+          state.attendanceView = "timestamps";
         } else if (t === "attendance") {
           state.attendanceView = "weekly";
         }
@@ -6399,6 +7087,8 @@
   initClearGameDataModal();
   initCalendarDayModal();
   initEarningsModal();
+  initTimeTrendsDetailModal();
+  initClearTimeTrendsModal();
   initSettingsModal();
   initExtracurricularTaskModal();
   setInterval(() => {

@@ -30,6 +30,7 @@
         <button class="tab" data-tab="attendance" role="tab" aria-selected="false">Attendance</button>
         <div class="sidebar-sub-nav" id="sidebarAttendanceSubNav" aria-label="Attendance sub-pages">
           <button type="button" class="tab tab-sub" data-tab="attendance" data-attendance-view="history" id="sidebarTabHistory">History</button>
+          <button type="button" class="tab tab-sub" data-tab="attendance" data-attendance-view="timestamps" id="sidebarTabTimestamps">Time Trends</button>
         </div>
       </nav>
       <div class="sidebar-data-wrap">
@@ -796,6 +797,39 @@
           <button type="button" class="btn btn-ghost" id="clearGameDataCancel">Cancel</button>
           <button type="button" class="btn btn-danger" id="clearGameDataConfirm">Clear data</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clear Time Trends data modal (game selection) -->
+  <div id="clearTimeTrendsModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="clearTimeTrendsModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="clearTimeTrendsModalTitle">
+      <div class="modal-header">
+        <h3 id="clearTimeTrendsModalTitle" class="modal-title">Clear Time Trends data</h3>
+        <button type="button" class="icon-btn" id="clearTimeTrendsModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc" style="margin-top: 0;">Select which games to clear completion timestamps for:</p>
+        <div id="clearTimeTrendsModalGames" class="clear-time-trends-games"></div>
+        <div class="modal-actions" style="margin-top: 1rem;">
+          <button type="button" class="btn btn-ghost" id="clearTimeTrendsCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="clearTimeTrendsConfirm">Clear selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Time Trends detail modal (games/tasks in a data point) -->
+  <div id="timeTrendsDetailModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="timeTrendsDetailModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="timeTrendsDetailModalTitle">
+      <div class="modal-header">
+        <h3 id="timeTrendsDetailModalTitle" class="modal-title">Completions</h3>
+        <button type="button" class="icon-btn" id="timeTrendsDetailModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="timeTrendsDetailModalList" class="time-trends-detail-list"></div>
       </div>
     </div>
   </div>

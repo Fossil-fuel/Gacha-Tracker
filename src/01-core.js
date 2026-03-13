@@ -150,10 +150,13 @@
     endgameCurrencyEarned: {},
     endgameCompletionDates: {}, // { "gameId.taskId": [{ start: "YYYY-MM-DD", end: "YYYY-MM-DD" }, ...] }
     completionByDate: {}, // { "YYYY-MM-DD": { dailies: [gameId], weeklies: ["gameId.taskId"], endgame: ["gameId.taskId"] } }
+    completionTimestamps: [], // [{ dateStr, hour, gameId, taskType, taskId, taskLabel }] - when tasks were completed (for trend)
     lastProcessedResets: { dailies: {}, weeklies: {}, endgame: {} }, // last period we processed for each task
     attendancePieInclude: {},
     dataPieInclude: {}, // { gameId: { dailies, weeklies, endgame, extracurricular } } - true = include in total/pie
-    attendanceView: "weekly", // "weekly" | "history"
+    attendanceView: "weekly", // "weekly" | "history" | "timestamps"
+    timestampsSelectedGameIds: {}, // { gameId: true } - which games to show in timestamps page; empty = all
+    timestampsSelectedEndgameTasks: {}, // { "gameId.taskId": true } - which endgame tasks to show; empty = all
     historyMonth: null,
     historyYear: null,
     extracurricularTasks: [],
@@ -583,6 +586,9 @@
           });
         }
         if (parsed.completionByDate) state.completionByDate = parsed.completionByDate;
+        if (Array.isArray(parsed.completionTimestamps)) state.completionTimestamps = parsed.completionTimestamps;
+        if (parsed.timestampsSelectedGameIds && typeof parsed.timestampsSelectedGameIds === "object") state.timestampsSelectedGameIds = parsed.timestampsSelectedGameIds;
+        if (parsed.timestampsSelectedEndgameTasks && typeof parsed.timestampsSelectedEndgameTasks === "object") state.timestampsSelectedEndgameTasks = parsed.timestampsSelectedEndgameTasks;
         if (parsed.lastProcessedResets) state.lastProcessedResets = parsed.lastProcessedResets;
         if (parsed.dataSelectedGameId != null) state.dataSelectedGameId = parsed.dataSelectedGameId;
         if (parsed.gamesSelectedId != null) state.gamesSelectedId = parsed.gamesSelectedId;
@@ -591,7 +597,7 @@
         if (parsed.endgameView === "grid" || parsed.endgameView === "list") state.endgameView = parsed.endgameView;
         if (parsed.attendancePieInclude && typeof parsed.attendancePieInclude === "object") state.attendancePieInclude = parsed.attendancePieInclude;
         if (parsed.dataPieInclude && typeof parsed.dataPieInclude === "object") state.dataPieInclude = parsed.dataPieInclude;
-        if (parsed.attendanceView === "weekly" || parsed.attendanceView === "history") state.attendanceView = parsed.attendanceView;
+        if (parsed.attendanceView === "weekly" || parsed.attendanceView === "history" || parsed.attendanceView === "timestamps") state.attendanceView = parsed.attendanceView;
         if (parsed.historyMonth != null && parsed.historyMonth >= 0 && parsed.historyMonth <= 11) state.historyMonth = parsed.historyMonth;
         if (parsed.historyYear != null && Number.isFinite(parsed.historyYear)) state.historyYear = parsed.historyYear;
         if (Array.isArray(parsed.extracurricularTasks)) state.extracurricularTasks = parsed.extracurricularTasks;
@@ -632,6 +638,9 @@
     } catch (_) {}
     if (state.games.length === 0) ensureTestGame();
     if (!state.completionByDate) state.completionByDate = {};
+    if (!state.completionTimestamps) state.completionTimestamps = [];
+    if (!state.timestampsSelectedGameIds) state.timestampsSelectedGameIds = {};
+    if (!state.timestampsSelectedEndgameTasks) state.timestampsSelectedEndgameTasks = {};
     if (!state.lastProcessedResets) state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
@@ -720,6 +729,9 @@
       attendancePieInclude: state.attendancePieInclude,
       dataPieInclude: state.dataPieInclude,
       attendanceView: state.attendanceView,
+      timestampsSelectedGameIds: state.timestampsSelectedGameIds,
+      timestampsSelectedEndgameTasks: state.timestampsSelectedEndgameTasks,
+      completionTimestamps: state.completionTimestamps,
       historyMonth: state.historyMonth,
       historyYear: state.historyYear,
       extracurricularTasks: state.extracurricularTasks,
@@ -1213,16 +1225,55 @@
     return dates.length ? dates : [dateStr];
   }
 
-  function recordCompletion(dateStr, type, key) {
+  function recordCompletion(dateStr, type, key, skipTimestamp) {
     const datesToRecord = (type === "weeklies" || type === "endgame") ? getRemainingDatesInPeriod(type, key, dateStr) : [dateStr];
     datesToRecord.forEach((ds) => {
       if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
       const arr = state.completionByDate[ds][type];
       if (!arr.includes(key)) arr.push(key);
     });
+    if (!skipTimestamp) recordCompletionTimestamp(type, key);
   }
 
-  function unrecordCompletion(dateStr, type, key) {
+  function recordCompletionTimestamp(type, key) {
+    if (!state.completionTimestamps) state.completionTimestamps = [];
+    const now = new Date();
+    const tz = getAppTimezone ? getAppTimezone() : Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const parts = getDatePartsInTimezone ? getDatePartsInTimezone(now, tz) : { year: now.getFullYear(), month: now.getMonth(), day: now.getDate(), weekday: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][now.getDay()], hour: now.getHours(), minute: now.getMinutes() };
+    const dateStr = String(parts.year) + "-" + String(parts.month + 1).padStart(2, "0") + "-" + String(parts.day).padStart(2, "0");
+    let gameId = key, taskId = "", taskLabel = "";
+    if (type !== "dailies") {
+      const dot = key.indexOf(".");
+      gameId = dot >= 0 ? key.slice(0, dot) : key;
+      taskId = dot >= 0 ? key.slice(dot + 1) : "";
+      const game = getGame(gameId);
+      const task = type === "weeklies" ? (game?.weeklies || []).find((t) => (t.id || t.label) === taskId) : (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
+      taskLabel = task ? (task.label || taskId) : taskId;
+    } else {
+      const game = getGame(gameId);
+      taskLabel = game ? game.name : gameId;
+    }
+    state.completionTimestamps.push({ dateStr, hour: parts.hour, gameId, taskType: type, taskId, taskLabel });
+  }
+
+  function unrecordCompletionTimestamp(type, key) {
+    if (!state.completionTimestamps || state.completionTimestamps.length === 0) return;
+    let gameId = key, taskId = "";
+    if (type !== "dailies") {
+      const dot = key.indexOf(".");
+      gameId = dot >= 0 ? key.slice(0, dot) : key;
+      taskId = dot >= 0 ? key.slice(dot + 1) : "";
+    }
+    for (let i = state.completionTimestamps.length - 1; i >= 0; i--) {
+      const t = state.completionTimestamps[i];
+      if (t.gameId === gameId && t.taskType === type && (type === "dailies" || t.taskId === taskId)) {
+        state.completionTimestamps.splice(i, 1);
+        return;
+      }
+    }
+  }
+
+  function unrecordCompletion(dateStr, type, key, skipTimestamp) {
     const datesToRemove = (type === "weeklies" || type === "endgame") ? getAllDatesInPeriod(type, key, dateStr) : [dateStr];
     datesToRemove.forEach((ds) => {
       if (!state.completionByDate[ds]) return;
@@ -1230,6 +1281,7 @@
       const idx = arr.indexOf(key);
       if (idx >= 0) arr.splice(idx, 1);
     });
+    if (!skipTimestamp) unrecordCompletionTimestamp(type, key);
   }
 
   function freezeTalliesOnTimezoneChange() {
@@ -1722,6 +1774,10 @@
       if (dayData.endgame) dayData.endgame = dayData.endgame.filter((k) => !String(k).startsWith(gameId + "."));
     });
 
+    if (state.completionTimestamps) {
+      state.completionTimestamps = state.completionTimestamps.filter((t) => t.gameId !== gameId);
+    }
+
     save();
     renderAll();
   }
@@ -1750,6 +1806,7 @@
 
     state.lastSimulationSnapshot = JSON.parse(JSON.stringify({
       completionByDate: state.completionByDate,
+      completionTimestamps: state.completionTimestamps,
       dailiesCompleted: state.dailiesCompleted,
       weekliesCompleted: state.weekliesCompleted,
       endgameCompleted: state.endgameCompleted,
@@ -1769,13 +1826,13 @@
       const available = getTasksAvailableOnDate(dateStr);
 
       (available.dailies || []).forEach((item) => {
-        if (Math.random() < 0.75) recordCompletion(dateStr, "dailies", item.key);
+        if (Math.random() < 0.75) recordCompletion(dateStr, "dailies", item.key, true);
       });
       (available.weeklies || []).forEach((item) => {
-        if (Math.random() < 0.55) recordCompletion(dateStr, "weeklies", item.key);
+        if (Math.random() < 0.55) recordCompletion(dateStr, "weeklies", item.key, true);
       });
       (available.endgame || []).forEach((item) => {
-        if (Math.random() < 0.45) recordCompletion(dateStr, "endgame", item.key);
+        if (Math.random() < 0.45) recordCompletion(dateStr, "endgame", item.key, true);
       });
     }
 
@@ -1802,6 +1859,7 @@
     const snap = state.lastSimulationSnapshot;
     if (!snap) return;
     state.completionByDate = snap.completionByDate || {};
+    state.completionTimestamps = snap.completionTimestamps || [];
     state.dailiesCompleted = snap.dailiesCompleted || {};
     state.weekliesCompleted = snap.weekliesCompleted || {};
     state.endgameCompleted = snap.endgameCompleted || {};

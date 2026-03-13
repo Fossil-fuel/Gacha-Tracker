@@ -83,6 +83,7 @@
     state.endgameCurrencyEarned = {};
     state.endgameCompletionDates = {};
     state.completionByDate = {};
+    state.completionTimestamps = [];
     state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     state.lastSimulationSnapshot = null;
     state.attendancePieInclude = {};
@@ -651,6 +652,156 @@
     document.addEventListener("keydown", (e) => {
       if (!clearGameDataModalGameId) return;
       if (e.key === "Escape") closeClearGameDataModal();
+    });
+  }
+
+  let clearTimeTrendsModalOpen = false;
+  function openClearTimeTrendsModal() {
+    const modal = qs("clearTimeTrendsModal");
+    const container = qs("clearTimeTrendsModalGames");
+    if (!modal || !container) return;
+    clearTimeTrendsModalOpen = true;
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    container.innerHTML = "";
+    container.className = "clear-time-trends-games timestamps-game-selector";
+    container.style.display = "flex";
+    container.style.flexWrap = "wrap";
+    container.style.gap = "0.5rem";
+    const games = getAllGames();
+    const gameIdsWithData = new Set((state.completionTimestamps || []).map((t) => t.gameId));
+    const selected = new Set(gameIdsWithData);
+    games.forEach((game) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "timestamps-game-pill clear-time-trends-pill";
+      btn.textContent = game.name + (gameIdsWithData.has(game.id) ? " (" + (state.completionTimestamps || []).filter((t) => t.gameId === game.id).length + ")" : "");
+      btn.dataset.gameId = game.id;
+      btn.setAttribute("aria-pressed", selected.has(game.id) ? "true" : "false");
+      if (selected.has(game.id)) btn.classList.add("filled");
+      btn.addEventListener("click", () => {
+        if (selected.has(game.id)) {
+          selected.delete(game.id);
+          btn.classList.remove("filled");
+          btn.setAttribute("aria-pressed", "false");
+        } else {
+          selected.add(game.id);
+          btn.classList.add("filled");
+          btn.setAttribute("aria-pressed", "true");
+        }
+      });
+      container.appendChild(btn);
+    });
+    if (games.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty-state";
+      p.textContent = "No games to clear.";
+      container.appendChild(p);
+    }
+  }
+  function closeClearTimeTrendsModal() {
+    const modal = qs("clearTimeTrendsModal");
+    if (modal) {
+      clearTimeTrendsModalOpen = false;
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+      if (!settingsModalOpen && !clearDataModalOpen && !timeTrendsDetailModalOpen) document.body.style.overflow = "";
+    }
+  }
+  function confirmClearTimeTrends() {
+    const container = qs("clearTimeTrendsModalGames");
+    if (!container) return;
+    const selectedIds = new Set();
+    container.querySelectorAll('.clear-time-trends-pill.filled, .clear-time-trends-pill[aria-pressed="true"]').forEach((btn) => {
+      selectedIds.add(btn.dataset.gameId);
+    });
+    if (selectedIds.size > 0 && state.completionTimestamps) {
+      state.completionTimestamps = state.completionTimestamps.filter((t) => !selectedIds.has(t.gameId));
+      const selected = state.timestampsSelectedGameIds || {};
+      selectedIds.forEach((id) => delete selected[id]);
+      if (Object.keys(selected).length === 0) state.timestampsSelectedGameIds = {};
+      const endgameSelected = state.timestampsSelectedEndgameTasks || {};
+      Object.keys(endgameSelected).forEach((k) => {
+        if (selectedIds.has(k.split(".")[0])) delete endgameSelected[k];
+      });
+      if (Object.keys(endgameSelected).length === 0) state.timestampsSelectedEndgameTasks = {};
+    }
+    save();
+    renderAll();
+    closeClearTimeTrendsModal();
+  }
+
+  let timeTrendsDetailModalOpen = false;
+  function openTimeTrendsDetailModal(title, items) {
+    const modal = qs("timeTrendsDetailModal");
+    if (!modal) return;
+    timeTrendsDetailModalOpen = true;
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    const titleEl = qs("timeTrendsDetailModalTitle");
+    if (titleEl) titleEl.textContent = title;
+    const listEl = qs("timeTrendsDetailModalList");
+    if (listEl) {
+      listEl.innerHTML = "";
+      if (!items || items.length === 0) {
+        const p = document.createElement("p");
+        p.className = "empty-state";
+        p.textContent = "No completions in this period.";
+        listEl.appendChild(p);
+      } else {
+        items.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "time-trends-detail-list-item";
+          const gameName = item.gameName || item.gameId || "?";
+          const taskLabel = item.taskLabel || "";
+          const typeLabel = item.taskType ? " (" + item.taskType.charAt(0).toUpperCase() + item.taskType.slice(1) + ")" : "";
+          const datePart = item.dateStr ? " — " + item.dateStr : "";
+          row.textContent = gameName + (taskLabel ? " – " + taskLabel : "") + typeLabel + datePart;
+          listEl.appendChild(row);
+        });
+      }
+    }
+  }
+  function closeTimeTrendsDetailModal() {
+    const modal = qs("timeTrendsDetailModal");
+    if (modal) {
+      timeTrendsDetailModalOpen = false;
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+      if (!settingsModalOpen && !clearDataModalOpen) document.body.style.overflow = "";
+    }
+  }
+  function initTimeTrendsDetailModal() {
+    const modalEl = qs("timeTrendsDetailModal");
+    const closeBtn = qs("timeTrendsDetailModalClose");
+    if (!modalEl) return;
+    modalEl.addEventListener("click", (e) => {
+      if (e.target.classList.contains("modal-backdrop") || e.target.getAttribute("data-close") === "timeTrendsDetailModal") closeTimeTrendsDetailModal();
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeTimeTrendsDetailModal);
+    document.addEventListener("keydown", (e) => {
+      if (!timeTrendsDetailModalOpen) return;
+      if (e.key === "Escape") closeTimeTrendsDetailModal();
+    });
+  }
+
+  function initClearTimeTrendsModal() {
+    const modalEl = qs("clearTimeTrendsModal");
+    const closeBtn = qs("clearTimeTrendsModalClose");
+    const cancelBtn = qs("clearTimeTrendsCancel");
+    const confirmBtn = qs("clearTimeTrendsConfirm");
+    if (!modalEl) return;
+    modalEl.addEventListener("click", (e) => {
+      if (e.target.classList.contains("modal-backdrop") || e.target.getAttribute("data-close") === "clearTimeTrendsModal") closeClearTimeTrendsModal();
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeClearTimeTrendsModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeClearTimeTrendsModal);
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmClearTimeTrends);
+    document.addEventListener("keydown", (e) => {
+      if (!clearTimeTrendsModalOpen) return;
+      if (e.key === "Escape") closeClearTimeTrendsModal();
     });
   }
 

@@ -46,6 +46,8 @@
           const now = new Date();
           if (state.historyMonth == null) state.historyMonth = now.getMonth();
           if (state.historyYear == null) state.historyYear = now.getFullYear();
+        } else if (view === "timestamps") {
+          state.attendanceView = "timestamps";
         } else if (t === "attendance") {
           state.attendanceView = "weekly";
         }
@@ -75,6 +77,8 @@
   initClearGameDataModal();
   initCalendarDayModal();
   initEarningsModal();
+  initTimeTrendsDetailModal();
+  initClearTimeTrendsModal();
   initSettingsModal();
   initExtracurricularTaskModal();
   setInterval(() => {

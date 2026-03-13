@@ -114,7 +114,10 @@
   function renderTabs() {
     const current = document.getElementById("breadcrumbCurrent");
     const tabNames = { about: "About", home: "Home", dailies: "Dailies", weeklies: "Weeklies", endgame: "Endgame", attendance: "Attendance", extracurricular: "Extracurricular", data: "Data", games: "Games" };
-    if (current) current.textContent = tabNames[state.tab] || state.tab;
+    let label = tabNames[state.tab] || state.tab;
+    if (state.tab === "attendance" && state.attendanceView === "timestamps") label = "Time Trends";
+    else if (state.tab === "attendance" && state.attendanceView === "history") label = "History";
+    if (current) current.textContent = label;
 
     document.querySelectorAll(".tab").forEach((btn) => {
       const t = btn.dataset.tab;
