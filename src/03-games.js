@@ -103,8 +103,18 @@
   function addGame(name, opts) {
     const o = opts || {};
     const id = "g_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-    const weeklies = Array.isArray(o.weeklies) ? o.weeklies.map((t) => ({ ...t })) : [];
-    const endgame = Array.isArray(o.endgame) ? o.endgame.map((t) => ({ ...t })) : [];
+    const weeklies = Array.isArray(o.weeklies) ? o.weeklies.map((t) => ({
+      ...t,
+      dateStarted: isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr(),
+      frequencyEvery: Number.isFinite(t.frequencyEvery) ? t.frequencyEvery : 1,
+      frequencyUnit: t.frequencyUnit || "week",
+      timeLimitEvery: t.timeLimitEvery != null ? t.timeLimitEvery : 1,
+      timeLimitUnit: t.timeLimitUnit || "week",
+    })) : [];
+    const endgame = Array.isArray(o.endgame) ? o.endgame.map((t) => ({
+      ...t,
+      dateStarted: isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr(),
+    })) : [];
     state.games.push({
       id,
       name: name || "New game",
@@ -120,22 +130,23 @@
     });
     const game = getGame(id);
     if (game && o.presetId && (weeklies.length || endgame.length)) {
-      const now = new Date();
+      const now = getSimulatedNow();
       const todayStr = getDateStr();
       (game.weeklies || []).forEach((task) => {
         const key = id + "." + (task.id || task.label);
-        const nextReset = new Date(now.getTime() + getWeeklyTimeRemainingMs(task, now, game));
+        const remainingMs = getWeeklyTimeRemainingMs(task, now, game);
+        const { intervalMs, timeLimitMs } = getCycleParams(task);
+        const cycleEndMs = now.getTime() + remainingMs;
+        const nextCycleStartMs = cycleEndMs - timeLimitMs + intervalMs;
         state.lastProcessedResets.weeklies = state.lastProcessedResets.weeklies || {};
-        state.lastProcessedResets.weeklies[key] = getDateStr(new Date(nextReset.getTime() + 24 * 60 * 60 * 1000));
+        state.lastProcessedResets.weeklies[key] = nextCycleStartMs;
       });
       (game.endgame || []).forEach((task) => {
         const key = id + "." + (task.id || task.label);
         const cycleStart = getCycleStartForDate(task, todayStr, game);
-        const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
-        const hasExplicitLimit = task.timeLimitEvery != null || task.timeLimitUnit != null;
-        const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
+        const { intervalMs } = getCycleParams(task);
         state.lastProcessedResets.endgame = state.lastProcessedResets.endgame || {};
-        state.lastProcessedResets.endgame[key] = cycleStart.getTime() + timeLimitMs;
+        state.lastProcessedResets.endgame[key] = cycleStart.getTime() + intervalMs;
       });
     }
     if (o.presetId && Array.isArray(o.extracurricular) && o.extracurricular.length > 0) {
@@ -260,7 +271,7 @@
 
   function isCompletedToday(type, key) {
     const dateStr = type === "dailies"
-      ? (() => { const g = getGame(key); return g ? getDailyPeriodDateStr(g, new Date()) : getDateStr(); })()
+      ? (() => { const g = getGame(key); return g ? getDailyPeriodDateStr(g, getSimulatedNow()) : getDateStr(); })()
       : getDateStr();
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
     return (dayData[type] || []).includes(key);
@@ -268,12 +279,14 @@
 
   function toggleDaily(gameId) {
     const game = getGame(gameId);
-    const dateStr = game ? getDailyPeriodDateStr(game, new Date()) : getDateStr();
+    const dateStr = game ? getDailyPeriodDateStr(game, getSimulatedNow()) : getDateStr();
     const amt = getCompletedAmount(state.dailiesCompleted, gameId);
     const isMarkingComplete = !isCompletedToday("dailies", gameId);
     if (isMarkingComplete) {
       state.dailiesCompleted[gameId] = amt + 1;
       recordCompletion(dateStr, "dailies", gameId);
+      const attempted = getAttemptedAmount(state.dailiesAttempted, gameId);
+      if (attempted < state.dailiesCompleted[gameId]) state.dailiesAttempted[gameId] = state.dailiesCompleted[gameId];
     } else {
       state.dailiesCompleted[gameId] = Math.max(0, amt - 1);
       unrecordCompletion(dateStr, "dailies", gameId);
@@ -291,6 +304,8 @@
     if (isMarkingComplete) {
       state.weekliesCompleted[key] = amt + 1;
       recordCompletion(dateStr, "weeklies", key);
+      const attempted = getAttemptedAmount(state.weekliesAttempted, key);
+      if (attempted < state.weekliesCompleted[key]) state.weekliesAttempted[key] = state.weekliesCompleted[key];
     } else {
       const completedDateStr = getWeeklyCompletionDateInCurrentCycle(key, dateStr);
       if (completedDateStr) unrecordCompletion(completedDateStr, "weeklies", key);
@@ -310,6 +325,8 @@
       state.endgameCompleted[key] = amt + 1;
       recordCompletion(dateStr, "endgame", key);
       ensureEndgameEarnedArrayLength(gameId, taskId, amt + 1);
+      const attempted = getAttemptedAmount(state.endgameAttempted, key);
+      if (attempted < state.endgameCompleted[key]) state.endgameAttempted[key] = state.endgameCompleted[key];
     } else {
       const completedDateStr = getEndgameCompletionDateInCurrentCycle(key, dateStr);
       if (completedDateStr) unrecordCompletion(completedDateStr, "endgame", key);

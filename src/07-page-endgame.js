@@ -49,7 +49,7 @@
     remainingVal.dataset.type = "endgame";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
-    remainingVal.textContent = getEndgameTimeRemainingText(task, new Date(), game);
+    remainingVal.textContent = getEndgameTimeRemainingText(task, getSimulatedNow(), game);
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 
@@ -156,7 +156,7 @@
   function updateTaskRemainingTexts() {
     const tab = state.tab;
     if (tab !== "dailies" && tab !== "weeklies" && tab !== "endgame" && tab !== "home") return;
-    const now = new Date();
+    const now = getSimulatedNow();
     document.querySelectorAll(".task-remaining").forEach((el) => {
       const type = el.dataset.type;
       const gameId = el.dataset.gameId;

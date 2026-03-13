@@ -1,6 +1,6 @@
   function getSidebarResetHour() {
     const server = state.primaryServer && ["america", "asia", "europe"].includes(state.primaryServer) ? state.primaryServer : "america";
-    return getEffectiveResetHour ? getEffectiveResetHour(server, new Date()) : getDefaultResetHour();
+    return getEffectiveResetHour ? getEffectiveResetHour(server, getSimulatedNow()) : getDefaultResetHour();
   }
 
   function getSidebarResetMinute() {
@@ -33,12 +33,12 @@
     const hour = server === "asia" ? 4 : 3;
     const minute = 0;
     const tz = baseTz;
-    const offsetRef = new Date();
+    const offsetRef = getSimulatedNow();
     return getNextResetDateInTimezone(now, hour, minute, tz, offsetRef);
   }
 
   function updateSidebarTime() {
-    const now = new Date();
+    const now = getSimulatedNow();
     const tz = getAppTimezone();
     const recTz = getRecordingTimezone();
     const parts = getDatePartsInTimezone(now, tz);
@@ -46,7 +46,8 @@
     if (dateEl) {
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const month = monthNames[parts.month];
-      dateEl.textContent = parts.weekday + ", " + month + " " + parts.day + ", " + parts.year;
+      const offset = (state.simulatedDateOffset || 0);
+      dateEl.textContent = parts.weekday + ", " + month + " " + parts.day + ", " + parts.year + (offset > 0 ? " (+" + offset + " day simulated)" : "");
     }
     const timeEl = document.getElementById("currentTime");
     if (timeEl) {

@@ -6,7 +6,7 @@
     const at = state.extracurricularCompletedAt && state.extracurricularCompletedAt[task.id];
     if (!at) return true;
     const completedDate = new Date(at);
-    return (Date.now() - completedDate.getTime()) > EXTRACURRICULAR_ARCHIVE_MS;
+    return (getSimulatedNow().getTime() - completedDate.getTime()) > EXTRACURRICULAR_ARCHIVE_MS;
   }
 
   function getActiveExtracurricularTasks() {
@@ -21,7 +21,7 @@
     state.extracurricularCompleted[taskId] = completed;
     if (completed) {
       if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
-      state.extracurricularCompletedAt[taskId] = new Date().toISOString();
+      state.extracurricularCompletedAt[taskId] = getSimulatedNow().toISOString();
     } else {
       if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
     }
@@ -169,7 +169,7 @@
     const mo = parseInt(m[2], 10) - 1;
     const d = parseInt(m[3], 10);
     const endOfDay = new Date(y, mo, d, 23, 59, 59);
-    const now = new Date();
+    const now = getSimulatedNow();
     const ms = endOfDay.getTime() - now.getTime();
     input.value = ms > 0 ? formatRemainingMs(ms) : "Not Available";
   }
@@ -181,7 +181,7 @@
     if (!input || !endInput) return;
     const remainingMs = parseTimeRemainingToMs(input.value.trim());
     if (remainingMs == null || remainingMs <= 0) return;
-    const now = new Date();
+    const now = getSimulatedNow();
     const endDate = new Date(now.getTime() + remainingMs);
     const endStr = getDateStr(endDate);
     endInput.value = endStr;

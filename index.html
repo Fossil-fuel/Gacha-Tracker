@@ -636,6 +636,14 @@
               <span class="settings-hint">Revert to state before the last simulation</span>
             </div>
             <div class="settings-row">
+              <button type="button" class="btn btn-ghost" id="settingsSkipDayBtn">Skip 1 day (simulate reset)</button>
+              <span class="settings-hint">Advance "today" by one day to simulate a reset</span>
+            </div>
+            <div class="settings-row" id="settingsUndoSkipDayRow" hidden>
+              <button type="button" class="btn btn-ghost" id="settingsUndoSkipDayBtn">Undo skip day</button>
+              <span class="settings-hint">Revert to state before the last skip</span>
+            </div>
+            <div class="settings-row">
               <button type="button" class="btn btn-ghost btn-danger-sm" id="settingsClearDataBtn">Clear all data</button>
               <span class="settings-hint">Reset to empty state (cannot be undone)</span>
             </div>

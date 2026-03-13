@@ -43,7 +43,7 @@
         const exViewMode = btn.dataset.extracurricularViewMode;
         if (view === "history") {
           state.attendanceView = "history";
-          const now = new Date();
+          const now = getSimulatedNow();
           if (state.historyMonth == null) state.historyMonth = now.getMonth();
           if (state.historyYear == null) state.historyYear = now.getFullYear();
         } else if (view === "timestamps") {

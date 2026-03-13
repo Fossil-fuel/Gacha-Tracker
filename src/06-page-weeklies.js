@@ -48,7 +48,7 @@
     remainingVal.dataset.type = "weekly";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
-    remainingVal.textContent = getWeeklyTimeRemainingText(task, new Date(), game);
+    remainingVal.textContent = getWeeklyTimeRemainingText(task, getSimulatedNow(), game);
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 

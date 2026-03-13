@@ -46,7 +46,7 @@
     remainingVal.className = "task-remaining";
     remainingVal.dataset.type = "daily";
     remainingVal.dataset.gameId = game.id;
-    remainingVal.textContent = getDailyTimeRemainingText(game, new Date());
+    remainingVal.textContent = getDailyTimeRemainingText(game, getSimulatedNow());
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 

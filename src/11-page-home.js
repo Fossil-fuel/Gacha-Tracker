@@ -4,7 +4,7 @@
     container.innerHTML = "";
     const games = getAllGames();
     const todayStr = getDateStr();
-    const now = new Date();
+    const now = getSimulatedNow();
     const dDone = games.filter((g) => g.dailies && (state.completionByDate[getDailyPeriodDateStr(g, now)] || {}).dailies?.includes(g.id)).length;
     const available = getTasksAvailableOnDate(todayStr);
     const dTotal = Math.max(1, games.filter((g) => g.dailies).length);
@@ -49,10 +49,12 @@
     section.appendChild(barsWrap);
     container.appendChild(section);
 
-    // DWE checklist: tasks due earliest to latest, same order as game list for ties
+    // DWE checklist: incomplete first (by due date), completed at end
     const checklistItems = [];
     games.forEach((game, gameIdx) => {
       if (game.dailies) {
+        const periodStr = getDailyPeriodDateStr(game, now);
+        const completed = (state.completionByDate[periodStr] || {}).dailies?.includes(game.id);
         checklistItems.push({
           type: "dailies",
           key: game.id,
@@ -61,7 +63,8 @@
           label: (game.name || game.id),
           dueMs: now.getTime() + getDailyTimeRemainingMs(game, now),
           gameOrder: gameIdx,
-          taskOrder: 0
+          taskOrder: 0,
+          completed
         });
       }
       (game.weeklies || []).forEach((task, taskIdx) => {
@@ -75,7 +78,8 @@
             label: (game.name || game.id) + " — " + (task.label || "Weekly"),
             dueMs: now.getTime() + getWeeklyTimeRemainingMs(task, now, game),
             gameOrder: gameIdx,
-            taskOrder: taskIdx
+            taskOrder: taskIdx,
+            completed: isWeeklyCompletedInCurrentCycle(key, todayStr)
           });
         }
       });
@@ -90,12 +94,14 @@
             label: (game.name || game.id) + " — " + (task.label || "Endgame"),
             dueMs: now.getTime() + getEndgameTimeRemainingMs(task, now, game),
             gameOrder: gameIdx,
-            taskOrder: taskIdx
+            taskOrder: taskIdx,
+            completed: isEndgameCompletedInCurrentCycle(key, todayStr)
           });
         }
       });
     });
     const sortItems = (a, b) => {
+      if (a.completed !== b.completed) return (a.completed ? 1 : 0) - (b.completed ? 1 : 0);
       if (a.dueMs !== b.dueMs) return a.dueMs - b.dueMs;
       if (a.gameOrder !== b.gameOrder) return a.gameOrder - b.gameOrder;
       return a.taskOrder - b.taskOrder;
@@ -111,7 +117,7 @@
       if (task.endDateTBD) return true;
       if (!task.endDate) return true;
       return todayStr <= task.endDate;
-    });
+    }).sort((a, b) => ((state.extracurricularCompleted[a.id] ? 1 : 0) - (state.extracurricularCompleted[b.id] ? 1 : 0)));
 
     function renderChecklistGrid(items, typeLabel, type) {
       const section = document.createElement("div");
@@ -207,7 +213,7 @@
     const infoIcon = document.createElement("span");
     infoIcon.className = "home-checklist-info-icon";
     infoIcon.setAttribute("aria-label", "Information");
-    infoIcon.title = "This checklist will show the tasks by earliest to latest \"due date,\" followed by order of the Games.";
+    infoIcon.title = "Tasks are ordered by due date (earliest first). Completed tasks move to the end of each list.";
     infoIcon.innerHTML = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4M12 8h.01\"/></svg>";
     checklistHeading.appendChild(infoIcon);
     checklistWrap.appendChild(checklistHeading);

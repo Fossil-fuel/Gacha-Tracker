@@ -86,6 +86,8 @@
     state.completionTimestamps = [];
     state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     state.lastSimulationSnapshot = null;
+    state.lastSkipDaySnapshot = null;
+    state.simulatedDateOffset = 0;
     state.attendancePieInclude = {};
     state.dataPieInclude = {};
     state.extracurricularTasks = [];
@@ -123,8 +125,8 @@
       const isCompleted = type === "dailies"
         ? dayData.dailies.includes(item.key)
         : type === "weeklies"
-          ? dayData.weeklies.includes(item.key)
-          : dayData.endgame.includes(item.key);
+          ? isWeeklyCompletedInCurrentCycle(item.key, dateStr)
+          : isEndgameCompletedInCurrentCycle(item.key, dateStr);
       const label = document.createElement("label");
       label.className = "calendar-day-modal-task calendar-day-modal-task-" + type;
       const check = document.createElement("input");
@@ -264,7 +266,11 @@
     if (!dateStr) return;
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
     checkboxes.forEach(({ check, type, key }) => {
-      const wasCompleted = (dayData[type] || []).includes(key);
+      const wasCompleted = type === "dailies"
+        ? (dayData.dailies || []).includes(key)
+        : type === "weeklies"
+          ? isWeeklyCompletedInCurrentCycle(key, dateStr)
+          : isEndgameCompletedInCurrentCycle(key, dateStr);
       const nowCompleted = check.checked;
       if (nowCompleted) recordCompletion(dateStr, type, key);
       else unrecordCompletion(dateStr, type, key);
@@ -272,10 +278,14 @@
         if (type === "dailies") {
           const amt = getCompletedAmount(state.dailiesCompleted, key);
           state.dailiesCompleted[key] = nowCompleted ? amt + 1 : Math.max(0, amt - 1);
+          const attempted = getAttemptedAmount(state.dailiesAttempted, key);
+          if (attempted < state.dailiesCompleted[key]) state.dailiesAttempted[key] = state.dailiesCompleted[key];
         } else if (type === "weeklies" || type === "endgame") {
           const completedObj = type === "weeklies" ? state.weekliesCompleted : state.endgameCompleted;
+          const attemptedObj = type === "weeklies" ? state.weekliesAttempted : state.endgameAttempted;
           const amt = getCompletedAmount(completedObj, key);
           completedObj[key] = nowCompleted ? amt + 1 : Math.max(0, amt - 1);
+          if (nowCompleted && getAttemptedAmount(attemptedObj, key) < completedObj[key]) attemptedObj[key] = completedObj[key];
           if (type === "endgame") {
             const dot = key.indexOf(".");
             const gameId = dot >= 0 ? key.slice(0, dot) : key;
@@ -349,7 +359,7 @@
       ? 7 * 24 * 60 * 60 * 1000
       : getIntervalMs(Math.max(1, Number(limEvery && limEvery.value) || 1), limitUnit);
     const elapsedMs = Math.max(0, periodMs - remainingMs);
-    const now = new Date();
+    const now = getSimulatedNow();
     const cycleStart = new Date(now.getTime() - elapsedMs);
     const tz = getRecordingTimezone();
     const parts = getDatePartsInTimezone(cycleStart, tz);
@@ -1343,6 +1353,8 @@
     if (confirmDeleteEl) confirmDeleteEl.checked = state.confirmBeforeDelete !== false;
     const undoRow = qs("settingsUndoSimulationRow");
     if (undoRow) undoRow.hidden = !state.lastSimulationSnapshot;
+    const undoSkipRow = qs("settingsUndoSkipDayRow");
+    if (undoSkipRow) undoSkipRow.hidden = !state.lastSkipDaySnapshot;
     const standardTab = document.querySelector('.settings-tab-btn[data-color-tab="standard"]');
     const customTab = document.querySelector('.settings-tab-btn[data-color-tab="custom"]');
     const standardPanel = qs("settings-color-standard");
@@ -1550,6 +1562,18 @@
     const undoBtn = qs("settingsUndoSimulationBtn");
     if (undoBtn) undoBtn.addEventListener("click", () => {
       undoSimulation();
+      closeSettingsModal();
+    });
+    const skipDayBtn = qs("settingsSkipDayBtn");
+    if (skipDayBtn) skipDayBtn.addEventListener("click", () => {
+      skipDayForward();
+      syncSettingsUI();
+      closeSettingsModal();
+    });
+    const undoSkipBtn = qs("settingsUndoSkipDayBtn");
+    if (undoSkipBtn) undoSkipBtn.addEventListener("click", () => {
+      undoSkipDay();
+      syncSettingsUI();
       closeSettingsModal();
     });
     const clearBtn = qs("settingsClearDataBtn");

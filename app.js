@@ -143,8 +143,8 @@
       currencyPerPull: 160,
       currencyName: "Stellar Jade",
       weeklies: [
-        { id: "divergent", label: "Divergent Universe", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 225, frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week" },
-        { id: "currency", label: "Currency Wars", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 225, frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week" },
+        { id: "divergent", label: "Divergent Universe", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-09", currency: 225, frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week" },
+        { id: "currency", label: "Currency Wars", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-02", currency: 225, frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week" },
       ],
       endgame: [
         { id: "apocalyptic", label: "Apocalyptic Shadow", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-02", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week" },
@@ -297,6 +297,8 @@
     confirmBeforeDelete: true,
     textSize: "medium", // "small" | "medium" | "large"
     lastSimulationSnapshot: null, // snapshot of state before runSimulation, for undo
+    simulatedDateOffset: 0, // days to add to "today" for skip-day simulation (not persisted)
+    lastSkipDaySnapshot: null, // snapshot before skip day, for undo
     defaultAdjustForDST: true, // when true, reset times follow DST; when false, use standard time only
   };
 
@@ -435,7 +437,7 @@
 
   /** Offset ref: use current date for correct DST. */
   function getOffsetRefDateForTask(obj, tz) {
-    return new Date();
+    return getSimulatedNow();
   }
 
   function getUtcOffsetString(tz, date) {
@@ -1008,8 +1010,17 @@
     return { hour, minute };
   }
 
+  /** Returns the effective "now" for the app. When simulating a skip, this is real now + offset days. */
+  function getSimulatedNow() {
+    const offset = (state.simulatedDateOffset || 0);
+    if (offset === 0) return new Date();
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return d;
+  }
+
   function getDateStr(d) {
-    const date = d || new Date();
+    const date = d || getSimulatedNow();
     const tz = getRecordingTimezone();
     const parts = getDatePartsInTimezone(date, tz);
     const m = String(parts.month + 1).padStart(2, "0");
@@ -1120,7 +1131,18 @@
     return totalMs > 0 ? totalMs : null;
   }
 
-  /** Same time logic as getWeeklyTimeRemainingMs: use weekStartHour/weekStartMinute, server timezone when game has server. */
+  /** Get interval and time limit for cycle-based tasks (weeklies, endgame). Uses frequency/timeLimit when set; defaults to 1 week. */
+  function getCycleParams(task) {
+    const freqUnit = task && task.frequencyUnit === "day" ? "day" : "week";
+    const freqEvery = Number.isFinite(task && task.frequencyEvery) ? task.frequencyEvery : 1;
+    const intervalMs = getIntervalMs(freqEvery, freqUnit);
+    const limitUnit = task && task.timeLimitUnit === "day" ? "day" : "week";
+    const hasExplicitLimit = task && (task.timeLimitEvery != null || task.timeLimitUnit != null);
+    const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : intervalMs;
+    return { intervalMs, timeLimitMs };
+  }
+
+  /** Cycle anchor from dateStarted (preserved). Uses weekStartDay/Hour/Minute for alignment. */
   function getEndgameAnchorDate(task, game) {
     const ds = isValidDateStr(task && task.dateStarted) ? task.dateStarted : getDateStr();
     const weekStartHour = getResetHour(task, "weekStartHour", getResetHour(task, "resetHour", 4), game);
@@ -1233,20 +1255,17 @@
 
   function getWeeklyTimeRemainingMs(task, now, game) {
     const n = now || new Date();
-    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
-    const tz = getTimezoneForTaskDst(task, baseTz);
-    const parts = getDatePartsInTimezone(n, tz);
-    const weekStartDay = Number.isFinite(task && task.weekStartDay) ? task.weekStartDay : 0;
-    const weekStartHour = getResetHour(task, "weekStartHour", getDefaultResetHour(), game, n);
-    const weekStartMinute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : 0;
-    const offsetRef = getOffsetRefDateForTask(task, tz);
-    const resetMoment = createDateInTimezone(parts.year, parts.month, parts.day, weekStartHour, weekStartMinute, tz, offsetRef);
-    const dayOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday);
-    const daysBack = (dayOfWeek - weekStartDay + 7) % 7;
-    const weekStart = new Date(resetMoment.getTime() - daysBack * 24 * 60 * 60 * 1000);
-    if (n < weekStart) weekStart.setTime(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-    return weekEnd.getTime() - n.getTime();
+    const anchor = getEndgameAnchorDate(task, game);
+    const { intervalMs, timeLimitMs } = getCycleParams(task);
+    const anchorMs = anchor.getTime();
+    const nowMs = n.getTime();
+    let cycleStartMs = anchorMs;
+    if (nowMs > anchorMs) {
+      const k = Math.floor((nowMs - anchorMs) / intervalMs);
+      cycleStartMs = anchorMs + k * intervalMs;
+    }
+    const deadlineMs = cycleStartMs + timeLimitMs;
+    return deadlineMs - nowMs;
   }
 
   function getWeeklyTimeRemainingText(task, now, game) {
@@ -1254,7 +1273,7 @@
   }
 
   function getWeekDates() {
-    const now = new Date();
+    const now = getSimulatedNow();
     const tz = getRecordingTimezone();
     const parts = getDatePartsInTimezone(now, tz);
     const dayOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday);
@@ -1283,9 +1302,11 @@
     if (type === "weeklies") {
       const task = (game.weeklies || []).find((t) => (t.id || t.label) === taskId);
       if (!task) return [dateStr];
-      const weekStart = getWeekStartForDate(task, dateStr, game);
-      const lastDayOfWeek = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6);
-      for (let day = new Date(d.getFullYear(), d.getMonth(), d.getDate()); day.getTime() <= lastDayOfWeek.getTime(); day.setDate(day.getDate() + 1)) {
+      const cycleStart = getCycleStartForDate(task, dateStr, game);
+      const { timeLimitMs } = getCycleParams(task);
+      const cycleDays = Math.ceil(timeLimitMs / (24 * 60 * 60 * 1000));
+      const lastDayOfCycle = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate() + cycleDays - 1);
+      for (let day = new Date(d.getFullYear(), d.getMonth(), d.getDate()); day.getTime() <= lastDayOfCycle.getTime(); day.setDate(day.getDate() + 1)) {
         dates.push(getDateStr(day));
       }
     } else if (type === "endgame") {
@@ -1319,9 +1340,11 @@
     if (type === "weeklies") {
       const task = (game.weeklies || []).find((t) => (t.id || t.label) === taskId);
       if (!task) return [dateStr];
-      const weekStart = getWeekStartForDate(task, dateStr, game);
-      const lastDayOfWeek = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6);
-      for (let day = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate()); day.getTime() <= lastDayOfWeek.getTime(); day.setDate(day.getDate() + 1)) {
+      const cycleStart = getCycleStartForDate(task, dateStr, game);
+      const { timeLimitMs } = getCycleParams(task);
+      const cycleDays = Math.ceil(timeLimitMs / (24 * 60 * 60 * 1000));
+      const lastDayOfCycle = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate() + cycleDays - 1);
+      for (let day = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate()); day.getTime() <= lastDayOfCycle.getTime(); day.setDate(day.getDate() + 1)) {
         dates.push(getDateStr(day));
       }
     } else if (type === "endgame") {
@@ -1349,12 +1372,33 @@
       const arr = state.completionByDate[ds][type];
       if (!arr.includes(key)) arr.push(key);
     });
+    if (type === "endgame") {
+      const dot = key.indexOf(".");
+      const gameId = dot >= 0 ? key.slice(0, dot) : key;
+      const taskId = dot >= 0 ? key.slice(dot + 1) : "";
+      const game = getGame(gameId);
+      const task = (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
+      if (game && task) {
+        const index = getCompletedAmount(state.endgameCompleted, key) - 1;
+        if (index >= 0) {
+          const stored = (state.endgameCompletionDates[key] || [])[index];
+          if (!stored || !stored.start || !stored.end) {
+            const cycleStart = getCycleStartForDate(task, dateStr, game);
+            const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
+            const hasExplicitLimit = task.timeLimitEvery != null || task.timeLimitUnit != null;
+            const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
+            const cycleEnd = new Date(cycleStart.getTime() + timeLimitMs);
+            setEndgameCompletionDate(gameId, taskId, index, getDateStr(cycleStart), getDateStr(cycleEnd));
+          }
+        }
+      }
+    }
     if (!skipTimestamp) recordCompletionTimestamp(type, key);
   }
 
   function recordCompletionTimestamp(type, key) {
     if (!state.completionTimestamps) state.completionTimestamps = [];
-    const now = new Date();
+    const now = getSimulatedNow();
     const tz = getAppTimezone ? getAppTimezone() : Intl.DateTimeFormat().resolvedOptions().timeZone;
     const parts = getDatePartsInTimezone ? getDatePartsInTimezone(now, tz) : { year: now.getFullYear(), month: now.getMonth(), day: now.getDate(), weekday: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][now.getDay()], hour: now.getHours(), minute: now.getMinutes() };
     const dateStr = String(parts.year) + "-" + String(parts.month + 1).padStart(2, "0") + "-" + String(parts.day).padStart(2, "0");
@@ -1402,7 +1446,7 @@
   }
 
   function freezeTalliesOnTimezoneChange() {
-    const now = new Date();
+    const now = getSimulatedNow();
     const todayStr = getDateStr();
     getAllGames().forEach((game) => {
       if (game.dailies) {
@@ -1410,9 +1454,12 @@
       }
       (game.weeklies || []).forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const nextReset = new Date(now.getTime() + getWeeklyTimeRemainingMs(task, now, game));
+        const remainingMs = getWeeklyTimeRemainingMs(task, now, game);
+        const { intervalMs, timeLimitMs } = getCycleParams(task);
+        const cycleEndMs = now.getTime() + remainingMs;
+        const nextCycleStartMs = cycleEndMs - timeLimitMs + intervalMs;
         if (!state.lastProcessedResets.weeklies) state.lastProcessedResets.weeklies = {};
-        state.lastProcessedResets.weeklies[key] = getDateStr(new Date(nextReset.getTime() + 24 * 60 * 60 * 1000));
+        state.lastProcessedResets.weeklies[key] = nextCycleStartMs;
       });
       (game.endgame || []).forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
@@ -1427,7 +1474,7 @@
   }
 
   function processResets() {
-    const now = new Date();
+    const now = getSimulatedNow();
     const todayStr = getDateStr();
     let didChange = false;
 
@@ -1436,7 +1483,15 @@
         const gameId = game.id;
         const hour = getResetHour(game, "resetHour", getDefaultResetHour(), game, now);
         const minute = Number.isFinite(game.resetMinute) ? game.resetMinute : 0;
-        let lastStr = state.lastProcessedResets.dailies[gameId] || todayStr;
+        let lastStr = state.lastProcessedResets.dailies[gameId];
+        if (!lastStr) {
+          let earliestStr = null;
+          Object.keys(state.completionByDate || {}).forEach((dateStr) => {
+            const dayData = state.completionByDate[dateStr] || { dailies: [] };
+            if ((dayData.dailies || []).includes(gameId) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
+          });
+          lastStr = earliestStr ? (() => { const d = new Date(earliestStr + "T12:00:00"); d.setDate(d.getDate() - 1); return getDateStr(d); })() : todayStr;
+        }
         let d = new Date(lastStr + "T12:00:00");
         d.setDate(d.getDate() + 1);
         let lastProcessed = lastStr;
@@ -1459,53 +1514,50 @@
 
       (game.weeklies || []).forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const weekStartDay = Number.isFinite(task.weekStartDay) ? task.weekStartDay : 0;
-        const weekStartHour = getResetHour(task, "weekStartHour", 4, game, now);
-        const weekStartMinute = Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0;
-        let lastStr = state.lastProcessedResets.weeklies[key] || todayStr;
-        const last = new Date(lastStr + "T12:00:00");
-        const weekStart = new Date(last.getFullYear(), last.getMonth(), last.getDate(), weekStartHour, weekStartMinute, 0, 0);
-        const daysBack = (last.getDay() - weekStartDay + 7) % 7;
-        weekStart.setDate(weekStart.getDate() - daysBack);
-        if (last < weekStart) weekStart.setDate(weekStart.getDate() - 7);
-        let iter = new Date(weekStart);
-        const nowWeekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), weekStartHour, weekStartMinute, 0, 0);
-        const nowDaysBack = (now.getDay() - weekStartDay + 7) % 7;
-        nowWeekEnd.setDate(nowWeekEnd.getDate() - nowDaysBack);
-        if (now < nowWeekEnd) nowWeekEnd.setDate(nowWeekEnd.getDate() - 7);
-        const thisWeekEnd = new Date(nowWeekEnd.getTime() + 7 * 24 * 60 * 60 * 1000);
-        let lastProcessed = lastStr;
-        while (iter < nowWeekEnd) {
-          const weekEnd = new Date(iter.getTime() + 7 * 24 * 60 * 60 * 1000);
-          if (now >= weekEnd) {
-            didChange = true;
-            state.weekliesAttempted[key] = getAttemptedAmount(state.weekliesAttempted, key) + 1;
-            let completed = false;
-            for (let i = 0; i < 7; i++) {
-              const checkDate = new Date(iter);
-              checkDate.setDate(checkDate.getDate() + i);
-              const dateStr = getDateStr(checkDate);
-              const dayData = state.completionByDate[dateStr] || { weeklies: [] };
-              if ((dayData.weeklies || []).includes(key)) { completed = true; break; }
-            }
-            if (completed) state.weekliesCompleted[key] = getCompletedAmount(state.weekliesCompleted, key) + 1;
-            iter.setDate(iter.getDate() + 7);
-            lastProcessed = getDateStr(iter);
+        const anchor = getEndgameAnchorDate(task, game);
+        const { intervalMs, timeLimitMs } = getCycleParams(task);
+        let lastMs = state.lastProcessedResets.weeklies[key];
+        let cycleStartMs;
+        if (!lastMs || typeof lastMs !== "number") {
+          let earliestStr = null;
+          Object.keys(state.completionByDate || {}).forEach((dateStr) => {
+            const dayData = state.completionByDate[dateStr] || { weeklies: [] };
+            if ((dayData.weeklies || []).includes(key) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
+          });
+          if (earliestStr) {
+            cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
           } else {
-            break;
+            const cycleEnd = getCycleStartForDate(task, todayStr, game).getTime() + timeLimitMs;
+            cycleStartMs = cycleEnd - timeLimitMs + intervalMs;
           }
+        } else {
+          cycleStartMs = lastMs;
         }
-        state.lastProcessedResets.weeklies[key] = lastProcessed;
+        const nowMs = now.getTime();
+        while (cycleStartMs + timeLimitMs <= nowMs) {
+          const cycleEndMs = cycleStartMs + timeLimitMs;
+          didChange = true;
+          state.weekliesAttempted[key] = getAttemptedAmount(state.weekliesAttempted, key) + 1;
+          const cycleStart = new Date(cycleStartMs);
+          const cycleEnd = new Date(cycleEndMs);
+          let completed = false;
+          for (let d = new Date(cycleStart); d < cycleEnd; d.setDate(d.getDate() + 1)) {
+            const dateStr = getDateStr(d);
+            const dayData = state.completionByDate[dateStr] || { weeklies: [] };
+            if ((dayData.weeklies || []).includes(key)) { completed = true; break; }
+          }
+          if (completed) state.weekliesCompleted[key] = getCompletedAmount(state.weekliesCompleted, key) + 1;
+          cycleStartMs += intervalMs;
+        }
+        state.lastProcessedResets.weeklies[key] = cycleStartMs;
       });
 
       (game.endgame || []).forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
         const anchor = getEndgameAnchorDate(task, game);
-        const intervalMs = getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
-        const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
-        const hasExplicitLimit = task.timeLimitEvery != null || task.timeLimitUnit != null;
-        const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : intervalMs;
+        const { intervalMs, timeLimitMs } = getCycleParams(task);
         let lastMs = state.lastProcessedResets.endgame[key];
+        let cycleStartMs;
         if (!lastMs) {
           let earliestStr = null;
           Object.keys(state.completionByDate || {}).forEach((dateStr) => {
@@ -1513,18 +1565,20 @@
             if ((dayData.endgame || []).includes(key) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
           });
           if (earliestStr) {
-            lastMs = getCycleStartForDate(task, earliestStr, game).getTime();
+            cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
           } else {
-            lastMs = getCycleStartForDate(task, todayStr, game).getTime() + timeLimitMs;
+            const cycleEnd = getCycleStartForDate(task, todayStr, game).getTime() + timeLimitMs;
+            cycleStartMs = cycleEnd - timeLimitMs + intervalMs;
           }
+        } else {
+          cycleStartMs = lastMs;
         }
         const nowMs = now.getTime();
-        let cycleEndMs = lastMs;
-        while (cycleEndMs + timeLimitMs <= nowMs) {
-          cycleEndMs += timeLimitMs;
+        while (cycleStartMs + timeLimitMs <= nowMs) {
+          const cycleEndMs = cycleStartMs + timeLimitMs;
           didChange = true;
           state.endgameAttempted[key] = getAttemptedAmount(state.endgameAttempted, key) + 1;
-          const cycleStart = new Date(cycleEndMs - timeLimitMs);
+          const cycleStart = new Date(cycleStartMs);
           const cycleEnd = new Date(cycleEndMs);
           let completed = false;
           for (let d = new Date(cycleStart); d < cycleEnd; d.setDate(d.getDate() + 1)) {
@@ -1533,9 +1587,10 @@
             if ((dayData.endgame || []).includes(key)) { completed = true; break; }
           }
           if (completed) state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
+          cycleStartMs += intervalMs;
         }
         ensureEndgameEarnedArrayLength(game.id, task.id || task.label, getCompletedAmount(state.endgameCompleted, key));
-        state.lastProcessedResets.endgame[key] = cycleEndMs;
+        state.lastProcessedResets.endgame[key] = cycleStartMs;
       });
     });
 
@@ -1545,9 +1600,15 @@
 
   function isWeeklyAvailableOnDate(task, date, game) {
     const d = new Date(date);
-    const weekStart = getWeekStartForDate(task, getDateStr(d), game);
-    const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
-    return d.getTime() >= weekStart.getTime() && d.getTime() < weekEnd.getTime();
+    const anchor = getEndgameAnchorDate(task, game);
+    const { intervalMs, timeLimitMs } = getCycleParams(task);
+    const anchorMs = anchor.getTime();
+    const dateMs = d.getTime();
+    if (dateMs < anchorMs) return false;
+    const k = Math.floor((dateMs - anchorMs) / intervalMs);
+    const cycleStartMs = anchorMs + k * intervalMs;
+    const cycleEndMs = cycleStartMs + timeLimitMs;
+    return dateMs >= cycleStartMs && dateMs < cycleEndMs;
   }
 
   function isEndgameAvailableOnDate(task, date, game) {
@@ -1609,17 +1670,17 @@
     const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
     const d = isValidDateStr(todayStr) ? new Date(todayStr + "T12:00:00") : new Date();
-    const weekStartDay = Number.isFinite(task.weekStartDay) ? task.weekStartDay : 0;
-    const weekStartHour = getResetHour(task, "weekStartHour", 4, game);
-    const weekStartMinute = Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0;
-    const resetMoment = new Date(d.getFullYear(), d.getMonth(), d.getDate(), weekStartHour, weekStartMinute, 0, 0);
-    const daysBack = (d.getDay() - weekStartDay + 7) % 7;
-    const weekStart = new Date(resetMoment);
-    weekStart.setDate(weekStart.getDate() - daysBack);
-    if (d < weekStart) weekStart.setDate(weekStart.getDate() - 7);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 7);
-    for (let day = new Date(weekStart); day < weekEnd; day.setDate(day.getDate() + 1)) {
+    const anchor = getEndgameAnchorDate(task, game);
+    const { intervalMs, timeLimitMs } = getCycleParams(task);
+    const anchorMs = anchor.getTime();
+    const dateMs = d.getTime();
+    if (dateMs < anchorMs) return null;
+    const k = Math.floor((dateMs - anchorMs) / intervalMs);
+    const cycleStartMs = anchorMs + k * intervalMs;
+    const cycleEndMs = cycleStartMs + timeLimitMs;
+    const cycleStart = new Date(cycleStartMs);
+    const cycleEnd = new Date(cycleEndMs);
+    for (let day = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate()); day < cycleEnd; day.setDate(day.getDate() + 1)) {
       const dateStr = getDateStr(day);
       const dayData = state.completionByDate[dateStr] || { weeklies: [] };
       if ((dayData.weeklies || []).includes(key)) return dateStr;
@@ -1668,10 +1729,14 @@
     else unrecordCompletion(dateStr, type, key);
     const todayStr = getDateStr();
     if (dateStr === todayStr) {
-      if (type === "dailies") state.dailiesCompleted[key] = checked ? 1 : 0;
-      else if (type === "weeklies" || type === "endgame") {
-        const obj = type === "weeklies" ? state.weekliesCompleted : state.endgameCompleted;
-        obj[key] = checked ? 1 : 0;
+      if (type === "dailies") {
+        state.dailiesCompleted[key] = checked ? 1 : 0;
+        if (checked) state.dailiesAttempted[key] = Math.max(1, getAttemptedAmount(state.dailiesAttempted, key));
+      } else if (type === "weeklies" || type === "endgame") {
+        const completedObj = type === "weeklies" ? state.weekliesCompleted : state.endgameCompleted;
+        const attemptedObj = type === "weeklies" ? state.weekliesAttempted : state.endgameAttempted;
+        completedObj[key] = checked ? 1 : 0;
+        if (checked) attemptedObj[key] = Math.max(1, getAttemptedAmount(attemptedObj, key));
       }
     }
     save();
@@ -1708,11 +1773,11 @@
     return weekStart;
   }
 
-  /** Get cycle start for an endgame task given a date. Allows cycles before anchor (for tally). */
+  /** Get cycle start for a cycle-based task (weekly, endgame) given a date. Uses dateStarted anchor. */
   function getCycleStartForDate(task, dateStr, game) {
     const d = isValidDateStr(dateStr) ? new Date(dateStr + "T12:00:00") : new Date();
     const anchor = getEndgameAnchorDate(task, game);
-    const intervalMs = getIntervalMs(task && task.frequencyEvery, (task && task.frequencyUnit === "day") ? "day" : "week");
+    const { intervalMs } = getCycleParams(task);
     const anchorMs = anchor.getTime();
     const dateMs = d.getTime();
     const k = Math.floor((dateMs - anchorMs) / intervalMs);
@@ -1726,7 +1791,7 @@
    * Toggling multiple times within a period = 1 complete (not multiple). Attempts come from create/reset only.
    */
   function getTaskTallyHistory(game, type, key) {
-    const now = new Date();
+    const now = getSimulatedNow();
     const todayStr = getDateStr();
     const result = [];
 
@@ -1756,27 +1821,26 @@
     } else if (type === "weeklies") {
       const task = (game.weeklies || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
       if (!task) return result;
-      let earliestWeekStart = null;
+      const { intervalMs, timeLimitMs } = getCycleParams(task);
+      let earliestStr = null;
       Object.keys(state.completionByDate || {}).forEach((dateStr) => {
         const dayData = state.completionByDate[dateStr] || { weeklies: [] };
-        if ((dayData.weeklies || []).includes(key)) {
-          const ws = getWeekStartForDate(task, dateStr, game);
-          if (!earliestWeekStart || ws < earliestWeekStart) earliestWeekStart = new Date(ws);
-        }
+        if ((dayData.weeklies || []).includes(key) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
       });
-      if (!earliestWeekStart) return result;
-      let iter = new Date(earliestWeekStart);
-      const nowWeekStart = getWeekStartForDate(task, todayStr, game);
-      while (iter <= nowWeekStart) {
-        const weekEnd = new Date(iter.getTime() + 7 * 24 * 60 * 60 * 1000);
+      if (!earliestStr) return result;
+      let cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
+      const nowMs = now.getTime();
+      while (cycleStartMs <= nowMs) {
+        const cycleStart = new Date(cycleStartMs);
+        const cycleEnd = new Date(cycleStartMs + timeLimitMs);
         let completed = 0;
-        for (let day = new Date(iter); day < weekEnd; day.setDate(day.getDate() + 1)) {
+        for (let day = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate()); day < cycleEnd; day.setDate(day.getDate() + 1)) {
           const dateStr = getDateStr(day);
           const dayData = state.completionByDate[dateStr] || { weeklies: [] };
           if ((dayData.weeklies || []).includes(key)) { completed = 1; break; }
         }
-        result.push({ periodStart: new Date(iter), periodEnd: weekEnd, completed });
-        iter.setDate(iter.getDate() + 7);
+        result.push({ periodStart: cycleStart, periodEnd: cycleEnd, completed });
+        cycleStartMs += intervalMs;
       }
     } else if (type === "endgame") {
       const task = (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
@@ -1829,8 +1893,9 @@
       state.weekliesAttempted[key] = attempted;
       const task = (game.weeklies || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
       if (task) {
+        const { intervalMs } = getCycleParams(task);
         const last = history.length > 0 ? history[history.length - 1] : null;
-        state.lastProcessedResets.weeklies[key] = last ? getDateStr(last.periodStart) : getDateStr(getWeekStartForDate(task, todayStr, game));
+        state.lastProcessedResets.weeklies[key] = last ? last.periodStart.getTime() + intervalMs : getCycleStartForDate(task, todayStr, game).getTime() + intervalMs;
       }
     } else if (type === "endgame") {
       state.endgameCompleted[key] = completed;
@@ -1840,7 +1905,8 @@
         ensureEndgameEarnedArrayLength(game.id, task.id || task.label, completed);
         const last = history.length > 0 ? history[history.length - 1] : null;
         if (last) {
-          state.lastProcessedResets.endgame[key] = last.periodEnd.getTime();
+          const intervalMs = getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
+          state.lastProcessedResets.endgame[key] = last.periodStart.getTime() + intervalMs;
         } else {
           const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
           const hasExplicitLimit = task.timeLimitEvery != null || task.timeLimitUnit != null;
@@ -1970,6 +2036,53 @@
   }
 
   /**
+   * Skip 1 day forward: simulate that "today" is tomorrow. Runs processResets to apply any resets.
+   * Saves a snapshot for undo.
+   */
+  function skipDayForward() {
+    state.lastSkipDaySnapshot = JSON.parse(JSON.stringify({
+      completionByDate: state.completionByDate,
+      completionTimestamps: state.completionTimestamps,
+      dailiesCompleted: state.dailiesCompleted,
+      weekliesCompleted: state.weekliesCompleted,
+      endgameCompleted: state.endgameCompleted,
+      dailiesAttempted: state.dailiesAttempted,
+      weekliesAttempted: state.weekliesAttempted,
+      endgameAttempted: state.endgameAttempted,
+      lastProcessedResets: state.lastProcessedResets,
+      endgameCurrencyEarned: state.endgameCurrencyEarned,
+      endgameCompletionDates: state.endgameCompletionDates,
+    }));
+    state.simulatedDateOffset = (state.simulatedDateOffset || 0) + 1;
+    processResets();
+    save();
+    renderAll();
+  }
+
+  /**
+   * Undo the last skip day: restore state from the saved snapshot.
+   */
+  function undoSkipDay() {
+    const snap = state.lastSkipDaySnapshot;
+    if (!snap) return;
+    state.completionByDate = snap.completionByDate || {};
+    state.completionTimestamps = snap.completionTimestamps || [];
+    state.dailiesCompleted = snap.dailiesCompleted || {};
+    state.weekliesCompleted = snap.weekliesCompleted || {};
+    state.endgameCompleted = snap.endgameCompleted || {};
+    state.dailiesAttempted = snap.dailiesAttempted || {};
+    state.weekliesAttempted = snap.weekliesAttempted || {};
+    state.endgameAttempted = snap.endgameAttempted || {};
+    state.lastProcessedResets = snap.lastProcessedResets || { dailies: {}, weeklies: {}, endgame: {} };
+    state.endgameCurrencyEarned = snap.endgameCurrencyEarned || {};
+    state.endgameCompletionDates = snap.endgameCompletionDates || {};
+    state.simulatedDateOffset = 0;
+    state.lastSkipDaySnapshot = null;
+    save();
+    renderAll();
+  }
+
+  /**
    * Undo the last simulation: restore state from the saved snapshot.
    */
   function undoSimulation() {
@@ -2083,6 +2196,8 @@
     state.completionTimestamps = [];
     state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     state.lastSimulationSnapshot = null;
+    state.lastSkipDaySnapshot = null;
+    state.simulatedDateOffset = 0;
     state.attendancePieInclude = {};
     state.dataPieInclude = {};
     state.extracurricularTasks = [];
@@ -2120,8 +2235,8 @@
       const isCompleted = type === "dailies"
         ? dayData.dailies.includes(item.key)
         : type === "weeklies"
-          ? dayData.weeklies.includes(item.key)
-          : dayData.endgame.includes(item.key);
+          ? isWeeklyCompletedInCurrentCycle(item.key, dateStr)
+          : isEndgameCompletedInCurrentCycle(item.key, dateStr);
       const label = document.createElement("label");
       label.className = "calendar-day-modal-task calendar-day-modal-task-" + type;
       const check = document.createElement("input");
@@ -2261,7 +2376,11 @@
     if (!dateStr) return;
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
     checkboxes.forEach(({ check, type, key }) => {
-      const wasCompleted = (dayData[type] || []).includes(key);
+      const wasCompleted = type === "dailies"
+        ? (dayData.dailies || []).includes(key)
+        : type === "weeklies"
+          ? isWeeklyCompletedInCurrentCycle(key, dateStr)
+          : isEndgameCompletedInCurrentCycle(key, dateStr);
       const nowCompleted = check.checked;
       if (nowCompleted) recordCompletion(dateStr, type, key);
       else unrecordCompletion(dateStr, type, key);
@@ -2269,10 +2388,14 @@
         if (type === "dailies") {
           const amt = getCompletedAmount(state.dailiesCompleted, key);
           state.dailiesCompleted[key] = nowCompleted ? amt + 1 : Math.max(0, amt - 1);
+          const attempted = getAttemptedAmount(state.dailiesAttempted, key);
+          if (attempted < state.dailiesCompleted[key]) state.dailiesAttempted[key] = state.dailiesCompleted[key];
         } else if (type === "weeklies" || type === "endgame") {
           const completedObj = type === "weeklies" ? state.weekliesCompleted : state.endgameCompleted;
+          const attemptedObj = type === "weeklies" ? state.weekliesAttempted : state.endgameAttempted;
           const amt = getCompletedAmount(completedObj, key);
           completedObj[key] = nowCompleted ? amt + 1 : Math.max(0, amt - 1);
+          if (nowCompleted && getAttemptedAmount(attemptedObj, key) < completedObj[key]) attemptedObj[key] = completedObj[key];
           if (type === "endgame") {
             const dot = key.indexOf(".");
             const gameId = dot >= 0 ? key.slice(0, dot) : key;
@@ -2346,7 +2469,7 @@
       ? 7 * 24 * 60 * 60 * 1000
       : getIntervalMs(Math.max(1, Number(limEvery && limEvery.value) || 1), limitUnit);
     const elapsedMs = Math.max(0, periodMs - remainingMs);
-    const now = new Date();
+    const now = getSimulatedNow();
     const cycleStart = new Date(now.getTime() - elapsedMs);
     const tz = getRecordingTimezone();
     const parts = getDatePartsInTimezone(cycleStart, tz);
@@ -3340,6 +3463,8 @@
     if (confirmDeleteEl) confirmDeleteEl.checked = state.confirmBeforeDelete !== false;
     const undoRow = qs("settingsUndoSimulationRow");
     if (undoRow) undoRow.hidden = !state.lastSimulationSnapshot;
+    const undoSkipRow = qs("settingsUndoSkipDayRow");
+    if (undoSkipRow) undoSkipRow.hidden = !state.lastSkipDaySnapshot;
     const standardTab = document.querySelector('.settings-tab-btn[data-color-tab="standard"]');
     const customTab = document.querySelector('.settings-tab-btn[data-color-tab="custom"]');
     const standardPanel = qs("settings-color-standard");
@@ -3549,6 +3674,18 @@
       undoSimulation();
       closeSettingsModal();
     });
+    const skipDayBtn = qs("settingsSkipDayBtn");
+    if (skipDayBtn) skipDayBtn.addEventListener("click", () => {
+      skipDayForward();
+      syncSettingsUI();
+      closeSettingsModal();
+    });
+    const undoSkipBtn = qs("settingsUndoSkipDayBtn");
+    if (undoSkipBtn) undoSkipBtn.addEventListener("click", () => {
+      undoSkipDay();
+      syncSettingsUI();
+      closeSettingsModal();
+    });
     const clearBtn = qs("settingsClearDataBtn");
     if (clearBtn) clearBtn.addEventListener("click", () => {
       if (state.confirmBeforeDelete === false) {
@@ -3743,8 +3880,18 @@
   function addGame(name, opts) {
     const o = opts || {};
     const id = "g_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-    const weeklies = Array.isArray(o.weeklies) ? o.weeklies.map((t) => ({ ...t })) : [];
-    const endgame = Array.isArray(o.endgame) ? o.endgame.map((t) => ({ ...t })) : [];
+    const weeklies = Array.isArray(o.weeklies) ? o.weeklies.map((t) => ({
+      ...t,
+      dateStarted: isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr(),
+      frequencyEvery: Number.isFinite(t.frequencyEvery) ? t.frequencyEvery : 1,
+      frequencyUnit: t.frequencyUnit || "week",
+      timeLimitEvery: t.timeLimitEvery != null ? t.timeLimitEvery : 1,
+      timeLimitUnit: t.timeLimitUnit || "week",
+    })) : [];
+    const endgame = Array.isArray(o.endgame) ? o.endgame.map((t) => ({
+      ...t,
+      dateStarted: isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr(),
+    })) : [];
     state.games.push({
       id,
       name: name || "New game",
@@ -3760,22 +3907,23 @@
     });
     const game = getGame(id);
     if (game && o.presetId && (weeklies.length || endgame.length)) {
-      const now = new Date();
+      const now = getSimulatedNow();
       const todayStr = getDateStr();
       (game.weeklies || []).forEach((task) => {
         const key = id + "." + (task.id || task.label);
-        const nextReset = new Date(now.getTime() + getWeeklyTimeRemainingMs(task, now, game));
+        const remainingMs = getWeeklyTimeRemainingMs(task, now, game);
+        const { intervalMs, timeLimitMs } = getCycleParams(task);
+        const cycleEndMs = now.getTime() + remainingMs;
+        const nextCycleStartMs = cycleEndMs - timeLimitMs + intervalMs;
         state.lastProcessedResets.weeklies = state.lastProcessedResets.weeklies || {};
-        state.lastProcessedResets.weeklies[key] = getDateStr(new Date(nextReset.getTime() + 24 * 60 * 60 * 1000));
+        state.lastProcessedResets.weeklies[key] = nextCycleStartMs;
       });
       (game.endgame || []).forEach((task) => {
         const key = id + "." + (task.id || task.label);
         const cycleStart = getCycleStartForDate(task, todayStr, game);
-        const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
-        const hasExplicitLimit = task.timeLimitEvery != null || task.timeLimitUnit != null;
-        const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
+        const { intervalMs } = getCycleParams(task);
         state.lastProcessedResets.endgame = state.lastProcessedResets.endgame || {};
-        state.lastProcessedResets.endgame[key] = cycleStart.getTime() + timeLimitMs;
+        state.lastProcessedResets.endgame[key] = cycleStart.getTime() + intervalMs;
       });
     }
     if (o.presetId && Array.isArray(o.extracurricular) && o.extracurricular.length > 0) {
@@ -3900,7 +4048,7 @@
 
   function isCompletedToday(type, key) {
     const dateStr = type === "dailies"
-      ? (() => { const g = getGame(key); return g ? getDailyPeriodDateStr(g, new Date()) : getDateStr(); })()
+      ? (() => { const g = getGame(key); return g ? getDailyPeriodDateStr(g, getSimulatedNow()) : getDateStr(); })()
       : getDateStr();
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
     return (dayData[type] || []).includes(key);
@@ -3908,12 +4056,14 @@
 
   function toggleDaily(gameId) {
     const game = getGame(gameId);
-    const dateStr = game ? getDailyPeriodDateStr(game, new Date()) : getDateStr();
+    const dateStr = game ? getDailyPeriodDateStr(game, getSimulatedNow()) : getDateStr();
     const amt = getCompletedAmount(state.dailiesCompleted, gameId);
     const isMarkingComplete = !isCompletedToday("dailies", gameId);
     if (isMarkingComplete) {
       state.dailiesCompleted[gameId] = amt + 1;
       recordCompletion(dateStr, "dailies", gameId);
+      const attempted = getAttemptedAmount(state.dailiesAttempted, gameId);
+      if (attempted < state.dailiesCompleted[gameId]) state.dailiesAttempted[gameId] = state.dailiesCompleted[gameId];
     } else {
       state.dailiesCompleted[gameId] = Math.max(0, amt - 1);
       unrecordCompletion(dateStr, "dailies", gameId);
@@ -3931,6 +4081,8 @@
     if (isMarkingComplete) {
       state.weekliesCompleted[key] = amt + 1;
       recordCompletion(dateStr, "weeklies", key);
+      const attempted = getAttemptedAmount(state.weekliesAttempted, key);
+      if (attempted < state.weekliesCompleted[key]) state.weekliesAttempted[key] = state.weekliesCompleted[key];
     } else {
       const completedDateStr = getWeeklyCompletionDateInCurrentCycle(key, dateStr);
       if (completedDateStr) unrecordCompletion(completedDateStr, "weeklies", key);
@@ -3950,6 +4102,8 @@
       state.endgameCompleted[key] = amt + 1;
       recordCompletion(dateStr, "endgame", key);
       ensureEndgameEarnedArrayLength(gameId, taskId, amt + 1);
+      const attempted = getAttemptedAmount(state.endgameAttempted, key);
+      if (attempted < state.endgameCompleted[key]) state.endgameAttempted[key] = state.endgameCompleted[key];
     } else {
       const completedDateStr = getEndgameCompletionDateInCurrentCycle(key, dateStr);
       if (completedDateStr) unrecordCompletion(completedDateStr, "endgame", key);
@@ -4073,7 +4227,7 @@
 
   function getSidebarResetHour() {
     const server = state.primaryServer && ["america", "asia", "europe"].includes(state.primaryServer) ? state.primaryServer : "america";
-    return getEffectiveResetHour ? getEffectiveResetHour(server, new Date()) : getDefaultResetHour();
+    return getEffectiveResetHour ? getEffectiveResetHour(server, getSimulatedNow()) : getDefaultResetHour();
   }
 
   function getSidebarResetMinute() {
@@ -4106,12 +4260,12 @@
     const hour = server === "asia" ? 4 : 3;
     const minute = 0;
     const tz = baseTz;
-    const offsetRef = new Date();
+    const offsetRef = getSimulatedNow();
     return getNextResetDateInTimezone(now, hour, minute, tz, offsetRef);
   }
 
   function updateSidebarTime() {
-    const now = new Date();
+    const now = getSimulatedNow();
     const tz = getAppTimezone();
     const recTz = getRecordingTimezone();
     const parts = getDatePartsInTimezone(now, tz);
@@ -4119,7 +4273,8 @@
     if (dateEl) {
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const month = monthNames[parts.month];
-      dateEl.textContent = parts.weekday + ", " + month + " " + parts.day + ", " + parts.year;
+      const offset = (state.simulatedDateOffset || 0);
+      dateEl.textContent = parts.weekday + ", " + month + " " + parts.day + ", " + parts.year + (offset > 0 ? " (+" + offset + " day simulated)" : "");
     }
     const timeEl = document.getElementById("currentTime");
     if (timeEl) {
@@ -4297,7 +4452,7 @@
     remainingVal.className = "task-remaining";
     remainingVal.dataset.type = "daily";
     remainingVal.dataset.gameId = game.id;
-    remainingVal.textContent = getDailyTimeRemainingText(game, new Date());
+    remainingVal.textContent = getDailyTimeRemainingText(game, getSimulatedNow());
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 
@@ -4387,7 +4542,7 @@
     remainingVal.dataset.type = "weekly";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
-    remainingVal.textContent = getWeeklyTimeRemainingText(task, new Date(), game);
+    remainingVal.textContent = getWeeklyTimeRemainingText(task, getSimulatedNow(), game);
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 
@@ -4521,7 +4676,7 @@
     remainingVal.dataset.type = "endgame";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
-    remainingVal.textContent = getEndgameTimeRemainingText(task, new Date(), game);
+    remainingVal.textContent = getEndgameTimeRemainingText(task, getSimulatedNow(), game);
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 
@@ -4628,7 +4783,7 @@
   function updateTaskRemainingTexts() {
     const tab = state.tab;
     if (tab !== "dailies" && tab !== "weeklies" && tab !== "endgame" && tab !== "home") return;
-    const now = new Date();
+    const now = getSimulatedNow();
     document.querySelectorAll(".task-remaining").forEach((el) => {
       const type = el.dataset.type;
       const gameId = el.dataset.gameId;
@@ -4652,24 +4807,28 @@
   function getHistoryDWEForDate(dateStr) {
     const available = getTasksAvailableOnDate(dateStr);
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
+    const wCompleted = (available.weeklies || []).filter((item) => isWeeklyCompletedInCurrentCycle(item.key, dateStr)).length;
+    const eCompleted = (available.endgame || []).filter((item) => isEndgameCompletedInCurrentCycle(item.key, dateStr)).length;
     return {
       dCompleted: (dayData.dailies || []).length,
       dTotal: (available.dailies || []).length,
-      wCompleted: (dayData.weeklies || []).length,
+      wCompleted,
       wTotal: (available.weeklies || []).length,
-      eCompleted: (dayData.endgame || []).length,
+      eCompleted,
       eTotal: (available.endgame || []).length,
     };
   }
 
   function getHistoryCompletedTaskLabels(dateStr) {
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
+    const available = getTasksAvailableOnDate(dateStr);
     const labels = { dailies: [], weeklies: [], endgame: [] };
     (dayData.dailies || []).forEach((gameId) => {
       const game = getGame(gameId);
       labels.dailies.push(game ? game.name : gameId);
     });
-    (dayData.weeklies || []).forEach((key) => {
+    (available.weeklies || []).filter((item) => isWeeklyCompletedInCurrentCycle(item.key, dateStr)).forEach((item) => {
+      const key = item.key;
       const dot = key.indexOf(".");
       const gId = dot >= 0 ? key.slice(0, dot) : key;
       const tId = dot >= 0 ? key.slice(dot + 1) : "";
@@ -4677,7 +4836,8 @@
       const task = (game?.weeklies || []).find((t) => (t.id || t.label) === tId);
       labels.weeklies.push(task ? task.label : tId);
     });
-    (dayData.endgame || []).forEach((key) => {
+    (available.endgame || []).filter((item) => isEndgameCompletedInCurrentCycle(item.key, dateStr)).forEach((item) => {
+      const key = item.key;
       const dot = key.indexOf(".");
       const gId = dot >= 0 ? key.slice(0, dot) : key;
       const tId = dot >= 0 ? key.slice(dot + 1) : "";
@@ -4689,7 +4849,7 @@
   }
 
   function renderAttendanceHistory(container) {
-    const now = new Date();
+    const now = getSimulatedNow();
     let month = state.historyMonth != null ? Number(state.historyMonth) : now.getMonth();
     let year = state.historyYear != null ? Number(state.historyYear) : now.getFullYear();
     if (!Number.isFinite(month) || month < 0 || month > 11) month = now.getMonth();
@@ -4985,7 +5145,7 @@
     historyBtn.textContent = "History";
     historyBtn.addEventListener("click", () => {
       state.attendanceView = "history";
-      const now = new Date();
+      const now = getSimulatedNow();
       if (state.historyMonth == null) state.historyMonth = now.getMonth();
       if (state.historyYear == null) state.historyYear = now.getFullYear();
       save();
@@ -5011,7 +5171,9 @@
       const dateStr = getDateStr(d);
       const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
       const available = getTasksAvailableOnDate(dateStr);
-      const completedCount = dayData.dailies.length + dayData.weeklies.length + dayData.endgame.length;
+      const wDone = (available.weeklies || []).filter((item) => isWeeklyCompletedInCurrentCycle(item.key, dateStr)).length;
+      const eDone = (available.endgame || []).filter((item) => isEndgameCompletedInCurrentCycle(item.key, dateStr)).length;
+      const completedCount = (dayData.dailies || []).length + wDone + eDone;
       const isFuture = dateStr > todayStr;
       const dayEl = document.createElement("div");
       dayEl.className = "attendance-calendar-day" + (dateStr === todayStr ? " today" : "") + (isFuture ? " future" : "");
@@ -5040,18 +5202,18 @@
           const game = getGame(gameId);
           addPart(game ? game.name : gameId, "dailies");
         });
-        dayData.weeklies.forEach((key) => {
-          const dot = key.indexOf(".");
-          const gId = dot >= 0 ? key.slice(0, dot) : key;
-          const tId = dot >= 0 ? key.slice(dot + 1) : "";
+        (available.weeklies || []).filter((item) => isWeeklyCompletedInCurrentCycle(item.key, dateStr)).forEach((item) => {
+          const dot = item.key.indexOf(".");
+          const gId = dot >= 0 ? item.key.slice(0, dot) : item.key;
+          const tId = dot >= 0 ? item.key.slice(dot + 1) : "";
           const game = getGame(gId);
           const task = (game?.weeklies || []).find((t) => (t.id || t.label) === tId);
           addPart(task ? task.label : tId, "weeklies");
         });
-        dayData.endgame.forEach((key) => {
-          const dot = key.indexOf(".");
-          const gId = dot >= 0 ? key.slice(0, dot) : key;
-          const tId = dot >= 0 ? key.slice(dot + 1) : "";
+        (available.endgame || []).filter((item) => isEndgameCompletedInCurrentCycle(item.key, dateStr)).forEach((item) => {
+          const dot = item.key.indexOf(".");
+          const gId = dot >= 0 ? item.key.slice(0, dot) : item.key;
+          const tId = dot >= 0 ? item.key.slice(dot + 1) : "";
           const game = getGame(gId);
           const task = (game?.endgame || []).find((t) => (t.id || t.label) === tId);
           addPart(task ? task.label : tId, "endgame");
@@ -5610,7 +5772,7 @@
     const at = state.extracurricularCompletedAt && state.extracurricularCompletedAt[task.id];
     if (!at) return true;
     const completedDate = new Date(at);
-    return (Date.now() - completedDate.getTime()) > EXTRACURRICULAR_ARCHIVE_MS;
+    return (getSimulatedNow().getTime() - completedDate.getTime()) > EXTRACURRICULAR_ARCHIVE_MS;
   }
 
   function getActiveExtracurricularTasks() {
@@ -5625,7 +5787,7 @@
     state.extracurricularCompleted[taskId] = completed;
     if (completed) {
       if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
-      state.extracurricularCompletedAt[taskId] = new Date().toISOString();
+      state.extracurricularCompletedAt[taskId] = getSimulatedNow().toISOString();
     } else {
       if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
     }
@@ -5773,7 +5935,7 @@
     const mo = parseInt(m[2], 10) - 1;
     const d = parseInt(m[3], 10);
     const endOfDay = new Date(y, mo, d, 23, 59, 59);
-    const now = new Date();
+    const now = getSimulatedNow();
     const ms = endOfDay.getTime() - now.getTime();
     input.value = ms > 0 ? formatRemainingMs(ms) : "Not Available";
   }
@@ -5785,7 +5947,7 @@
     if (!input || !endInput) return;
     const remainingMs = parseTimeRemainingToMs(input.value.trim());
     if (remainingMs == null || remainingMs <= 0) return;
-    const now = new Date();
+    const now = getSimulatedNow();
     const endDate = new Date(now.getTime() + remainingMs);
     const endStr = getDateStr(endDate);
     endInput.value = endStr;
@@ -6450,7 +6612,7 @@
       changerInput.addEventListener("change", () => {
         const v = Math.max(0, Number(changerInput.value) || 0);
         state.dailiesCompleted[selected.id] = v;
-        const dateStr = getDailyPeriodDateStr(selected, new Date());
+        const dateStr = getDailyPeriodDateStr(selected, getSimulatedNow());
         if (v) recordCompletion(dateStr, "dailies", selected.id);
         else unrecordCompletion(dateStr, "dailies", selected.id);
         save();
@@ -6612,7 +6774,7 @@
         potSpan.textContent = "Potential: " + getWeeklyPotential(t);
         const resetSpan = document.createElement("span");
         resetSpan.className = "games-task-reset";
-        resetSpan.textContent = "Resets: " + getWeeklyResetDisplay(t, new Date(), selected);
+        resetSpan.textContent = "Resets: " + getWeeklyResetDisplay(t, getSimulatedNow(), selected);
         const dateStartSpan = document.createElement("span");
         dateStartSpan.className = "games-weekly-date-start";
         const ds = isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr();
@@ -6705,7 +6867,7 @@
         potSpan.textContent = "Potential: " + getEndgamePotential(t);
         const resetSpan = document.createElement("span");
         resetSpan.className = "games-task-reset";
-        resetSpan.textContent = "Resets: " + getEndgameResetDisplay(t, new Date(), selected);
+        resetSpan.textContent = "Resets: " + getEndgameResetDisplay(t, getSimulatedNow(), selected);
         const dateStartSpan = document.createElement("span");
         dateStartSpan.className = "games-endgame-date-start";
         const ds = isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr();
@@ -6793,7 +6955,7 @@
     container.innerHTML = "";
     const games = getAllGames();
     const todayStr = getDateStr();
-    const now = new Date();
+    const now = getSimulatedNow();
     const dDone = games.filter((g) => g.dailies && (state.completionByDate[getDailyPeriodDateStr(g, now)] || {}).dailies?.includes(g.id)).length;
     const available = getTasksAvailableOnDate(todayStr);
     const dTotal = Math.max(1, games.filter((g) => g.dailies).length);
@@ -6838,10 +7000,12 @@
     section.appendChild(barsWrap);
     container.appendChild(section);
 
-    // DWE checklist: tasks due earliest to latest, same order as game list for ties
+    // DWE checklist: incomplete first (by due date), completed at end
     const checklistItems = [];
     games.forEach((game, gameIdx) => {
       if (game.dailies) {
+        const periodStr = getDailyPeriodDateStr(game, now);
+        const completed = (state.completionByDate[periodStr] || {}).dailies?.includes(game.id);
         checklistItems.push({
           type: "dailies",
           key: game.id,
@@ -6850,7 +7014,8 @@
           label: (game.name || game.id),
           dueMs: now.getTime() + getDailyTimeRemainingMs(game, now),
           gameOrder: gameIdx,
-          taskOrder: 0
+          taskOrder: 0,
+          completed
         });
       }
       (game.weeklies || []).forEach((task, taskIdx) => {
@@ -6864,7 +7029,8 @@
             label: (game.name || game.id) + " — " + (task.label || "Weekly"),
             dueMs: now.getTime() + getWeeklyTimeRemainingMs(task, now, game),
             gameOrder: gameIdx,
-            taskOrder: taskIdx
+            taskOrder: taskIdx,
+            completed: isWeeklyCompletedInCurrentCycle(key, todayStr)
           });
         }
       });
@@ -6879,12 +7045,14 @@
             label: (game.name || game.id) + " — " + (task.label || "Endgame"),
             dueMs: now.getTime() + getEndgameTimeRemainingMs(task, now, game),
             gameOrder: gameIdx,
-            taskOrder: taskIdx
+            taskOrder: taskIdx,
+            completed: isEndgameCompletedInCurrentCycle(key, todayStr)
           });
         }
       });
     });
     const sortItems = (a, b) => {
+      if (a.completed !== b.completed) return (a.completed ? 1 : 0) - (b.completed ? 1 : 0);
       if (a.dueMs !== b.dueMs) return a.dueMs - b.dueMs;
       if (a.gameOrder !== b.gameOrder) return a.gameOrder - b.gameOrder;
       return a.taskOrder - b.taskOrder;
@@ -6900,7 +7068,7 @@
       if (task.endDateTBD) return true;
       if (!task.endDate) return true;
       return todayStr <= task.endDate;
-    });
+    }).sort((a, b) => ((state.extracurricularCompleted[a.id] ? 1 : 0) - (state.extracurricularCompleted[b.id] ? 1 : 0)));
 
     function renderChecklistGrid(items, typeLabel, type) {
       const section = document.createElement("div");
@@ -6996,7 +7164,7 @@
     const infoIcon = document.createElement("span");
     infoIcon.className = "home-checklist-info-icon";
     infoIcon.setAttribute("aria-label", "Information");
-    infoIcon.title = "This checklist will show the tasks by earliest to latest \"due date,\" followed by order of the Games.";
+    infoIcon.title = "Tasks are ordered by due date (earliest first). Completed tasks move to the end of each list.";
     infoIcon.innerHTML = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4M12 8h.01\"/></svg>";
     checklistHeading.appendChild(infoIcon);
     checklistWrap.appendChild(checklistHeading);
@@ -7053,7 +7221,7 @@
         const exViewMode = btn.dataset.extracurricularViewMode;
         if (view === "history") {
           state.attendanceView = "history";
-          const now = new Date();
+          const now = getSimulatedNow();
           if (state.historyMonth == null) state.historyMonth = now.getMonth();
           if (state.historyYear == null) state.historyYear = now.getFullYear();
         } else if (view === "timestamps") {

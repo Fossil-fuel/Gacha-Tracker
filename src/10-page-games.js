@@ -170,7 +170,7 @@
       changerInput.addEventListener("change", () => {
         const v = Math.max(0, Number(changerInput.value) || 0);
         state.dailiesCompleted[selected.id] = v;
-        const dateStr = getDailyPeriodDateStr(selected, new Date());
+        const dateStr = getDailyPeriodDateStr(selected, getSimulatedNow());
         if (v) recordCompletion(dateStr, "dailies", selected.id);
         else unrecordCompletion(dateStr, "dailies", selected.id);
         save();
@@ -332,7 +332,7 @@
         potSpan.textContent = "Potential: " + getWeeklyPotential(t);
         const resetSpan = document.createElement("span");
         resetSpan.className = "games-task-reset";
-        resetSpan.textContent = "Resets: " + getWeeklyResetDisplay(t, new Date(), selected);
+        resetSpan.textContent = "Resets: " + getWeeklyResetDisplay(t, getSimulatedNow(), selected);
         const dateStartSpan = document.createElement("span");
         dateStartSpan.className = "games-weekly-date-start";
         const ds = isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr();
@@ -425,7 +425,7 @@
         potSpan.textContent = "Potential: " + getEndgamePotential(t);
         const resetSpan = document.createElement("span");
         resetSpan.className = "games-task-reset";
-        resetSpan.textContent = "Resets: " + getEndgameResetDisplay(t, new Date(), selected);
+        resetSpan.textContent = "Resets: " + getEndgameResetDisplay(t, getSimulatedNow(), selected);
         const dateStartSpan = document.createElement("span");
         dateStartSpan.className = "games-endgame-date-start";
         const ds = isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr();
