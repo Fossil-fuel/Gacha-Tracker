@@ -142,27 +142,7 @@
 
       if (type === "extracurricular") {
         items.forEach((task) => {
-          const card = document.createElement("div");
-          card.className = "task-item home-dwe-checklist-item home-dwe-checklist-item-extracurricular" + (state.extracurricularCompleted[task.id] ? " done" : "");
-          const label = document.createElement("span");
-          label.className = "task-label home-dwe-checklist-label";
-          label.textContent = task.label || "Task";
-          const check = document.createElement("input");
-          check.type = "checkbox";
-          check.className = "task-checkbox";
-          check.checked = !!state.extracurricularCompleted[task.id];
-          check.addEventListener("change", () => {
-            setExtracurricularCompleted(task.id, check.checked);
-            save();
-            renderAll();
-          });
-          const info = document.createElement("span");
-          info.className = "home-extracurricular-info";
-          const endStr = task.endDateTBD ? "TBD" : (task.endDate || "");
-          info.textContent = (task.startDate || "") + (endStr ? " — " + endStr : "");
-          card.appendChild(label);
-          card.appendChild(check);
-          card.appendChild(info);
+          const card = buildExtracurricularTaskItemForHome(task, "div");
           grid.appendChild(card);
         });
       } else if (type === "dailies") {

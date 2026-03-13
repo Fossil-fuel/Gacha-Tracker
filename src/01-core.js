@@ -1074,6 +1074,21 @@
     return formatRemainingMs(getEndgameTimeRemainingMs(task, now, game));
   }
 
+  /** Time remaining until end of endDate for extracurricular tasks. Returns null if endDateTBD or no endDate. */
+  function getExtracurricularTimeRemainingMs(task, now) {
+    if (!task || task.endDateTBD || !task.endDate || !isValidDateStr(task.endDate)) return null;
+    const n = now || getSimulatedNow();
+    const endOfDay = new Date(task.endDate + "T23:59:59.999");
+    return endOfDay.getTime() - n.getTime();
+  }
+
+  function getExtracurricularTimeRemainingText(task, now) {
+    const ms = getExtracurricularTimeRemainingMs(task, now);
+    if (ms == null) return "TBD";
+    if (ms <= 0) return "Overdue";
+    return formatRemainingMs(ms);
+  }
+
   function getEndgameCycleDates(task, index, game) {
     const anchor = getEndgameAnchorDate(task, game);
     const freqUnit = task && task.frequencyUnit === "day" ? "day" : "week";

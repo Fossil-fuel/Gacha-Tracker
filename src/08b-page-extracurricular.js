@@ -37,6 +37,72 @@
     }
   }
 
+  /** Builds a card for the home page checklist, matching the format of weekly/endgame cards (title, potential, completion status, time remaining). */
+  function buildExtracurricularTaskItemForHome(task, tagName) {
+    const completed = !!state.extracurricularCompleted[task.id];
+    const el = document.createElement(tagName || "div");
+    el.className = "task-item home-dwe-checklist-item home-dwe-checklist-item-extracurricular" + (completed ? " done" : "");
+
+    const top = document.createElement("div");
+    top.className = "task-top";
+    const span = document.createElement("span");
+    span.className = "task-label home-dwe-checklist-label";
+    span.textContent = task.label || "Task";
+    top.appendChild(span);
+    const pot = Math.max(0, Number(task.currency) || 0);
+    if (pot > 0) {
+      const potSpan = document.createElement("span");
+      potSpan.className = "task-potential";
+      potSpan.textContent = "Potential: " + pot;
+      top.appendChild(potSpan);
+    }
+    el.appendChild(top);
+
+    const sub = document.createElement("div");
+    sub.className = "task-subrows";
+    const row1 = document.createElement("div");
+    row1.className = "task-subrow";
+    const left1 = document.createElement("div");
+    left1.className = "left";
+    const check = document.createElement("button");
+    check.type = "button";
+    check.className = "task-checkbox";
+    check.setAttribute("aria-label", completed ? "Mark incomplete" : "Mark complete");
+    check.addEventListener("click", () => {
+      setExtracurricularCompleted(task.id, !completed);
+      save();
+      renderAll();
+    });
+    const label1 = document.createElement("span");
+    label1.innerHTML = "<strong>Completion Status:</strong> " + (completed ? "Complete" : "Incomplete");
+    span.addEventListener("click", () => {
+      setExtracurricularCompleted(task.id, !completed);
+      save();
+      renderAll();
+    });
+    left1.appendChild(check);
+    left1.appendChild(label1);
+    row1.appendChild(left1);
+    sub.appendChild(row1);
+
+    const remainingRow = document.createElement("div");
+    remainingRow.className = "task-subrow";
+    const leftR = document.createElement("div");
+    leftR.className = "left";
+    const labelR = document.createElement("span");
+    labelR.innerHTML = "<strong>Time remaining:</strong>";
+    leftR.appendChild(labelR);
+    remainingRow.appendChild(leftR);
+    const remainingVal = document.createElement("span");
+    remainingVal.className = "task-remaining";
+    remainingVal.textContent = getExtracurricularTimeRemainingText(task, getSimulatedNow());
+    remainingRow.appendChild(remainingVal);
+    sub.appendChild(remainingRow);
+
+    el.appendChild(sub);
+    return el;
+  }
+
   function buildExtracurricularTaskItem(task, listOrGrid) {
     const completed = state.extracurricularCompleted[task.id];
     const li = document.createElement("li");
@@ -71,6 +137,13 @@
     }
     labelWrap.appendChild(label);
     labelWrap.appendChild(info);
+    const remainingText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
+    if (remainingText !== "TBD") {
+      const remainingSpan = document.createElement("span");
+      remainingSpan.className = "extracurricular-task-remaining";
+      remainingSpan.textContent = " · " + remainingText + " left";
+      labelWrap.appendChild(remainingSpan);
+    }
     top.appendChild(labelWrap);
     const actions = document.createElement("div");
     actions.className = "task-item-actions";

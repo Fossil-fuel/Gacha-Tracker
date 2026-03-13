@@ -918,6 +918,7 @@ body {
 }
 
 .home-dwe-checklist-item-extracurricular input[type="checkbox"],
+.home-dwe-checklist-item-extracurricular .task-checkbox,
 #extracurricularContent .task-checkbox,
 .games-extracurricular-section .task-checkbox {
   appearance: none;
