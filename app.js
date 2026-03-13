@@ -5775,8 +5775,18 @@
     return (getSimulatedNow().getTime() - completedDate.getTime()) > EXTRACURRICULAR_ARCHIVE_MS;
   }
 
+  function sortExtracurricularByDueDate(tasks) {
+    return [...tasks].sort((a, b) => {
+      const aTbd = !!a.endDateTBD || !a.endDate;
+      const bTbd = !!b.endDateTBD || !b.endDate;
+      if (aTbd !== bTbd) return aTbd ? 1 : -1;
+      if (aTbd) return 0;
+      return (a.endDate || "").localeCompare(b.endDate || "");
+    });
+  }
+
   function getActiveExtracurricularTasks() {
-    return (state.extracurricularTasks || []).filter((t) => !isExtracurricularArchived(t));
+    return sortExtracurricularByDueDate((state.extracurricularTasks || []).filter((t) => !isExtracurricularArchived(t)));
   }
 
   function getArchivedExtracurricularTasks() {
@@ -6645,7 +6655,7 @@
       content.appendChild(syncRow);
     } else if (state.gamesSubTab === "extracurricular") {
       const gameTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === selected.id);
-      const activeTasks = gameTasks.filter((t) => !isExtracurricularArchived(t));
+      const activeTasks = sortExtracurricularByDueDate(gameTasks.filter((t) => !isExtracurricularArchived(t)));
       const archivedTasks = gameTasks.filter((t) => isExtracurricularArchived(t));
       if (gameTasks.length === 0) {
         const empty = document.createElement("p");
@@ -7068,7 +7078,15 @@
       if (task.endDateTBD) return true;
       if (!task.endDate) return true;
       return todayStr <= task.endDate;
-    }).sort((a, b) => ((state.extracurricularCompleted[a.id] ? 1 : 0) - (state.extracurricularCompleted[b.id] ? 1 : 0)));
+    }).sort((a, b) => {
+      const aTbd = !!a.endDateTBD || !a.endDate;
+      const bTbd = !!b.endDateTBD || !b.endDate;
+      if (aTbd !== bTbd) return aTbd ? 1 : -1;
+      if (aTbd) return 0;
+      const aEnd = (a.endDate || "").localeCompare(b.endDate || "");
+      if (aEnd !== 0) return aEnd;
+      return (state.extracurricularCompleted[a.id] ? 1 : 0) - (state.extracurricularCompleted[b.id] ? 1 : 0);
+    });
 
     function renderChecklistGrid(items, typeLabel, type) {
       const section = document.createElement("div");

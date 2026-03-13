@@ -203,7 +203,7 @@
       content.appendChild(syncRow);
     } else if (state.gamesSubTab === "extracurricular") {
       const gameTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === selected.id);
-      const activeTasks = gameTasks.filter((t) => !isExtracurricularArchived(t));
+      const activeTasks = sortExtracurricularByDueDate(gameTasks.filter((t) => !isExtracurricularArchived(t)));
       const archivedTasks = gameTasks.filter((t) => isExtracurricularArchived(t));
       if (gameTasks.length === 0) {
         const empty = document.createElement("p");

@@ -117,7 +117,15 @@
       if (task.endDateTBD) return true;
       if (!task.endDate) return true;
       return todayStr <= task.endDate;
-    }).sort((a, b) => ((state.extracurricularCompleted[a.id] ? 1 : 0) - (state.extracurricularCompleted[b.id] ? 1 : 0)));
+    }).sort((a, b) => {
+      const aTbd = !!a.endDateTBD || !a.endDate;
+      const bTbd = !!b.endDateTBD || !b.endDate;
+      if (aTbd !== bTbd) return aTbd ? 1 : -1;
+      if (aTbd) return 0;
+      const aEnd = (a.endDate || "").localeCompare(b.endDate || "");
+      if (aEnd !== 0) return aEnd;
+      return (state.extracurricularCompleted[a.id] ? 1 : 0) - (state.extracurricularCompleted[b.id] ? 1 : 0);
+    });
 
     function renderChecklistGrid(items, typeLabel, type) {
       const section = document.createElement("div");

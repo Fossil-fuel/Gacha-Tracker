@@ -9,8 +9,18 @@
     return (getSimulatedNow().getTime() - completedDate.getTime()) > EXTRACURRICULAR_ARCHIVE_MS;
   }
 
+  function sortExtracurricularByDueDate(tasks) {
+    return [...tasks].sort((a, b) => {
+      const aTbd = !!a.endDateTBD || !a.endDate;
+      const bTbd = !!b.endDateTBD || !b.endDate;
+      if (aTbd !== bTbd) return aTbd ? 1 : -1;
+      if (aTbd) return 0;
+      return (a.endDate || "").localeCompare(b.endDate || "");
+    });
+  }
+
   function getActiveExtracurricularTasks() {
-    return (state.extracurricularTasks || []).filter((t) => !isExtracurricularArchived(t));
+    return sortExtracurricularByDueDate((state.extracurricularTasks || []).filter((t) => !isExtracurricularArchived(t)));
   }
 
   function getArchivedExtracurricularTasks() {
