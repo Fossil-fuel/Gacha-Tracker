@@ -657,6 +657,13 @@ body {
   margin: 0 0 0.5rem 0;
 }
 
+.extracurricular-task-game-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 0.25rem;
+}
+
 .extracurricular-task-info {
   font-size: 0.85rem;
   color: var(--text-muted);

@@ -43,6 +43,16 @@
     const el = document.createElement(tagName || "div");
     el.className = "task-item home-dwe-checklist-item home-dwe-checklist-item-extracurricular" + (completed ? " done" : "");
 
+    if (task.gameId) {
+      const game = getGame(task.gameId);
+      if (game) {
+        const gameLabel = document.createElement("div");
+        gameLabel.className = "task-grid-game-label";
+        gameLabel.textContent = game.name || task.gameId;
+        el.appendChild(gameLabel);
+      }
+    }
+
     const top = document.createElement("div");
     top.className = "task-top";
     const span = document.createElement("span");
@@ -109,6 +119,16 @@
     li.className = "task-item task-item-with-changer";
     if (completed) li.classList.add("done");
 
+    if (task.gameId) {
+      const game = getGame(task.gameId);
+      if (game) {
+        const gameLabel = document.createElement("div");
+        gameLabel.className = "extracurricular-task-game-label";
+        gameLabel.textContent = game.name || task.gameId;
+        li.appendChild(gameLabel);
+      }
+    }
+
     const top = document.createElement("div");
     top.className = "task-item-top";
     const checkbox = document.createElement("input");
@@ -131,10 +151,6 @@
     const startStr = task.startDate || "";
     const endStr = task.endDateTBD ? "TBD" : (task.endDate || "");
     info.textContent = startStr + (endStr ? " — " + endStr : "");
-    if (task.gameId) {
-      const game = getGame(task.gameId);
-      if (game) info.textContent += " (" + (game.name || task.gameId) + ")";
-    }
     labelWrap.appendChild(label);
     labelWrap.appendChild(info);
     const remainingText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
