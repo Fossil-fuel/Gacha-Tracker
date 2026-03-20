@@ -30,6 +30,12 @@
     transform: translateX(-100%);
     transition: transform 0.25s ease, box-shadow 0.25s ease;
     box-shadow: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.mobile-sidebar-open {
+    overflow: hidden;
   }
 
   body.mobile-sidebar-open .sidebar-left {
@@ -77,15 +83,18 @@
     display: none !important;
   }
 
-  /* Main content: full width */
+  /* Main content: full width, no horizontal scroll */
   .content {
     flex: 1 1 100%;
     min-width: 0;
     padding: 0.75rem 1rem;
+    overflow-x: hidden;
   }
 
   .content-card {
     padding: 1rem;
+    min-width: 0;
+    overflow-x: hidden;
   }
 
   /* Breadcrumb bar: ensure hamburger + content fit */
@@ -98,13 +107,69 @@
     font-size: 0.8rem;
   }
 
+  /* Very narrow: icon-only top bar links to save space */
+  @media (max-width: 480px) {
+    .top-bar-actions .top-bar-btn-text {
+      display: none;
+    }
+    .top-bar-actions .top-bar-btn {
+      padding: 0.35rem;
+    }
+  }
+
+  /* Modals: compact with margins, adapt to visual viewport (keyboard) */
+  .modal {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 0.5rem;
+    overflow-y: auto;
+  }
+
+  .modal-dialog {
+    margin: auto;
+    max-height: calc(var(--visual-viewport-height, 100vh) - 1rem);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .modal-dialog .modal-body,
+  .modal-dialog .modal-header + * {
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .modal-body {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   /* Settings modal: stack sidebar on mobile */
   .modal-dialog-settings {
-    max-height: calc(100vh - 2rem);
+    max-height: calc(var(--visual-viewport-height, 100vh) - 1rem);
   }
 
   .settings-body {
+    min-height: 0;
+    overflow: hidden;
     flex-direction: column;
+  }
+
+  .settings-content {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
+  }
+
+  /* When keyboard is open: tighter modal, ensure scroll areas work */
+  body.mobile-keyboard-open .modal-dialog {
+    max-height: calc(var(--visual-viewport-height, 100vh) - 0.5rem);
+  }
+
+  body.mobile-keyboard-open .modal {
+    align-items: flex-start;
+    padding-top: 0.25rem;
   }
 
   .settings-sidebar {
@@ -149,6 +214,173 @@
   /* Home DWE bars: stack vertically on narrow mobile */
   .home-dwe-bars {
     flex-direction: column;
+  }
+
+  /* Attendance calendars: mobile-friendly layout */
+  .history-calendar-scroll-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-left: -1rem;
+    margin-right: -1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .history-calendar-grid {
+    min-width: max-content;
+    grid-template-columns: repeat(7, minmax(120px, 1fr));
+  }
+
+  .history-calendar-day {
+    min-height: 4.5rem;
+    padding: 0.4rem;
+  }
+
+  .history-calendar-day-top {
+    margin-bottom: 0.25rem;
+  }
+
+  .history-calendar-day-num {
+    font-size: 0.9rem;
+  }
+
+  .history-calendar-day-today .history-calendar-day-num {
+    min-width: 1.5rem;
+    height: 1.5rem;
+  }
+
+  .history-calendar-day-edit {
+    padding: 0.15rem 0.3rem;
+    font-size: 0.65rem;
+  }
+
+  .history-dwe-bar {
+    height: 1rem;
+  }
+
+  .history-dwe-fraction {
+    font-size: 0.6rem;
+  }
+
+  .history-dwe-label {
+    font-size: 0.7rem;
+  }
+
+  /* Attendance weekly calendar: two days per row on mobile */
+  .attendance-calendar-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .attendance-calendar-day {
+    padding: 0.6rem;
+  }
+
+  /* Data section: horizontal scroll for tables */
+  #dataContainer .data-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: none;
+  }
+
+  #dataContainer .data-summary-table {
+    min-width: 380px;
+  }
+
+  /* Games section: no horizontal scroll on mobile */
+  #gamesContainer {
+    overflow-x: hidden;
+    min-width: 0;
+  }
+
+  .games-title-row {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .games-title-row .games-selected-title {
+    width: 100%;
+    margin-bottom: 0;
+  }
+
+  .games-sub-tabs {
+    gap: 0.25rem;
+  }
+
+  .games-sub-tab {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  .games-changer-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+  }
+
+  .games-changer-row label {
+    min-width: 0;
+  }
+
+  .games-changer-row input[type="number"] {
+    max-width: none;
+  }
+
+  .task-item-with-changer .task-item-top {
+    flex-wrap: wrap;
+  }
+
+  .task-item-with-changer .task-item-info {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .task-item-with-changer .task-label {
+    flex: 1 1 100%;
+    min-width: 0;
+    word-break: break-word;
+  }
+
+  .task-item-with-changer .games-task-potential,
+  .task-item-with-changer .games-task-reset,
+  .games-endgame-date-start,
+  .games-weekly-date-start {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+  }
+
+  .endgame-currency-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+  }
+
+  .endgame-currency-row label {
+    width: 100%;
+  }
+
+  .endgame-currency-row input[type="text"] {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .endgame-currency-row input[type="number"] {
+    width: 100%;
+    max-width: 8rem;
+  }
+
+  .endgame-currency-row-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pulls-calc-wrap {
+    flex-wrap: wrap;
+  }
+
+  .pulls-calc-wrap input.pulls-calc-input {
+    width: 100%;
+    max-width: 8rem;
   }
 
   /* Touch-friendly minimum sizes */

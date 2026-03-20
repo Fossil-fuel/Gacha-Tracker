@@ -119,6 +119,8 @@
     header.appendChild(timestampsBtn);
     container.appendChild(header);
 
+    const gridWrap = document.createElement("div");
+    gridWrap.className = "history-calendar-scroll-wrap";
     const grid = document.createElement("div");
     grid.className = "history-calendar-grid";
     const firstDay = state.firstDayOfWeek === 1 ? 1 : 0;
@@ -210,7 +212,16 @@
       cell.appendChild(bar("E", dwe.eCompleted, dwe.eTotal, taskLabels.endgame, "endgame"));
       grid.appendChild(cell);
     });
-    container.appendChild(grid);
+    gridWrap.appendChild(grid);
+    container.appendChild(gridWrap);
+
+    const todayCell = grid.querySelector(".history-calendar-day-today");
+    if (todayCell && gridWrap.scrollWidth > gridWrap.clientWidth) {
+      requestAnimationFrame(function () {
+        const scrollLeft = todayCell.offsetLeft - (gridWrap.clientWidth / 2) + (todayCell.offsetWidth / 2);
+        gridWrap.scrollLeft = Math.max(0, scrollLeft);
+      });
+    }
   }
 
   function renderAttendance() {

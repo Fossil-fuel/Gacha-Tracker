@@ -295,6 +295,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .sidebar-brand .title {
@@ -1728,14 +1730,10 @@ body {
 .history-dwe-tooltip-item.attendance-tooltip-weeklies { color: var(--pie-weeklies); }
 .history-dwe-tooltip-item.attendance-tooltip-endgame { color: var(--pie-endgame); }
 
-@media (max-width: 700px) {
-  .history-calendar-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .history-calendar-weekday:nth-child(n+8) {
-    display: none;
-  }
+/* History calendar scroll wrapper - enables horizontal scroll on narrow viewports */
+.history-calendar-scroll-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Calendar day edit modal */
@@ -1929,6 +1927,7 @@ body {
 
 .data-summary-table {
   width: 100%;
+  min-width: 280px;
   border-collapse: collapse;
   font-size: 0.9rem;
   border: 1px solid var(--border);
@@ -2017,6 +2016,8 @@ body {
 .data-table-wrap {
   width: 100%;
   max-width: 400px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .data-tables-section .data-tables-header {
@@ -2040,6 +2041,8 @@ body {
   gap: 2rem;
   align-items: flex-start;
   width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .data-tables-row .data-summary-table {
@@ -2100,6 +2103,8 @@ body {
   align-items: flex-start;
   gap: 1.5rem;
   margin-top: 0.75rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .data-table-pies-row .data-summary-table {

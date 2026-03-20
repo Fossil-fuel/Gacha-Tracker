@@ -8,14 +8,48 @@
 
   const MOBILE_BREAKPOINT = 768;
   const BODY_CLASS_OPEN = "mobile-sidebar-open";
+  const BODY_CLASS_KEYBOARD = "mobile-keyboard-open";
+  const KEYBOARD_THRESHOLD = 0.75;
 
   let hamburgerEl = null;
   let overlayEl = null;
   let mobileSettingsBtn = null;
   let navListenersAttached = false;
+  let maxViewportHeight = 0;
 
   function isMobile() {
     return window.matchMedia("(max-width: " + MOBILE_BREAKPOINT + "px)").matches;
+  }
+
+  function updateVisualViewport() {
+    if (!window.visualViewport) return;
+    const vv = window.visualViewport;
+    const h = vv.height;
+    const t = vv.offsetTop;
+    if (isMobile()) {
+      maxViewportHeight = Math.max(maxViewportHeight, h);
+      const keyboardOpen = h < maxViewportHeight * KEYBOARD_THRESHOLD;
+      document.body.classList.toggle(BODY_CLASS_KEYBOARD, keyboardOpen);
+    } else {
+      document.body.classList.remove(BODY_CLASS_KEYBOARD);
+      maxViewportHeight = 0;
+    }
+    document.documentElement.style.setProperty("--visual-viewport-height", h + "px");
+    document.documentElement.style.setProperty("--visual-viewport-offset-top", t + "px");
+  }
+
+  function scrollFocusedIntoView() {
+    const active = document.activeElement;
+    if (!active || !active.closest || !active.closest(".modal")) return;
+    const modal = active.closest(".modal-dialog");
+    if (!modal) return;
+    const scrollEl = modal.querySelector(".modal-body, .settings-content");
+    if (!scrollEl || !scrollEl.contains(active)) return;
+    function doScroll() {
+      active.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    requestAnimationFrame(doScroll);
+    setTimeout(doScroll, 350);
   }
 
   function openSidebar() {
@@ -75,15 +109,14 @@
 
   function closeSidebarOnNavClick() {
     const sidebar = document.querySelector(".sidebar-left");
-    if (!sidebar) return;
+    if (!sidebar || navListenersAttached) return;
 
-    sidebar.querySelectorAll(".tab, .sidebar-data-item, .sidebar-game-item").forEach(function (el) {
-      el.addEventListener("click", function () {
-        if (isMobile()) {
-          closeSidebar();
-        }
-      });
+    sidebar.addEventListener("click", function (e) {
+      if (!isMobile()) return;
+      const target = e.target.closest(".tab, .sidebar-data-item, .sidebar-game-item, .sidebar-brand, #aboutNavTitle");
+      if (target) closeSidebar();
     });
+    navListenersAttached = true;
   }
 
   function init() {
@@ -115,10 +148,7 @@
       }
     }
 
-    if (!navListenersAttached) {
-      closeSidebarOnNavClick();
-      navListenersAttached = true;
-    }
+    closeSidebarOnNavClick();
   }
 
   function handleResize() {
@@ -129,6 +159,12 @@
     }
   }
 
+  function onEscape(e) {
+    if (e.key === "Escape" && document.body.classList.contains(BODY_CLASS_OPEN)) {
+      closeSidebar();
+    }
+  }
+
   function run() {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", init);
@@ -136,6 +172,14 @@
       init();
     }
     window.addEventListener("resize", handleResize);
+    document.addEventListener("keydown", onEscape);
+
+    if (window.visualViewport) {
+      updateVisualViewport();
+      window.visualViewport.addEventListener("resize", updateVisualViewport);
+      window.visualViewport.addEventListener("scroll", updateVisualViewport);
+    }
+    document.addEventListener("focusin", scrollFocusedIntoView);
   }
 
   run();
