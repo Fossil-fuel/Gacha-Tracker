@@ -1096,12 +1096,23 @@
     return formatRemainingMs(getEndgameTimeRemainingMs(task, now, game));
   }
 
-  /** Time remaining until end of endDate for extracurricular tasks. Returns null if endDateTBD or no endDate. */
-  function getExtracurricularTimeRemainingMs(task, now) {
+  /** End moment (ms) for extracurricular task. Uses endDate + endTime (default 23:59:59). Returns null if endDateTBD or no endDate. */
+  function getExtracurricularEndMs(task) {
     if (!task || task.endDateTBD || !task.endDate || !isValidDateStr(task.endDate)) return null;
+    let timeStr = (task.endTime || "").trim();
+    if (!timeStr) timeStr = "23:59:59";
+    else if (/^\d{1,2}:\d{2}$/.test(timeStr)) timeStr += ":00";
+    else if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:59";
+    const end = new Date(task.endDate + "T" + timeStr);
+    return end.getTime();
+  }
+
+  /** Time remaining until end of endDate/endTime for extracurricular tasks. Returns null if endDateTBD or no endDate. */
+  function getExtracurricularTimeRemainingMs(task, now) {
+    const endMs = getExtracurricularEndMs(task);
+    if (endMs == null) return null;
     const n = now || getSimulatedNow();
-    const endOfDay = new Date(task.endDate + "T23:59:59.999");
-    return endOfDay.getTime() - n.getTime();
+    return endMs - n.getTime();
   }
 
   function getExtracurricularTimeRemainingText(task, now) {

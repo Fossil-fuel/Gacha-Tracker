@@ -1213,12 +1213,23 @@
     return formatRemainingMs(getEndgameTimeRemainingMs(task, now, game));
   }
 
-  /** Time remaining until end of endDate for extracurricular tasks. Returns null if endDateTBD or no endDate. */
-  function getExtracurricularTimeRemainingMs(task, now) {
+  /** End moment (ms) for extracurricular task. Uses endDate + endTime (default 23:59:59). Returns null if endDateTBD or no endDate. */
+  function getExtracurricularEndMs(task) {
     if (!task || task.endDateTBD || !task.endDate || !isValidDateStr(task.endDate)) return null;
+    let timeStr = (task.endTime || "").trim();
+    if (!timeStr) timeStr = "23:59:59";
+    else if (/^\d{1,2}:\d{2}$/.test(timeStr)) timeStr += ":00";
+    else if (!/^\d{1,2}:\d{2}:\d{2}$/.test(timeStr)) timeStr = "23:59:59";
+    const end = new Date(task.endDate + "T" + timeStr);
+    return end.getTime();
+  }
+
+  /** Time remaining until end of endDate/endTime for extracurricular tasks. Returns null if endDateTBD or no endDate. */
+  function getExtracurricularTimeRemainingMs(task, now) {
+    const endMs = getExtracurricularEndMs(task);
+    if (endMs == null) return null;
     const n = now || getSimulatedNow();
-    const endOfDay = new Date(task.endDate + "T23:59:59.999");
-    return endOfDay.getTime() - n.getTime();
+    return endMs - n.getTime();
   }
 
   function getExtracurricularTimeRemainingText(task, now) {
@@ -5889,12 +5900,15 @@
   const EXTRACURRICULAR_ARCHIVE_MS = 24 * 60 * 60 * 1000;
 
   function isExtracurricularArchived(task) {
+    const now = getSimulatedNow().getTime();
+    const endMs = getExtracurricularEndMs(task);
+    if (endMs != null && now > endMs) return true;
     const completed = state.extracurricularCompleted[task.id];
     if (!completed) return false;
     const at = state.extracurricularCompletedAt && state.extracurricularCompletedAt[task.id];
     if (!at) return true;
     const completedDate = new Date(at);
-    return (getSimulatedNow().getTime() - completedDate.getTime()) > EXTRACURRICULAR_ARCHIVE_MS;
+    return (now - completedDate.getTime()) > EXTRACURRICULAR_ARCHIVE_MS;
   }
 
   function sortExtracurricularByDueDate(tasks) {
@@ -6038,7 +6052,8 @@
     info.className = "extracurricular-task-info";
     const startStr = task.startDate || "";
     const endStr = task.endDateTBD ? "TBD" : (task.endDate || "");
-    info.textContent = startStr + (endStr ? " — " + endStr : "");
+    const endDisplay = endStr + (task.endTime && !task.endDateTBD ? " " + task.endTime : "");
+    info.textContent = startStr + (endDisplay ? " — " + endDisplay : "");
     labelWrap.appendChild(label);
     labelWrap.appendChild(info);
     const remainingText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
@@ -6122,7 +6137,7 @@
       const empty = document.createElement("p");
       empty.className = "empty-state";
       empty.textContent = viewMode === "history"
-        ? "No archived tasks. Completed tasks stay in the list for 24 hours, then move here."
+        ? "No archived tasks. Tasks move here when their end date passes, or when completed 24+ hours ago."
         : "No extracurricular tasks yet. Add one to get started.";
       container.appendChild(empty);
       return;
@@ -6137,6 +6152,7 @@
   function updateExtracurricularTimeRemainingDisplay() {
     const endTBDInput = document.getElementById("extracurricularTaskEndDateTBD");
     const endInput = document.getElementById("extracurricularTaskEndDate");
+    const endTimeInput = document.getElementById("extracurricularTaskEndTime");
     const row = document.getElementById("extracurricularTimeRemainingRow");
     const input = document.getElementById("extracurricularTimeRemainingInput");
     if (!row || !input) return;
@@ -6152,18 +6168,21 @@
       input.value = "";
       return;
     }
-    const y = parseInt(m[1], 10);
-    const mo = parseInt(m[2], 10) - 1;
-    const d = parseInt(m[3], 10);
-    const endOfDay = new Date(y, mo, d, 23, 59, 59);
+    const timeStr = (endTimeInput && endTimeInput.value) ? endTimeInput.value.trim() : "23:59";
+    const tParts = timeStr.split(":");
+    const h = parseInt(tParts[0], 10) || 23;
+    const min = parseInt(tParts[1], 10) || 59;
+    const sec = parseInt(tParts[2], 10) || 0;
+    const endMoment = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10), h, min, sec);
     const now = getSimulatedNow();
-    const ms = endOfDay.getTime() - now.getTime();
+    const ms = endMoment.getTime() - now.getTime();
     input.value = ms > 0 ? formatRemainingMs(ms) : "Not Available";
   }
 
   function applyExtracurricularTimeRemainingFromInput() {
     const input = document.getElementById("extracurricularTimeRemainingInput");
     const endInput = document.getElementById("extracurricularTaskEndDate");
+    const endTimeInput = document.getElementById("extracurricularTaskEndTime");
     const endTBDInput = document.getElementById("extracurricularTaskEndDateTBD");
     if (!input || !endInput) return;
     const remainingMs = parseTimeRemainingToMs(input.value.trim());
@@ -6172,6 +6191,9 @@
     const endDate = new Date(now.getTime() + remainingMs);
     const endStr = getDateStr(endDate);
     endInput.value = endStr;
+    const h = endDate.getHours();
+    const m = endDate.getMinutes();
+    if (endTimeInput) endTimeInput.value = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
     if (endTBDInput) {
       endTBDInput.checked = false;
       endInput.disabled = false;
@@ -6201,6 +6223,7 @@
     const startInput = document.getElementById("extracurricularTaskStartDate");
     const endTBDInput = document.getElementById("extracurricularTaskEndDateTBD");
     const endInput = document.getElementById("extracurricularTaskEndDate");
+    const endTimeInput = document.getElementById("extracurricularTaskEndTime");
     const descInput = document.getElementById("extracurricularTaskDescription");
     const gameSelect = document.getElementById("extracurricularTaskGame");
 
@@ -6213,6 +6236,7 @@
       endInput.value = task && task.endDate ? task.endDate : "";
       endInput.disabled = !!(task && task.endDateTBD);
     }
+    if (endTimeInput) endTimeInput.value = (task && task.endTime) ? task.endTime : "23:59";
     if (descInput) descInput.value = task ? (task.description || "") : "";
     if (currencyInput) currencyInput.value = task && task.currency != null ? String(task.currency) : "";
     if (gameSelect) {
@@ -6227,17 +6251,24 @@
     }
 
     const endRow = document.querySelector(".extracurricular-end-date-row");
+    const endTimeRow = document.querySelector(".extracurricular-end-time-row");
     if (endRow) endRow.style.display = endTBDInput && endTBDInput.checked ? "none" : "";
+    if (endTimeRow) endTimeRow.style.display = endTBDInput && endTBDInput.checked ? "none" : "";
     if (endTBDInput) {
       endTBDInput.onchange = () => {
         if (endInput) endInput.disabled = endTBDInput.checked;
         if (endRow) endRow.style.display = endTBDInput.checked ? "none" : "";
+        if (endTimeRow) endTimeRow.style.display = endTBDInput.checked ? "none" : "";
         updateExtracurricularTimeRemainingDisplay();
       };
     }
     if (endInput) {
       endInput.onchange = updateExtracurricularTimeRemainingDisplay;
       endInput.oninput = updateExtracurricularTimeRemainingDisplay;
+    }
+    if (endTimeInput) {
+      endTimeInput.onchange = updateExtracurricularTimeRemainingDisplay;
+      endTimeInput.oninput = updateExtracurricularTimeRemainingDisplay;
     }
 
     updateExtracurricularTimeRemainingDisplay();
@@ -6308,12 +6339,15 @@
 
       const task = extracurricularTaskModalState.task;
       const currency = Math.max(0, Number(currencyInput && currencyInput.value) || 0);
+      const endTimeInput = document.getElementById("extracurricularTaskEndTime");
+      const endTimeVal = endTBDInput && endTBDInput.checked ? null : (endTimeInput && endTimeInput.value ? endTimeInput.value.trim() : null);
       const payload = {
         id: task ? task.id : "ex_" + Date.now(),
         label,
         startDate: startInput && startInput.value ? startInput.value : getDateStr(),
         endDateTBD: !!(endTBDInput && endTBDInput.checked),
         endDate: endTBDInput && endTBDInput.checked ? null : (endInput && endInput.value || null),
+        endTime: endTimeVal || undefined,
         description: (descInput && descInput.value || "").trim() || null,
         gameId: (gameSelect && gameSelect.value) || null,
         currency: currency || undefined,
