@@ -110,6 +110,25 @@
         { id: "weekly_routine", label: "Weekly Routine", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 500, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10" },
       ],
     },
+    {
+      id: "pgr",
+      name: "Punishing Grey Raven",
+      server: "america",
+      resetHour: 0,
+      resetMinute: 0,
+      dailies: true,
+      dailyCurrency: 30,
+      currencyPerPull: 250,
+      currencyName: "Black Cards",
+      weeklies: [
+        { id: "missions", label: "Missions", weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, currency: 1000, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-17" },
+        { id: "operation_guardians", label: "Operation Guardians", weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, currency: 0, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-17" },
+      ],
+      endgame: [
+        { id: "warzone", label: "WarZone", currency: 0, weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week" },
+        { id: "pain_cage", label: "Pain Cage", currency: 50, weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week" },
+      ],
+    },
   ];
 
   const taskModal = {
@@ -154,6 +173,7 @@
     lastProcessedResets: { dailies: {}, weeklies: {}, endgame: {} }, // last period we processed for each task
     attendancePieInclude: {},
     dataPieInclude: {}, // { gameId: { dailies, weeklies, endgame, extracurricular } } - true = include in total/pie
+    dataExcludeInProgress: {}, // { gameId: true } - true = only completed cycles (default); false = include theoretical in-progress
     attendanceView: "weekly", // "weekly" | "history" | "timestamps"
     timestampsSelectedGameIds: {}, // { gameId: true } - which games to show in timestamps page; empty = all
     timestampsSelectedEndgameTasks: {}, // { "gameId.taskId": true } - which endgame tasks to show; empty = all
@@ -599,6 +619,7 @@
         if (parsed.endgameView === "grid" || parsed.endgameView === "list") state.endgameView = parsed.endgameView;
         if (parsed.attendancePieInclude && typeof parsed.attendancePieInclude === "object") state.attendancePieInclude = parsed.attendancePieInclude;
         if (parsed.dataPieInclude && typeof parsed.dataPieInclude === "object") state.dataPieInclude = parsed.dataPieInclude;
+        if (parsed.dataExcludeInProgress && typeof parsed.dataExcludeInProgress === "object") state.dataExcludeInProgress = parsed.dataExcludeInProgress;
         if (parsed.attendanceView === "weekly" || parsed.attendanceView === "history" || parsed.attendanceView === "timestamps") state.attendanceView = parsed.attendanceView;
         if (parsed.historyMonth != null && parsed.historyMonth >= 0 && parsed.historyMonth <= 11) state.historyMonth = parsed.historyMonth;
         if (parsed.historyYear != null && Number.isFinite(parsed.historyYear)) state.historyYear = parsed.historyYear;
@@ -730,6 +751,7 @@
       endgameView: state.endgameView,
       attendancePieInclude: state.attendancePieInclude,
       dataPieInclude: state.dataPieInclude,
+      dataExcludeInProgress: state.dataExcludeInProgress,
       attendanceView: state.attendanceView,
       timestampsSelectedGameIds: state.timestampsSelectedGameIds,
       timestampsSelectedEndgameTasks: state.timestampsSelectedEndgameTasks,

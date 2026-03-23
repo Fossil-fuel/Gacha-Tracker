@@ -129,9 +129,13 @@
       endgame,
     });
     const game = getGame(id);
-    if (game && o.presetId && (weeklies.length || endgame.length)) {
+    if (game && o.presetId) {
       const now = getSimulatedNow();
       const todayStr = getDateStr();
+      if (game.dailies) {
+        state.lastProcessedResets.dailies = state.lastProcessedResets.dailies || {};
+        state.lastProcessedResets.dailies[id] = todayStr;
+      }
       (game.weeklies || []).forEach((task) => {
         const key = id + "." + (task.id || task.label);
         const remainingMs = getWeeklyTimeRemainingMs(task, now, game);
@@ -409,24 +413,75 @@
     return name || "Currency";
   }
 
-  function getGameEarnedAndPotential(game) {
+  /** Get completed and attempted counts for only cycles that have fully ended (periodEnd <= now). */
+  function getCompletedAttemptedCompletedCyclesOnly(game, type, key) {
+    const now = getSimulatedNow();
+    const history = getTaskTallyHistory(game, type, key);
+    const endedOnly = history.filter((p) => p.periodEnd.getTime() <= now.getTime());
+    return {
+      attempted: endedOnly.length,
+      completed: endedOnly.reduce((s, p) => s + p.completed, 0),
+    };
+  }
+
+  /** Get earned for endgame from only completed cycles (first N entries from endgameCurrencyEarned). */
+  function getEndgameEarnedCompletedCyclesOnly(gameId, taskId, completedCount) {
+    const arr = getEndgameEarnedPerCompletion(gameId, taskId);
+    let sum = 0;
+    for (let i = 0; i < completedCount && i < arr.length; i++) {
+      sum += Number(arr[i]) || 0;
+    }
+    return sum;
+  }
+
+  function getGameEarnedAndPotential(game, excludeInProgress) {
     if (!game) return null;
-    const dEarned = game.dailies ? getCompletedAmount(state.dailiesCompleted, game.id) * getDailyPotential(game) : 0;
-    const dPotential = game.dailies ? getAttemptedAmount(state.dailiesAttempted, game.id) * getDailyPotential(game) : 0;
+    const excl = excludeInProgress !== false && (state.dataExcludeInProgress && state.dataExcludeInProgress[game.id] !== false);
+    const dailyPot = getDailyPotential(game);
+
+    let dEarned, dPotential;
+    if (game.dailies) {
+      if (excl) {
+        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id);
+        dEarned = ca.completed * dailyPot;
+        dPotential = ca.attempted * dailyPot;
+      } else {
+        dEarned = getCompletedAmount(state.dailiesCompleted, game.id) * dailyPot;
+        dPotential = getAttemptedAmount(state.dailiesAttempted, game.id) * dailyPot;
+      }
+    } else {
+      dEarned = 0;
+      dPotential = 0;
+    }
+
     let wEarned = 0, wPotential = 0;
     (game.weeklies || []).forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
       const pot = getWeeklyPotential(t);
-      wEarned += getCompletedAmount(state.weekliesCompleted, key) * pot;
-      wPotential += getAttemptedAmount(state.weekliesAttempted, key) * pot;
+      if (excl) {
+        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key);
+        wEarned += ca.completed * pot;
+        wPotential += ca.attempted * pot;
+      } else {
+        wEarned += getCompletedAmount(state.weekliesCompleted, key) * pot;
+        wPotential += getAttemptedAmount(state.weekliesAttempted, key) * pot;
+      }
     });
+
     let eEarned = 0, ePotential = 0;
     (game.endgame || []).forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
       const pot = getEndgamePotential(t);
-      eEarned += getEndgameEarned(game.id, t.id || t.label);
-      ePotential += getAttemptedAmount(state.endgameAttempted, key) * pot;
+      if (excl) {
+        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key);
+        eEarned += getEndgameEarnedCompletedCyclesOnly(game.id, t.id || t.label, ca.completed);
+        ePotential += ca.attempted * pot;
+      } else {
+        eEarned += getEndgameEarned(game.id, t.id || t.label);
+        ePotential += getAttemptedAmount(state.endgameAttempted, key) * pot;
+      }
     });
+
     let xEarned = 0, xPotential = 0;
     (state.extracurricularTasks || []).forEach((t) => {
       if (t.gameId !== game.id) return;
@@ -435,6 +490,7 @@
       xPotential += cur;
       if (state.extracurricularCompleted[t.id]) xEarned += cur;
     });
+
     return {
       dailies: { earned: dEarned, potential: dPotential },
       weeklies: { earned: wEarned, potential: wPotential },

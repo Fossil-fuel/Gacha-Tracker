@@ -227,6 +227,25 @@
         { id: "weekly_routine", label: "Weekly Routine", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 500, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10" },
       ],
     },
+    {
+      id: "pgr",
+      name: "Punishing Grey Raven",
+      server: "america",
+      resetHour: 0,
+      resetMinute: 0,
+      dailies: true,
+      dailyCurrency: 30,
+      currencyPerPull: 250,
+      currencyName: "Black Cards",
+      weeklies: [
+        { id: "missions", label: "Missions", weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, currency: 1000, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-17" },
+        { id: "operation_guardians", label: "Operation Guardians", weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, currency: 0, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-17" },
+      ],
+      endgame: [
+        { id: "warzone", label: "WarZone", currency: 0, weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week" },
+        { id: "pain_cage", label: "Pain Cage", currency: 50, weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week" },
+      ],
+    },
   ];
 
   const taskModal = {
@@ -271,6 +290,7 @@
     lastProcessedResets: { dailies: {}, weeklies: {}, endgame: {} }, // last period we processed for each task
     attendancePieInclude: {},
     dataPieInclude: {}, // { gameId: { dailies, weeklies, endgame, extracurricular } } - true = include in total/pie
+    dataExcludeInProgress: {}, // { gameId: true } - true = only completed cycles (default); false = include theoretical in-progress
     attendanceView: "weekly", // "weekly" | "history" | "timestamps"
     timestampsSelectedGameIds: {}, // { gameId: true } - which games to show in timestamps page; empty = all
     timestampsSelectedEndgameTasks: {}, // { "gameId.taskId": true } - which endgame tasks to show; empty = all
@@ -716,6 +736,7 @@
         if (parsed.endgameView === "grid" || parsed.endgameView === "list") state.endgameView = parsed.endgameView;
         if (parsed.attendancePieInclude && typeof parsed.attendancePieInclude === "object") state.attendancePieInclude = parsed.attendancePieInclude;
         if (parsed.dataPieInclude && typeof parsed.dataPieInclude === "object") state.dataPieInclude = parsed.dataPieInclude;
+        if (parsed.dataExcludeInProgress && typeof parsed.dataExcludeInProgress === "object") state.dataExcludeInProgress = parsed.dataExcludeInProgress;
         if (parsed.attendanceView === "weekly" || parsed.attendanceView === "history" || parsed.attendanceView === "timestamps") state.attendanceView = parsed.attendanceView;
         if (parsed.historyMonth != null && parsed.historyMonth >= 0 && parsed.historyMonth <= 11) state.historyMonth = parsed.historyMonth;
         if (parsed.historyYear != null && Number.isFinite(parsed.historyYear)) state.historyYear = parsed.historyYear;
@@ -847,6 +868,7 @@
       endgameView: state.endgameView,
       attendancePieInclude: state.attendancePieInclude,
       dataPieInclude: state.dataPieInclude,
+      dataExcludeInProgress: state.dataExcludeInProgress,
       attendanceView: state.attendanceView,
       timestampsSelectedGameIds: state.timestampsSelectedGameIds,
       timestampsSelectedEndgameTasks: state.timestampsSelectedEndgameTasks,
@@ -3939,9 +3961,13 @@
       endgame,
     });
     const game = getGame(id);
-    if (game && o.presetId && (weeklies.length || endgame.length)) {
+    if (game && o.presetId) {
       const now = getSimulatedNow();
       const todayStr = getDateStr();
+      if (game.dailies) {
+        state.lastProcessedResets.dailies = state.lastProcessedResets.dailies || {};
+        state.lastProcessedResets.dailies[id] = todayStr;
+      }
       (game.weeklies || []).forEach((task) => {
         const key = id + "." + (task.id || task.label);
         const remainingMs = getWeeklyTimeRemainingMs(task, now, game);
@@ -4219,24 +4245,75 @@
     return name || "Currency";
   }
 
-  function getGameEarnedAndPotential(game) {
+  /** Get completed and attempted counts for only cycles that have fully ended (periodEnd <= now). */
+  function getCompletedAttemptedCompletedCyclesOnly(game, type, key) {
+    const now = getSimulatedNow();
+    const history = getTaskTallyHistory(game, type, key);
+    const endedOnly = history.filter((p) => p.periodEnd.getTime() <= now.getTime());
+    return {
+      attempted: endedOnly.length,
+      completed: endedOnly.reduce((s, p) => s + p.completed, 0),
+    };
+  }
+
+  /** Get earned for endgame from only completed cycles (first N entries from endgameCurrencyEarned). */
+  function getEndgameEarnedCompletedCyclesOnly(gameId, taskId, completedCount) {
+    const arr = getEndgameEarnedPerCompletion(gameId, taskId);
+    let sum = 0;
+    for (let i = 0; i < completedCount && i < arr.length; i++) {
+      sum += Number(arr[i]) || 0;
+    }
+    return sum;
+  }
+
+  function getGameEarnedAndPotential(game, excludeInProgress) {
     if (!game) return null;
-    const dEarned = game.dailies ? getCompletedAmount(state.dailiesCompleted, game.id) * getDailyPotential(game) : 0;
-    const dPotential = game.dailies ? getAttemptedAmount(state.dailiesAttempted, game.id) * getDailyPotential(game) : 0;
+    const excl = excludeInProgress !== false && (state.dataExcludeInProgress && state.dataExcludeInProgress[game.id] !== false);
+    const dailyPot = getDailyPotential(game);
+
+    let dEarned, dPotential;
+    if (game.dailies) {
+      if (excl) {
+        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id);
+        dEarned = ca.completed * dailyPot;
+        dPotential = ca.attempted * dailyPot;
+      } else {
+        dEarned = getCompletedAmount(state.dailiesCompleted, game.id) * dailyPot;
+        dPotential = getAttemptedAmount(state.dailiesAttempted, game.id) * dailyPot;
+      }
+    } else {
+      dEarned = 0;
+      dPotential = 0;
+    }
+
     let wEarned = 0, wPotential = 0;
     (game.weeklies || []).forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
       const pot = getWeeklyPotential(t);
-      wEarned += getCompletedAmount(state.weekliesCompleted, key) * pot;
-      wPotential += getAttemptedAmount(state.weekliesAttempted, key) * pot;
+      if (excl) {
+        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key);
+        wEarned += ca.completed * pot;
+        wPotential += ca.attempted * pot;
+      } else {
+        wEarned += getCompletedAmount(state.weekliesCompleted, key) * pot;
+        wPotential += getAttemptedAmount(state.weekliesAttempted, key) * pot;
+      }
     });
+
     let eEarned = 0, ePotential = 0;
     (game.endgame || []).forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
       const pot = getEndgamePotential(t);
-      eEarned += getEndgameEarned(game.id, t.id || t.label);
-      ePotential += getAttemptedAmount(state.endgameAttempted, key) * pot;
+      if (excl) {
+        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key);
+        eEarned += getEndgameEarnedCompletedCyclesOnly(game.id, t.id || t.label, ca.completed);
+        ePotential += ca.attempted * pot;
+      } else {
+        eEarned += getEndgameEarned(game.id, t.id || t.label);
+        ePotential += getAttemptedAmount(state.endgameAttempted, key) * pot;
+      }
     });
+
     let xEarned = 0, xPotential = 0;
     (state.extracurricularTasks || []).forEach((t) => {
       if (t.gameId !== game.id) return;
@@ -4245,6 +4322,7 @@
       xPotential += cur;
       if (state.extracurricularCompleted[t.id]) xEarned += cur;
     });
+
     return {
       dailies: { earned: dEarned, potential: dPotential },
       weeklies: { earned: wEarned, potential: wPotential },
@@ -6254,6 +6332,16 @@
     });
   }
 
+  function getDataExcludeInProgress(gameId) {
+    const g = state.dataExcludeInProgress && state.dataExcludeInProgress[gameId];
+    return g !== false;
+  }
+
+  function setDataExcludeInProgress(gameId, value) {
+    if (!state.dataExcludeInProgress) state.dataExcludeInProgress = {};
+    state.dataExcludeInProgress[gameId] = value;
+  }
+
   function getDataPieInclude(gameId, category) {
     const g = state.dataPieInclude && state.dataPieInclude[gameId];
     return g && g[category] !== undefined ? g[category] : true;
@@ -6278,6 +6366,27 @@
     gameTitle.className = "data-game-title";
     gameTitle.textContent = game.name;
     container.appendChild(gameTitle);
+
+    const exclToggleWrap = document.createElement("div");
+    exclToggleWrap.className = "data-excl-toggle-wrap";
+    const exclToggle = document.createElement("label");
+    exclToggle.className = "data-excl-toggle";
+    const exclCheck = document.createElement("input");
+    exclCheck.type = "checkbox";
+    exclCheck.checked = getDataExcludeInProgress(game.id);
+    exclCheck.setAttribute("aria-label", "Exclude in-progress cycles from data");
+    exclCheck.addEventListener("change", () => {
+      setDataExcludeInProgress(game.id, exclCheck.checked);
+      save();
+      renderAll();
+    });
+    exclToggle.appendChild(exclCheck);
+    const exclText = document.createElement("span");
+    exclText.className = "data-excl-text";
+    exclText.textContent = "Only completed cycles (exclude in-progress). Turn off to show theoretical data including current-cycle tasks not yet completed.";
+    exclToggle.appendChild(exclText);
+    exclToggleWrap.appendChild(exclToggle);
+    container.appendChild(exclToggleWrap);
 
     const ep = getGameEarnedAndPotential(game);
     const cpp = Math.max(0, Number(game.currencyPerPull) || 0);
@@ -6401,23 +6510,36 @@
     tablesSection.appendChild(pullsTableWrap);
     container.appendChild(tablesSection);
 
-    const dCompleted = game.dailies ? getCompletedAmount(state.dailiesCompleted, game.id) : 0;
-    const dAttempted = game.dailies ? getAttemptedAmount(state.dailiesAttempted, game.id) : 0;
+    const excl = getDataExcludeInProgress(game.id);
+    const dCompleted = game.dailies ? (excl ? getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id).completed : getCompletedAmount(state.dailiesCompleted, game.id)) : 0;
+    const dAttempted = game.dailies ? (excl ? getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id).attempted : getAttemptedAmount(state.dailiesAttempted, game.id)) : 0;
     const dTotal = game.dailies ? (dAttempted > 0 ? dAttempted : Math.max(dCompleted, 1)) : 0;
     const weeklies = game.weeklies || [];
     let wCompleted = 0, wAttempted = 0;
     weeklies.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
-      wCompleted += getCompletedAmount(state.weekliesCompleted, key);
-      wAttempted += getAttemptedAmount(state.weekliesAttempted, key);
+      if (excl) {
+        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key);
+        wCompleted += ca.completed;
+        wAttempted += ca.attempted;
+      } else {
+        wCompleted += getCompletedAmount(state.weekliesCompleted, key);
+        wAttempted += getAttemptedAmount(state.weekliesAttempted, key);
+      }
     });
     const wTotal = wAttempted > 0 ? wAttempted : Math.max(wCompleted, weeklies.length || 1);
     const endgame = game.endgame || [];
     let eCompleted = 0, eAttempted = 0;
     endgame.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
-      eCompleted += getCompletedAmount(state.endgameCompleted, key);
-      eAttempted += getAttemptedAmount(state.endgameAttempted, key);
+      if (excl) {
+        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key);
+        eCompleted += ca.completed;
+        eAttempted += ca.attempted;
+      } else {
+        eCompleted += getCompletedAmount(state.endgameCompleted, key);
+        eAttempted += getAttemptedAmount(state.endgameAttempted, key);
+      }
     });
     const eTotal = eAttempted > 0 ? eAttempted : Math.max(eCompleted, endgame.length || 1);
 
@@ -6443,10 +6565,9 @@
       wPies.className = "pie-row";
       weeklies.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const completed = getCompletedAmount(state.weekliesCompleted, key);
-        const attempted = getAttemptedAmount(state.weekliesAttempted, key);
-        const total = attempted > 0 ? attempted : Math.max(completed, 1);
-        wPies.appendChild(createCompletionPieBox(task.label || "Weekly", completed, total, false));
+        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key) : { completed: getCompletedAmount(state.weekliesCompleted, key), attempted: getAttemptedAmount(state.weekliesAttempted, key) };
+        const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
+        wPies.appendChild(createCompletionPieBox(task.label || "Weekly", ca.completed, total, false));
       });
       weekliesSection.appendChild(wPies);
       container.appendChild(weekliesSection);
@@ -6463,10 +6584,9 @@
       ePies.className = "pie-row";
       endgame.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const completed = getCompletedAmount(state.endgameCompleted, key);
-        const attempted = getAttemptedAmount(state.endgameAttempted, key);
-        const total = attempted > 0 ? attempted : Math.max(completed, 1);
-        ePies.appendChild(createCompletionPieBox(task.label || "Endgame", completed, total, true));
+        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key) : { completed: getCompletedAmount(state.endgameCompleted, key), attempted: getAttemptedAmount(state.endgameAttempted, key) };
+        const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
+        ePies.appendChild(createCompletionPieBox(task.label || "Endgame", ca.completed, total, true));
       });
       endgameSection.appendChild(ePies);
       container.appendChild(endgameSection);
@@ -6481,9 +6601,9 @@
       currencyPies.className = "pie-row";
       endgame.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const earned = Number(getEndgameEarned(game.id, task.id || task.label)) || 0;
-        const attempted = getAttemptedAmount(state.endgameAttempted, key);
-        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, attempted));
+        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key) : { completed: getCompletedAmount(state.endgameCompleted, key), attempted: getAttemptedAmount(state.endgameAttempted, key) };
+        const earned = excl ? getEndgameEarnedCompletedCyclesOnly(game.id, task.id || task.label, ca.completed) : (Number(getEndgameEarned(game.id, task.id || task.label)) || 0);
+        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, ca.attempted));
       });
       currencySection.appendChild(currencyPies);
       container.appendChild(currencySection);

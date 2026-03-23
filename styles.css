@@ -1897,10 +1897,57 @@ body {
 
 /* Data view - per-game pie charts */
 .data-game-title {
-  margin: 0 0 1rem;
+  margin: 0 0 0.5rem;
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--text);
+}
+
+.data-excl-toggle-wrap {
+  margin-bottom: 1rem;
+}
+
+.data-excl-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  max-width: 36rem;
+}
+
+/* Fill when on, outline when off (no check mark) */
+.data-excl-toggle input[type="checkbox"] {
+  flex-shrink: 0;
+  margin-top: 0.2em;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  min-width: 1.25rem;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+}
+
+.data-excl-toggle input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.data-excl-toggle input[type="checkbox"]:hover {
+  border-color: var(--accent);
+}
+
+.data-excl-toggle input[type="checkbox"]:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+.data-excl-text {
+  line-height: 1.4;
 }
 
 .data-pie-row,
@@ -3014,7 +3061,7 @@ input[type="date"] {
 
 .timestamps-hour-stacked .timestamps-hour-stack {
   align-items: stretch;
-  justify-content: flex-end;
+  justify-content: flex-start; /* bars start from bottom; flex-start = bottom in column-reverse */
 }
 
 .timestamps-bar-segment {
