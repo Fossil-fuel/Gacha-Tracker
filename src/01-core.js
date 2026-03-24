@@ -26,14 +26,14 @@
       currencyPerPull: 160,
       currencyName: "Stellar Jade",
       weeklies: [
-        { id: "divergent", label: "Divergent Universe", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-09", currency: 225, frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week" },
-        { id: "currency", label: "Currency Wars", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-02", currency: 225, frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week" },
+        { id: "divergent", label: "Divergent Universe", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 225, frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week", adjustForDST: true, dateStarted: "2026-03-09" },
+        { id: "currency", label: "Currency Wars", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 225, frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week", adjustForDST: true, dateStarted: "2026-03-02" },
       ],
       endgame: [
-        { id: "apocalyptic", label: "Apocalyptic Shadow", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-02", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week" },
-        { id: "anomaly", label: "Anomaly Arbitration", currency: 0, weekStartDay: 3, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-11", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week" },
-        { id: "moc", label: "Memory of Chaos", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-02", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week" },
-        { id: "purefiction", label: "Pure Fiction", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-16", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week" },
+        { id: "apocalyptic", label: "Apocalyptic Shadow", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-02", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week", adjustForDST: true },
+        { id: "anomaly", label: "Anomaly Arbitration", currency: 0, weekStartDay: 3, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-11", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week", adjustForDST: true },
+        { id: "moc", label: "Memory of Chaos", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-02", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week", adjustForDST: true },
+        { id: "purefiction", label: "Pure Fiction", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-16", frequencyEvery: 6, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "week", adjustForDST: true },
       ],
     },
     {
@@ -46,12 +46,12 @@
       currencyPerPull: 160,
       currencyName: "Polychrome",
       weeklies: [
-        { id: "weekly_ridu", label: "Weekly Ridu", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 60 },
-        { id: "hallow_zero", label: "Hallow Zero", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 160 },
+        { id: "weekly_ridu", label: "Weekly Ridu", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 60, adjustForDST: true },
+        { id: "hallow_zero", label: "Hallow Zero", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 160, adjustForDST: true },
       ],
       endgame: [
-        { id: "deadly_assault", label: "Deadly Assault", currency: 300, weekStartDay: 5, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-13", frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week" },
-        { id: "shiyu_defense", label: "Shiyu Defense", currency: 780, weekStartDay: 5, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-06", frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week" },
+        { id: "deadly_assault", label: "Deadly Assault", currency: 300, weekStartDay: 5, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-13", frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week", adjustForDST: true },
+        { id: "shiyu_defense", label: "Shiyu Defense", currency: 780, weekStartDay: 5, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-06", frequencyEvery: 2, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "week", adjustForDST: true },
       ],
     },
     {
@@ -65,14 +65,14 @@
       currencyPerPull: 280,
       currencyName: "Crystals",
       weeklies: [
-        { id: "weekly_share", label: "Weekly Share", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 30, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10" },
-        { id: "elysian_realm", label: "Elysian Realm", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 500, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10" },
-        { id: "armata_contribution", label: "Armata Contribution", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 25, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10" },
+        { id: "weekly_share", label: "Weekly Share", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 30, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10", adjustForDST: true },
+        { id: "elysian_realm", label: "Elysian Realm", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 500, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10", adjustForDST: true },
+        { id: "armata_contribution", label: "Armata Contribution", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 25, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10", adjustForDST: true },
       ],
       endgame: [
-        { id: "memorial_arena", label: "Memorial Arena", currency: 140, weekStartDay: 2, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-10", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "day" },
-        { id: "superstring_p1", label: "Superstring Dimension P1", currency: 520, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-10", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "day" },
-        { id: "superstring_p2", label: "Superstring Dimension P2", currency: 520, weekStartDay: 5, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-06", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "day" },
+        { id: "memorial_arena", label: "Memorial Arena", currency: 140, weekStartDay: 2, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-10", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 6, timeLimitUnit: "day", adjustForDST: true },
+        { id: "superstring_p1", label: "Superstring Dimension P1", currency: 520, weekStartDay: 1, weekStartHour: 20, weekStartMinute: 0, dateStarted: "2026-03-23", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "day", adjustForDST: true },
+        { id: "superstring_p2", label: "Superstring Dimension P2", currency: 520, weekStartDay: 5, weekStartHour: 20, weekStartMinute: 0, dateStarted: "2026-03-06", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 2, timeLimitUnit: "day", adjustForDST: true },
       ],
     },
     {
@@ -86,11 +86,11 @@
       currencyPerPull: 160,
       currencyName: "Astrite",
       weeklies: [
-        { id: "thousand_gateways", label: "Thousand Gateways", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 160, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10" },
+        { id: "thousand_gateways", label: "Thousand Gateways", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 160, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10", adjustForDST: true },
       ],
       endgame: [
-        { id: "tower_of_adversity", label: "Tower of Adversity", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-02", frequencyEvery: 4, frequencyUnit: "week", timeLimitEvery: 4, timeLimitUnit: "week" },
-        { id: "whimpering_wastes", label: "Whimpering Wastes", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-16", frequencyEvery: 4, frequencyUnit: "week", timeLimitEvery: 4, timeLimitUnit: "week" },
+        { id: "tower_of_adversity", label: "Tower of Adversity", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-03-02", frequencyEvery: 4, frequencyUnit: "week", timeLimitEvery: 4, timeLimitUnit: "week", adjustForDST: true },
+        { id: "whimpering_wastes", label: "Whimpering Wastes", currency: 800, weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, dateStarted: "2026-02-16", frequencyEvery: 4, frequencyUnit: "week", timeLimitEvery: 4, timeLimitUnit: "week", adjustForDST: true },
       ],
       extracurricular: [
         { label: "Doubled Pawns Matrix", description: "This is a Placeholder for the Doubled Pawns Matrix gamemode (GM). Starting date does not matter for this task, just change the End date. Feel free to remove this if you don't wish to track this GM. For a new rotation of this GM, a new task will have to be created for the respective rotation.", endDateTBD: true },
@@ -107,8 +107,9 @@
       currencyPerPull: 500,
       currencyName: "Oroberyls",
       weeklies: [
-        { id: "weekly_routine", label: "Weekly Routine", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 500, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10" },
+        { id: "weekly_routine", label: "Weekly Routine", weekStartDay: 1, weekStartHour: 4, weekStartMinute: 0, currency: 500, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-10", adjustForDST: true },
       ],
+      endgame: [],
     },
     {
       id: "pgr",
@@ -121,12 +122,12 @@
       currencyPerPull: 250,
       currencyName: "Black Cards",
       weeklies: [
-        { id: "missions", label: "Missions", weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, currency: 1000, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-17" },
-        { id: "operation_guardians", label: "Operation Guardians", weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, currency: 0, frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", dateStarted: "2026-03-17" },
+        { id: "missions", label: "Missions", weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, currency: 1000, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", adjustForDST: true },
+        { id: "operation_guardians", label: "Operation Guardians", weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, currency: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", adjustForDST: true },
       ],
       endgame: [
-        { id: "warzone", label: "WarZone", currency: 0, weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week" },
-        { id: "pain_cage", label: "Pain Cage", currency: 50, weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week" },
+        { id: "warzone", label: "WarZone", currency: 0, weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", adjustForDST: true },
+        { id: "pain_cage", label: "Pain Cage", currency: 50, weekStartDay: 1, weekStartHour: 0, weekStartMinute: 0, dateStarted: "2026-03-17", frequencyEvery: 1, frequencyUnit: "week", timeLimitEvery: 1, timeLimitUnit: "week", adjustForDST: true },
       ],
     },
   ];
