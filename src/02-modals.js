@@ -235,6 +235,24 @@
     }
     }
 
+    const skippedSection = qs("earningsModalSkippedSection");
+    const skippedListEl = qs("earningsModalSkippedList");
+    const skippedCycles = getEndgameSkippedCycles(key);
+    if (skippedSection && skippedListEl) {
+      if (skippedCycles.length === 0) {
+        skippedSection.hidden = true;
+      } else {
+        skippedSection.hidden = false;
+        skippedListEl.innerHTML = "";
+        skippedCycles.forEach((s) => {
+          const item = document.createElement("div");
+          item.className = "earnings-modal-skipped-item";
+          item.textContent = s.startStr + " — " + s.endStr + " (skipped)";
+          skippedListEl.appendChild(item);
+        });
+      }
+    }
+
     const modalEl = qs("earningsModal");
     if (modalEl) {
       modalEl.hidden = false;
@@ -728,14 +746,6 @@
     });
     if (selectedIds.size > 0 && state.completionTimestamps) {
       state.completionTimestamps = state.completionTimestamps.filter((t) => !selectedIds.has(t.gameId));
-      const selected = state.timestampsSelectedGameIds || {};
-      selectedIds.forEach((id) => delete selected[id]);
-      if (Object.keys(selected).length === 0) state.timestampsSelectedGameIds = {};
-      const endgameSelected = state.timestampsSelectedEndgameTasks || {};
-      Object.keys(endgameSelected).forEach((k) => {
-        if (selectedIds.has(k.split(".")[0])) delete endgameSelected[k];
-      });
-      if (Object.keys(endgameSelected).length === 0) state.timestampsSelectedEndgameTasks = {};
     }
     save();
     renderAll();

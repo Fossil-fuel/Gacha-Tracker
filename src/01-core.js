@@ -1778,8 +1778,7 @@
       const hour = getResetHour(game, "resetHour", getDefaultResetHour());
       const minute = Number.isFinite(game.resetMinute) ? game.resetMinute : 0;
       let d = new Date(earliestStr + "T12:00:00");
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      while (d <= today) {
+      while (getDateStr(d) <= todayStr) {
         const dateStr = getDateStr(d);
         const dayData = state.completionByDate[dateStr] || { dailies: [] };
         const completed = (dayData.dailies || []).includes(gameId) ? 1 : 0;
@@ -1841,6 +1840,142 @@
       }
     }
     return result;
+  }
+
+  /**
+   * Skipped endgame cycles (attempted but not completed). Used for time trend (0%) and history tab.
+   * Returns array of { periodStart, periodEnd, startStr, endStr }.
+   */
+  function getEndgameSkippedCycles(key) {
+    const dot = key.indexOf(".");
+    const gameId = dot >= 0 ? key.slice(0, dot) : key;
+    const game = getGame(gameId);
+    const task = (game?.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
+    if (!game || !task) return [];
+    const history = getTaskTallyHistory(game, "endgame", key);
+    const now = getSimulatedNow();
+    return history
+      .filter((p) => p.completed === 0 && p.periodEnd.getTime() <= now.getTime())
+      .map((p) => ({
+        periodStart: p.periodStart,
+        periodEnd: p.periodEnd,
+        startStr: getDateStr(p.periodStart),
+        endStr: getDateStr(p.periodEnd),
+      }));
+  }
+
+  /**
+   * Merged endgame completion events for the time trend graph.
+   * Completion History (start/end) = cycle boundaries = total time for the task.
+   * Calendar = earliest completion date within each cycle = when it was actually completed.
+   * % time remaining = (cycleEnd - completionMoment) / (cycleEnd - cycleStart) * 100.
+   * Skipped cycles = 0% plot points.
+   * Returns sorted array of { dateStr?, hour?, gameId, taskId, taskLabel, cycleStartStr?, cycleEndStr?, skipped? }.
+   */
+  function getEndgameCompletionEventsForTrend(key) {
+    const dot = key.indexOf(".");
+    const gameId = dot >= 0 ? key.slice(0, dot) : key;
+    const taskId = dot >= 0 ? key.slice(dot + 1) : "";
+    const game = getGame(gameId);
+    const task = (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
+    const taskLabel = task ? (task.label || taskId) : taskId;
+
+    const calendarDates = [];
+    Object.keys(state.completionByDate || {}).sort().forEach((dateStr) => {
+      const dayData = state.completionByDate[dateStr] || { endgame: [] };
+      if ((dayData.endgame || []).includes(key)) calendarDates.push(dateStr);
+    });
+
+    const storedDates = state.endgameCompletionDates[key] || [];
+    const timestampByDate = {};
+    (state.completionTimestamps || []).forEach((t) => {
+      if (t.taskType === "endgame" && t.gameId === gameId && t.taskId === taskId && isValidDateStr(t.dateStr)) {
+        timestampByDate[t.dateStr] = Number(t.hour);
+      }
+    });
+
+    const events = [];
+    const usedCalendarDates = new Set();
+
+    storedDates.forEach((stored, i) => {
+      const cycleStartStr = (stored && isValidDateStr(stored.start)) ? stored.start : null;
+      const cycleEndStr = (stored && isValidDateStr(stored.end)) ? stored.end : null;
+      if (!cycleStartStr || !cycleEndStr) {
+        const dateStr = calendarDates[i];
+        if (dateStr && isValidDateStr(dateStr)) {
+          const hour = Number.isFinite(timestampByDate[dateStr]) ? timestampByDate[dateStr] : 12;
+          events.push({ dateStr, hour, gameId, taskId, taskLabel, cycleStartStr: null, cycleEndStr: null });
+        }
+        return;
+      }
+      const earliestInCycle = calendarDates.find((dateStr) => {
+        if (usedCalendarDates.has(dateStr)) return false;
+        return dateStr >= cycleStartStr && dateStr <= cycleEndStr;
+      });
+      const dateStr = earliestInCycle || calendarDates[i];
+      if (!dateStr || !isValidDateStr(dateStr)) return;
+      if (dateStr < cycleStartStr || dateStr > cycleEndStr) return;
+      if (earliestInCycle) usedCalendarDates.add(earliestInCycle);
+      const hour = Number.isFinite(timestampByDate[dateStr]) ? timestampByDate[dateStr] : 12;
+      events.push({ dateStr, hour, gameId, taskId, taskLabel, cycleStartStr, cycleEndStr });
+    });
+
+    calendarDates.forEach((dateStr, i) => {
+      if (usedCalendarDates.has(dateStr)) return;
+      const stored = storedDates[i];
+      const cycleStartStr = (stored && isValidDateStr(stored.start)) ? stored.start : null;
+      const cycleEndStr = (stored && isValidDateStr(stored.end)) ? stored.end : null;
+      if (cycleStartStr && cycleEndStr) return;
+      const hour = Number.isFinite(timestampByDate[dateStr]) ? timestampByDate[dateStr] : 12;
+      events.push({ dateStr, hour, gameId, taskId, taskLabel, cycleStartStr, cycleEndStr });
+    });
+
+    (state.completionTimestamps || []).filter((t) => t.taskType === "endgame" && t.gameId === gameId && t.taskId === taskId).forEach((t) => {
+      const exists = events.some((e) => e.dateStr === t.dateStr);
+      if (!exists && isValidDateStr(t.dateStr)) {
+        events.push({ dateStr: t.dateStr, hour: Number(t.hour) || 12, gameId, taskId, taskLabel, cycleStartStr: null, cycleEndStr: null });
+      }
+    });
+
+    events.sort((a, b) => {
+      const da = a.dateStr + "T" + String(a.hour).padStart(2, "0") + ":00";
+      const db = b.dateStr + "T" + String(b.hour).padStart(2, "0") + ":00";
+      return da.localeCompare(db);
+    });
+
+    const skipped = getEndgameSkippedCycles(key);
+    skipped.forEach((s) => {
+      events.push({
+        dateStr: null,
+        hour: 12,
+        gameId,
+        taskId,
+        taskLabel,
+        cycleStartStr: s.startStr,
+        cycleEndStr: s.endStr,
+        skipped: true,
+      });
+    });
+    events.sort((a, b) => {
+      const aKey = a.cycleStartStr || a.dateStr || "";
+      const bKey = b.cycleStartStr || b.dateStr || "";
+      return aKey.localeCompare(bKey);
+    });
+    return events;
+  }
+
+  /** Parse dateStr (YYYY-MM-DD) and return moment at task's reset time in task timezone. Used for cycle boundary from Completion History. */
+  function getResetMomentForDateStr(task, game, dateStr) {
+    if (!isValidDateStr(dateStr)) return null;
+    const y = parseInt(dateStr.slice(0, 4), 10);
+    const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    const hour = getResetHour(task, "weekStartHour", getResetHour(task, "resetHour", 4), game);
+    const minute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : (Number.isFinite(task && task.resetMinute) ? task.resetMinute : 0);
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const tz = getTimezoneForTaskDst(task, baseTz);
+    const offsetRef = getOffsetRefDateForTask(task, tz);
+    return createDateInTimezone(y, mo, d, hour, minute, tz, offsetRef);
   }
 
   /**

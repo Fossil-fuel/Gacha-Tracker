@@ -3042,6 +3042,33 @@ input[type="date"] {
   text-align: center;
 }
 
+.earnings-modal-skipped-section {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.earnings-modal-skipped-heading {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+.earnings-modal-skipped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.earnings-modal-skipped-item {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
 /* Timestamps page */
 .timestamps-bar-graph {
   display: grid;

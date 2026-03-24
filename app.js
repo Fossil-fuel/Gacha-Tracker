@@ -1895,8 +1895,7 @@
       const hour = getResetHour(game, "resetHour", getDefaultResetHour());
       const minute = Number.isFinite(game.resetMinute) ? game.resetMinute : 0;
       let d = new Date(earliestStr + "T12:00:00");
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      while (d <= today) {
+      while (getDateStr(d) <= todayStr) {
         const dateStr = getDateStr(d);
         const dayData = state.completionByDate[dateStr] || { dailies: [] };
         const completed = (dayData.dailies || []).includes(gameId) ? 1 : 0;
@@ -1958,6 +1957,142 @@
       }
     }
     return result;
+  }
+
+  /**
+   * Skipped endgame cycles (attempted but not completed). Used for time trend (0%) and history tab.
+   * Returns array of { periodStart, periodEnd, startStr, endStr }.
+   */
+  function getEndgameSkippedCycles(key) {
+    const dot = key.indexOf(".");
+    const gameId = dot >= 0 ? key.slice(0, dot) : key;
+    const game = getGame(gameId);
+    const task = (game?.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
+    if (!game || !task) return [];
+    const history = getTaskTallyHistory(game, "endgame", key);
+    const now = getSimulatedNow();
+    return history
+      .filter((p) => p.completed === 0 && p.periodEnd.getTime() <= now.getTime())
+      .map((p) => ({
+        periodStart: p.periodStart,
+        periodEnd: p.periodEnd,
+        startStr: getDateStr(p.periodStart),
+        endStr: getDateStr(p.periodEnd),
+      }));
+  }
+
+  /**
+   * Merged endgame completion events for the time trend graph.
+   * Completion History (start/end) = cycle boundaries = total time for the task.
+   * Calendar = earliest completion date within each cycle = when it was actually completed.
+   * % time remaining = (cycleEnd - completionMoment) / (cycleEnd - cycleStart) * 100.
+   * Skipped cycles = 0% plot points.
+   * Returns sorted array of { dateStr?, hour?, gameId, taskId, taskLabel, cycleStartStr?, cycleEndStr?, skipped? }.
+   */
+  function getEndgameCompletionEventsForTrend(key) {
+    const dot = key.indexOf(".");
+    const gameId = dot >= 0 ? key.slice(0, dot) : key;
+    const taskId = dot >= 0 ? key.slice(dot + 1) : "";
+    const game = getGame(gameId);
+    const task = (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
+    const taskLabel = task ? (task.label || taskId) : taskId;
+
+    const calendarDates = [];
+    Object.keys(state.completionByDate || {}).sort().forEach((dateStr) => {
+      const dayData = state.completionByDate[dateStr] || { endgame: [] };
+      if ((dayData.endgame || []).includes(key)) calendarDates.push(dateStr);
+    });
+
+    const storedDates = state.endgameCompletionDates[key] || [];
+    const timestampByDate = {};
+    (state.completionTimestamps || []).forEach((t) => {
+      if (t.taskType === "endgame" && t.gameId === gameId && t.taskId === taskId && isValidDateStr(t.dateStr)) {
+        timestampByDate[t.dateStr] = Number(t.hour);
+      }
+    });
+
+    const events = [];
+    const usedCalendarDates = new Set();
+
+    storedDates.forEach((stored, i) => {
+      const cycleStartStr = (stored && isValidDateStr(stored.start)) ? stored.start : null;
+      const cycleEndStr = (stored && isValidDateStr(stored.end)) ? stored.end : null;
+      if (!cycleStartStr || !cycleEndStr) {
+        const dateStr = calendarDates[i];
+        if (dateStr && isValidDateStr(dateStr)) {
+          const hour = Number.isFinite(timestampByDate[dateStr]) ? timestampByDate[dateStr] : 12;
+          events.push({ dateStr, hour, gameId, taskId, taskLabel, cycleStartStr: null, cycleEndStr: null });
+        }
+        return;
+      }
+      const earliestInCycle = calendarDates.find((dateStr) => {
+        if (usedCalendarDates.has(dateStr)) return false;
+        return dateStr >= cycleStartStr && dateStr <= cycleEndStr;
+      });
+      const dateStr = earliestInCycle || calendarDates[i];
+      if (!dateStr || !isValidDateStr(dateStr)) return;
+      if (dateStr < cycleStartStr || dateStr > cycleEndStr) return;
+      if (earliestInCycle) usedCalendarDates.add(earliestInCycle);
+      const hour = Number.isFinite(timestampByDate[dateStr]) ? timestampByDate[dateStr] : 12;
+      events.push({ dateStr, hour, gameId, taskId, taskLabel, cycleStartStr, cycleEndStr });
+    });
+
+    calendarDates.forEach((dateStr, i) => {
+      if (usedCalendarDates.has(dateStr)) return;
+      const stored = storedDates[i];
+      const cycleStartStr = (stored && isValidDateStr(stored.start)) ? stored.start : null;
+      const cycleEndStr = (stored && isValidDateStr(stored.end)) ? stored.end : null;
+      if (cycleStartStr && cycleEndStr) return;
+      const hour = Number.isFinite(timestampByDate[dateStr]) ? timestampByDate[dateStr] : 12;
+      events.push({ dateStr, hour, gameId, taskId, taskLabel, cycleStartStr, cycleEndStr });
+    });
+
+    (state.completionTimestamps || []).filter((t) => t.taskType === "endgame" && t.gameId === gameId && t.taskId === taskId).forEach((t) => {
+      const exists = events.some((e) => e.dateStr === t.dateStr);
+      if (!exists && isValidDateStr(t.dateStr)) {
+        events.push({ dateStr: t.dateStr, hour: Number(t.hour) || 12, gameId, taskId, taskLabel, cycleStartStr: null, cycleEndStr: null });
+      }
+    });
+
+    events.sort((a, b) => {
+      const da = a.dateStr + "T" + String(a.hour).padStart(2, "0") + ":00";
+      const db = b.dateStr + "T" + String(b.hour).padStart(2, "0") + ":00";
+      return da.localeCompare(db);
+    });
+
+    const skipped = getEndgameSkippedCycles(key);
+    skipped.forEach((s) => {
+      events.push({
+        dateStr: null,
+        hour: 12,
+        gameId,
+        taskId,
+        taskLabel,
+        cycleStartStr: s.startStr,
+        cycleEndStr: s.endStr,
+        skipped: true,
+      });
+    });
+    events.sort((a, b) => {
+      const aKey = a.cycleStartStr || a.dateStr || "";
+      const bKey = b.cycleStartStr || b.dateStr || "";
+      return aKey.localeCompare(bKey);
+    });
+    return events;
+  }
+
+  /** Parse dateStr (YYYY-MM-DD) and return moment at task's reset time in task timezone. Used for cycle boundary from Completion History. */
+  function getResetMomentForDateStr(task, game, dateStr) {
+    if (!isValidDateStr(dateStr)) return null;
+    const y = parseInt(dateStr.slice(0, 4), 10);
+    const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    const hour = getResetHour(task, "weekStartHour", getResetHour(task, "resetHour", 4), game);
+    const minute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : (Number.isFinite(task && task.resetMinute) ? task.resetMinute : 0);
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const tz = getTimezoneForTaskDst(task, baseTz);
+    const offsetRef = getOffsetRefDateForTask(task, tz);
+    return createDateInTimezone(y, mo, d, hour, minute, tz, offsetRef);
   }
 
   /**
@@ -2462,6 +2597,24 @@
     }
     }
 
+    const skippedSection = qs("earningsModalSkippedSection");
+    const skippedListEl = qs("earningsModalSkippedList");
+    const skippedCycles = getEndgameSkippedCycles(key);
+    if (skippedSection && skippedListEl) {
+      if (skippedCycles.length === 0) {
+        skippedSection.hidden = true;
+      } else {
+        skippedSection.hidden = false;
+        skippedListEl.innerHTML = "";
+        skippedCycles.forEach((s) => {
+          const item = document.createElement("div");
+          item.className = "earnings-modal-skipped-item";
+          item.textContent = s.startStr + " — " + s.endStr + " (skipped)";
+          skippedListEl.appendChild(item);
+        });
+      }
+    }
+
     const modalEl = qs("earningsModal");
     if (modalEl) {
       modalEl.hidden = false;
@@ -2955,14 +3108,6 @@
     });
     if (selectedIds.size > 0 && state.completionTimestamps) {
       state.completionTimestamps = state.completionTimestamps.filter((t) => !selectedIds.has(t.gameId));
-      const selected = state.timestampsSelectedGameIds || {};
-      selectedIds.forEach((id) => delete selected[id]);
-      if (Object.keys(selected).length === 0) state.timestampsSelectedGameIds = {};
-      const endgameSelected = state.timestampsSelectedEndgameTasks || {};
-      Object.keys(endgameSelected).forEach((k) => {
-        if (selectedIds.has(k.split(".")[0])) delete endgameSelected[k];
-      });
-      if (Object.keys(endgameSelected).length === 0) state.timestampsSelectedEndgameTasks = {};
     }
     save();
     renderAll();
@@ -5424,11 +5569,15 @@
     container.appendChild(calendarSection);
   }
 
+  const TIMESTAMPS_NONE = "_none";
+
   function renderAttendanceTimestamps(container) {
     const games = getAllGames();
     const selected = state.timestampsSelectedGameIds || {};
-    const showAll = Object.keys(selected).length === 0;
-    const timestamps = (state.completionTimestamps || []).filter((t) => showAll || selected[t.gameId]);
+    const showNone = !!selected[TIMESTAMPS_NONE];
+    const gameIds = Object.keys(selected).filter((k) => k !== TIMESTAMPS_NONE);
+    const showAll = !showNone && gameIds.length === 0;
+    const timestamps = showNone ? [] : (state.completionTimestamps || []).filter((t) => showAll || selected[t.gameId]);
 
     const header = document.createElement("div");
     header.className = "history-header";
@@ -5457,11 +5606,41 @@
     header.appendChild(weeklyBtn);
     container.appendChild(header);
 
+    const gameLabelRow = document.createElement("div");
+    gameLabelRow.style.display = "flex";
+    gameLabelRow.style.alignItems = "center";
+    gameLabelRow.style.gap = "0.5rem";
+    gameLabelRow.style.marginTop = "1rem";
     const gameLabel = document.createElement("h4");
     gameLabel.className = "data-section-label";
     gameLabel.textContent = "Show games";
-    gameLabel.style.marginTop = "1rem";
-    container.appendChild(gameLabel);
+    gameLabel.style.margin = "0";
+    gameLabelRow.appendChild(gameLabel);
+    const selectAllBtn = document.createElement("button");
+    selectAllBtn.type = "button";
+    selectAllBtn.className = "btn btn-ghost";
+    selectAllBtn.textContent = "Select all";
+    selectAllBtn.title = "Select all games and tasks";
+    selectAllBtn.addEventListener("click", () => {
+      state.timestampsSelectedGameIds = {};
+      state.timestampsSelectedEndgameTasks = {};
+      save();
+      renderAll();
+    });
+    gameLabelRow.appendChild(selectAllBtn);
+    const unselectAllBtn = document.createElement("button");
+    unselectAllBtn.type = "button";
+    unselectAllBtn.className = "btn btn-ghost";
+    unselectAllBtn.textContent = "Unselect all";
+    unselectAllBtn.title = "Deselect all games and tasks (show none)";
+    unselectAllBtn.addEventListener("click", () => {
+      state.timestampsSelectedGameIds = { [TIMESTAMPS_NONE]: true };
+      state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
+      save();
+      renderAll();
+    });
+    gameLabelRow.appendChild(unselectAllBtn);
+    container.appendChild(gameLabelRow);
     const gameWrap = document.createElement("div");
     gameWrap.className = "timestamps-game-selector";
     gameWrap.style.display = "flex";
@@ -5477,6 +5656,7 @@
       const isSelected = showAll || selected[game.id];
       if (isSelected) btn.classList.add("filled");
       btn.addEventListener("click", () => {
+        delete state.timestampsSelectedGameIds[TIMESTAMPS_NONE];
         if (showAll || selected[game.id]) {
           if (showAll) {
             const others = games.filter((g) => g.id !== game.id).map((g) => g.id);
@@ -5485,10 +5665,10 @@
           } else {
             delete state.timestampsSelectedGameIds[game.id];
           }
-          if (Object.keys(state.timestampsSelectedGameIds).length === 0) state.timestampsSelectedGameIds = {};
+          if (Object.keys(state.timestampsSelectedGameIds).filter((k) => k !== TIMESTAMPS_NONE).length === 0) state.timestampsSelectedGameIds = { [TIMESTAMPS_NONE]: true };
         } else {
           state.timestampsSelectedGameIds[game.id] = true;
-          if (Object.keys(state.timestampsSelectedGameIds).length === games.length) state.timestampsSelectedGameIds = {};
+          if (Object.keys(state.timestampsSelectedGameIds).filter((k) => k !== TIMESTAMPS_NONE).length === games.length) state.timestampsSelectedGameIds = {};
         }
         save();
         renderAll();
@@ -5581,7 +5761,7 @@
       lbl.textContent = h;
       col.appendChild(lbl);
       const total = hourCountsByType.dailies[h] + hourCountsByType.weeklies[h] + hourCountsByType.endgame[h];
-      col.title = h + ":00 – Dailies: " + hourCountsByType.dailies[h] + ", Weeklies: " + hourCountsByType.weeklies[h] + ", Endgame: " + hourCountsByType.endgame[h];
+      col.title = h + ":00 – Dailies: " + hourCountsByType.dailies[h] + ", Weeklies: " + hourCountsByType.weeklies[h] + ", Endgame: " + hourCountsByType.endgame[h] + " — Total: " + total;
       col.style.cursor = "pointer";
       col.addEventListener("click", () => {
         openTimeTrendsDetailModal(h + ":00 completions", hourDetails[h] || []);
@@ -5589,7 +5769,7 @@
       barWrap.appendChild(col);
       const tooltip = document.createElement("div");
       tooltip.className = "timestamps-hour-tooltip";
-      tooltip.textContent = h + ":00 – Dailies: " + hourCountsByType.dailies[h] + ", Weeklies: " + hourCountsByType.weeklies[h] + ", Endgame: " + hourCountsByType.endgame[h];
+      tooltip.textContent = h + ":00 – Dailies: " + hourCountsByType.dailies[h] + ", Weeklies: " + hourCountsByType.weeklies[h] + ", Endgame: " + hourCountsByType.endgame[h] + " — Total: " + total;
       col.appendChild(tooltip);
     }
     container.appendChild(barWrap);
@@ -5665,13 +5845,43 @@
     });
 
     const endgameTaskSelected = state.timestampsSelectedEndgameTasks || {};
-    const showAllEndgameTasks = Object.keys(endgameTaskSelected).length === 0;
+    const showNoneEndgame = !!endgameTaskSelected[TIMESTAMPS_NONE];
+    const endgameTaskIds = Object.keys(endgameTaskSelected).filter((k) => k !== TIMESTAMPS_NONE);
+    const showAllEndgameTasks = !showNoneEndgame && endgameTaskIds.length === 0;
 
+    const endgameTaskLabelRow = document.createElement("div");
+    endgameTaskLabelRow.style.display = "flex";
+    endgameTaskLabelRow.style.alignItems = "center";
+    endgameTaskLabelRow.style.gap = "0.5rem";
+    endgameTaskLabelRow.style.marginTop = "1.5rem";
     const endgameTaskLabel = document.createElement("h4");
     endgameTaskLabel.className = "data-section-label";
     endgameTaskLabel.textContent = "Endgame tasks";
-    endgameTaskLabel.style.marginTop = "1.5rem";
-    container.appendChild(endgameTaskLabel);
+    endgameTaskLabel.style.margin = "0";
+    endgameTaskLabelRow.appendChild(endgameTaskLabel);
+    const unselectAllEndgameBtn = document.createElement("button");
+    unselectAllEndgameBtn.type = "button";
+    unselectAllEndgameBtn.className = "btn btn-ghost";
+    const selectAllEndgameBtn = document.createElement("button");
+    selectAllEndgameBtn.type = "button";
+    selectAllEndgameBtn.className = "btn btn-ghost";
+    selectAllEndgameBtn.textContent = "Select all";
+    selectAllEndgameBtn.title = "Select all endgame tasks";
+    selectAllEndgameBtn.addEventListener("click", () => {
+      state.timestampsSelectedEndgameTasks = {};
+      save();
+      renderAll();
+    });
+    endgameTaskLabelRow.appendChild(selectAllEndgameBtn);
+    unselectAllEndgameBtn.textContent = "Unselect all";
+    unselectAllEndgameBtn.title = "Deselect all endgame tasks (show none)";
+    unselectAllEndgameBtn.addEventListener("click", () => {
+      state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
+      save();
+      renderAll();
+    });
+    endgameTaskLabelRow.appendChild(unselectAllEndgameBtn);
+    container.appendChild(endgameTaskLabelRow);
     const endgameTaskWrap = document.createElement("div");
     endgameTaskWrap.className = "timestamps-game-selector";
     endgameTaskWrap.style.display = "flex";
@@ -5686,6 +5896,7 @@
       btn.setAttribute("aria-pressed", (showAllEndgameTasks || endgameTaskSelected[key]) ? "true" : "false");
       if (showAllEndgameTasks || endgameTaskSelected[key]) btn.classList.add("filled");
       btn.addEventListener("click", () => {
+        delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
         if (showAllEndgameTasks || endgameTaskSelected[key]) {
           if (showAllEndgameTasks) {
             const others = allEndgameTasks.filter((et) => et.key !== key).map((et) => et.key);
@@ -5694,10 +5905,10 @@
           } else {
             delete state.timestampsSelectedEndgameTasks[key];
           }
-          if (Object.keys(state.timestampsSelectedEndgameTasks).length === 0) state.timestampsSelectedEndgameTasks = {};
+          if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === 0) state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
         } else {
           state.timestampsSelectedEndgameTasks[key] = true;
-          if (Object.keys(state.timestampsSelectedEndgameTasks).length === allEndgameTasks.length) state.timestampsSelectedEndgameTasks = {};
+          if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === allEndgameTasks.length) state.timestampsSelectedEndgameTasks = {};
         }
         save();
         renderAll();
@@ -5706,32 +5917,47 @@
     });
     container.appendChild(endgameTaskWrap);
 
-    const filteredEndgame = endgameOnly.filter((t) => {
-      const key = t.gameId + "." + t.taskId;
-      return showAllEndgameTasks || endgameTaskSelected[key];
-    });
     const taskPoints = {};
-    [...filteredEndgame].sort((a, b) => {
-      const da = a.dateStr + "T" + String(a.hour).padStart(2, "0") + ":00";
-      const db = b.dateStr + "T" + String(b.hour).padStart(2, "0") + ":00";
-      return da.localeCompare(db);
-    }).forEach((t) => {
-      const key = t.gameId + "." + t.taskId;
-      const game = getGame(t.gameId);
-      const task = (game?.endgame || []).find((et) => (et.id || et.label) === t.taskId);
+    allEndgameTasks.forEach(({ key, gameId, taskId, gameName, taskLabel }) => {
+      if (!showAllEndgameTasks && !endgameTaskSelected[key]) return;
+      const events = getEndgameCompletionEventsForTrend(key);
+      if (events.length === 0) return;
+      const game = getGame(gameId);
+      const task = (game?.endgame || []).find((et) => (et.id || et.label) === taskId);
       if (!game || !task) return;
-      const cycleStart = getCycleStartForDate(task, t.dateStr, game);
       const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
       const hasExplicitLimit = task.timeLimitEvery != null || task.timeLimitUnit != null;
       const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
-      const cycleEndMs = cycleStart.getTime() + timeLimitMs;
-      const completionMs = new Date(t.dateStr + "T" + String(t.hour).padStart(2, "0") + ":00:00").getTime();
-      const cycleLen = cycleEndMs - cycleStart.getTime();
-      if (cycleLen <= 0) return;
-      let pct = ((cycleEndMs - completionMs) / cycleLen) * 100;
-      pct = Math.max(0, Math.min(100, pct));
-      if (!taskPoints[key]) taskPoints[key] = { label: t.taskLabel, points: [] };
-      taskPoints[key].points.push(pct);
+      const byCycle = {};
+      events.forEach((t) => {
+        let cycleStartMs, cycleEndMs;
+        if (t.cycleStartStr && t.cycleEndStr) {
+          const startMom = getResetMomentForDateStr(task, game, t.cycleStartStr);
+          const endMom = getResetMomentForDateStr(task, game, t.cycleEndStr);
+          if (!startMom || !endMom || endMom.getTime() <= startMom.getTime()) return;
+          cycleStartMs = startMom.getTime();
+          cycleEndMs = endMom.getTime();
+        } else {
+          const cycleStart = getCycleStartForDate(task, t.dateStr, game);
+          cycleStartMs = cycleStart.getTime();
+          cycleEndMs = cycleStartMs + timeLimitMs;
+        }
+        let pct;
+        if (t.skipped) {
+          pct = 0;
+        } else {
+          const completionMs = new Date(t.dateStr + "T" + String(t.hour).padStart(2, "0") + ":00:00").getTime();
+          const cycleLen = cycleEndMs - cycleStartMs;
+          if (cycleLen <= 0) return;
+          pct = ((cycleEndMs - completionMs) / cycleLen) * 100;
+          pct = Math.max(0, Math.min(100, pct));
+        }
+        if (byCycle[cycleStartMs] == null || pct > byCycle[cycleStartMs]) byCycle[cycleStartMs] = pct;
+      });
+      const sortedCycles = Object.keys(byCycle).map(Number).sort((a, b) => a - b);
+      if (sortedCycles.length > 0) {
+        taskPoints[key] = { label: taskLabel, points: sortedCycles.map((ms) => byCycle[ms]) };
+      }
     });
 
     const endgameLabel = document.createElement("h4");
