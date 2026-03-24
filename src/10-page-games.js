@@ -211,27 +211,30 @@
         empty.textContent = "No extracurricular tasks associated with this game. Add tasks in the Extracurricular section and link them to this game.";
         content.appendChild(empty);
       } else {
+        const section = document.createElement("div");
+        section.className = "games-extracurricular-section";
         if (activeTasks.length > 0) {
           const activeLabel = document.createElement("p");
           activeLabel.className = "games-extracurricular-section-label";
           activeLabel.textContent = "Active";
-          content.appendChild(activeLabel);
+          section.appendChild(activeLabel);
           const activeList = document.createElement("ul");
           activeList.className = "task-list";
           activeTasks.forEach((task) => activeList.appendChild(buildExtracurricularTaskItem(task)));
-          content.appendChild(activeList);
+          section.appendChild(activeList);
         }
         if (archivedTasks.length > 0) {
           const archivedLabel = document.createElement("p");
           archivedLabel.className = "games-extracurricular-section-label";
           archivedLabel.textContent = "History";
           archivedLabel.style.marginTop = "1rem";
-          content.appendChild(archivedLabel);
+          section.appendChild(archivedLabel);
           const archivedList = document.createElement("ul");
           archivedList.className = "task-list";
           archivedTasks.forEach((task) => archivedList.appendChild(buildExtracurricularTaskItem(task)));
-          content.appendChild(archivedList);
+          section.appendChild(archivedList);
         }
+        content.appendChild(section);
       }
     } else if (state.gamesSubTab === "currency") {
       const nameRow = document.createElement("div");
