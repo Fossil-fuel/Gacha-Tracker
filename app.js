@@ -318,7 +318,8 @@
     textSize: "medium", // "small" | "medium" | "large"
     lastSimulationSnapshot: null, // snapshot of state before runSimulation, for undo
     simulatedDateOffset: 0, // days to add to "today" for skip-day simulation (not persisted)
-    lastSkipDaySnapshot: null, // snapshot before skip day, for undo
+    simulatedHourOffset: 0, // hours to add for skip-time simulation (not persisted)
+    lastSkipDaySnapshot: null, // snapshot before first skip (day or hours), for undo
     defaultAdjustForDST: true, // when true, reset times follow DST; when false, use standard time only
   };
 
@@ -1032,12 +1033,14 @@
     return { hour, minute };
   }
 
-  /** Returns the effective "now" for the app. When simulating a skip, this is real now + offset days. */
+  /** Returns the effective "now" for the app. When simulating a skip, this is real now + offset days + offset hours. */
   function getSimulatedNow() {
-    const offset = (state.simulatedDateOffset || 0);
-    if (offset === 0) return new Date();
+    const dayOffset = state.simulatedDateOffset || 0;
+    const hourOffset = state.simulatedHourOffset || 0;
+    if (dayOffset === 0 && hourOffset === 0) return new Date();
     const d = new Date();
-    d.setDate(d.getDate() + offset);
+    d.setDate(d.getDate() + dayOffset);
+    d.setTime(d.getTime() + hourOffset * 60 * 60 * 1000);
     return d;
   }
 
@@ -1723,7 +1726,8 @@
     return getWeeklyCompletionDateInCurrentCycle(key, todayStr) != null;
   }
 
-  /** Returns the dateStr where this weekly was completed in the current cycle, or null. */
+  /** Returns the dateStr where this weekly was completed in the current cycle, or null.
+   * Uses actual current time so the cycle's "last day" correctly extends to reset (e.g. 4am) instead of midnight. */
   function getWeeklyCompletionDateInCurrentCycle(key, todayStr) {
     const dot = key.indexOf(".");
     if (dot <= 0) return null;
@@ -1732,7 +1736,15 @@
     const game = getGame(gameId);
     const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const d = isValidDateStr(todayStr) ? new Date(todayStr + "T12:00:00") : new Date();
+    const now = getSimulatedNow();
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const tz = getTimezoneForTaskDst(task, baseTz);
+    const parts = getDatePartsInTimezone(now, tz);
+    const hour = getResetHour(task, "weekStartHour", getResetHour(task, "resetHour", 4), game, now);
+    const minute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : (Number.isFinite(task && task.resetMinute) ? task.resetMinute : 0);
+    const offsetRef = getOffsetRefDateForTask(task, tz);
+    const todayReset = createDateInTimezone(parts.year, parts.month, parts.day, hour, minute, tz, offsetRef);
+    const d = now < todayReset ? new Date(todayReset.getTime() - 1) : now;
     const anchor = getEndgameAnchorDate(task, game);
     const { intervalMs, timeLimitMs } = getCycleParams(task);
     const anchorMs = anchor.getTime();
@@ -1759,7 +1771,8 @@
   }
 
   /** Returns the dateStr where this endgame was completed in the current cycle, or null.
-   * Uses completionByDate only; endgameCompletionDates is never consulted here. */
+   * Uses completionByDate only; endgameCompletionDates is never consulted here.
+   * Uses actual current time so the cycle's "last day" correctly extends to reset (e.g. 4am) instead of midnight. */
   function getEndgameCompletionDateInCurrentCycle(key, todayStr) {
     const dot = key.indexOf(".");
     if (dot <= 0) return null;
@@ -1768,7 +1781,15 @@
     const game = getGame(gameId);
     const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const d = isValidDateStr(todayStr) ? new Date(todayStr + "T12:00:00") : new Date();
+    const now = getSimulatedNow();
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const tz = getTimezoneForTaskDst(task, baseTz);
+    const parts = getDatePartsInTimezone(now, tz);
+    const hour = getResetHour(task, "weekStartHour", getResetHour(task, "resetHour", 4), game, now);
+    const minute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : (Number.isFinite(task && task.resetMinute) ? task.resetMinute : 0);
+    const offsetRef = getOffsetRefDateForTask(task, tz);
+    const todayReset = createDateInTimezone(parts.year, parts.month, parts.day, hour, minute, tz, offsetRef);
+    const d = now < todayReset ? new Date(todayReset.getTime() - 1) : now;
     const anchor = getEndgameAnchorDate(task, game);
     const intervalMs = getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
     const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
@@ -2103,23 +2124,52 @@
 
   /**
    * Skip 1 day forward: simulate that "today" is tomorrow. Runs processResets to apply any resets.
-   * Saves a snapshot for undo.
+   * Saves a snapshot for undo (only on first skip from real time).
    */
   function skipDayForward() {
-    state.lastSkipDaySnapshot = JSON.parse(JSON.stringify({
-      completionByDate: state.completionByDate,
-      completionTimestamps: state.completionTimestamps,
-      dailiesCompleted: state.dailiesCompleted,
-      weekliesCompleted: state.weekliesCompleted,
-      endgameCompleted: state.endgameCompleted,
-      dailiesAttempted: state.dailiesAttempted,
-      weekliesAttempted: state.weekliesAttempted,
-      endgameAttempted: state.endgameAttempted,
-      lastProcessedResets: state.lastProcessedResets,
-      endgameCurrencyEarned: state.endgameCurrencyEarned,
-      endgameCompletionDates: state.endgameCompletionDates,
-    }));
+    if ((state.simulatedDateOffset || 0) === 0 && (state.simulatedHourOffset || 0) === 0) {
+      state.lastSkipDaySnapshot = JSON.parse(JSON.stringify({
+        completionByDate: state.completionByDate,
+        completionTimestamps: state.completionTimestamps,
+        dailiesCompleted: state.dailiesCompleted,
+        weekliesCompleted: state.weekliesCompleted,
+        endgameCompleted: state.endgameCompleted,
+        dailiesAttempted: state.dailiesAttempted,
+        weekliesAttempted: state.weekliesAttempted,
+        endgameAttempted: state.endgameAttempted,
+        lastProcessedResets: state.lastProcessedResets,
+        endgameCurrencyEarned: state.endgameCurrencyEarned,
+        endgameCompletionDates: state.endgameCompletionDates,
+      }));
+    }
     state.simulatedDateOffset = (state.simulatedDateOffset || 0) + 1;
+    processResets();
+    save();
+    renderAll();
+  }
+
+  /**
+   * Skip X hours forward: advance simulated time by the given hours. Runs processResets if crossing reset boundaries.
+   * Saves a snapshot for undo (only on first skip from real time).
+   */
+  function skipTimeForward(hours) {
+    const h = Math.max(1, Math.min(168, Math.floor(Number(hours) || 1)));
+    if ((state.simulatedDateOffset || 0) === 0 && (state.simulatedHourOffset || 0) === 0) {
+      state.lastSkipDaySnapshot = JSON.parse(JSON.stringify({
+        completionByDate: state.completionByDate,
+        completionTimestamps: state.completionTimestamps,
+        dailiesCompleted: state.dailiesCompleted,
+        weekliesCompleted: state.weekliesCompleted,
+        endgameCompleted: state.endgameCompleted,
+        dailiesAttempted: state.dailiesAttempted,
+        weekliesAttempted: state.weekliesAttempted,
+        endgameAttempted: state.endgameAttempted,
+        lastProcessedResets: state.lastProcessedResets,
+        endgameCurrencyEarned: state.endgameCurrencyEarned,
+        endgameCompletionDates: state.endgameCompletionDates,
+      }));
+    }
+    state.simulatedHourOffset = (state.simulatedHourOffset || 0) + h;
     processResets();
     save();
     renderAll();
@@ -2143,6 +2193,7 @@
     state.endgameCurrencyEarned = snap.endgameCurrencyEarned || {};
     state.endgameCompletionDates = snap.endgameCompletionDates || {};
     state.simulatedDateOffset = 0;
+    state.simulatedHourOffset = 0;
     state.lastSkipDaySnapshot = null;
     save();
     renderAll();
@@ -3743,6 +3794,13 @@
     const skipDayBtn = qs("settingsSkipDayBtn");
     if (skipDayBtn) skipDayBtn.addEventListener("click", () => {
       skipDayForward();
+      syncSettingsUI();
+      closeSettingsModal();
+    });
+    const skipTimeBtn = qs("settingsSkipTimeBtn");
+    const skipHoursInput = qs("settingsSkipHoursInput");
+    if (skipTimeBtn && skipHoursInput) skipTimeBtn.addEventListener("click", () => {
+      skipTimeForward(Number(skipHoursInput.value) || 1);
       syncSettingsUI();
       closeSettingsModal();
     });

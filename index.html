@@ -647,9 +647,17 @@
               <button type="button" class="btn btn-ghost" id="settingsSkipDayBtn">Skip 1 day (simulate reset)</button>
               <span class="settings-hint">Advance "today" by one day to simulate a reset</span>
             </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsSkipHoursInput">Skip time (hours)</label>
+              <div class="settings-skip-time-wrap">
+                <input type="number" id="settingsSkipHoursInput" min="1" max="168" value="1" class="settings-input settings-skip-hours-input" aria-label="Hours to skip" />
+                <button type="button" class="btn btn-ghost" id="settingsSkipTimeBtn">Skip X hours</button>
+              </div>
+              <span class="settings-hint">Advance simulated time by the given hours</span>
+            </div>
             <div class="settings-row" id="settingsUndoSkipDayRow" hidden>
-              <button type="button" class="btn btn-ghost" id="settingsUndoSkipDayBtn">Undo skip day</button>
-              <span class="settings-hint">Revert to state before the last skip</span>
+              <button type="button" class="btn btn-ghost" id="settingsUndoSkipDayBtn">Undo simulated time</button>
+              <span class="settings-hint">Revert all simulated time (days and hours) back to real time</span>
             </div>
             <div class="settings-row">
               <button type="button" class="btn btn-ghost btn-danger-sm" id="settingsClearDataBtn">Clear all data</button>

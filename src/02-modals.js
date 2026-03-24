@@ -1570,6 +1570,13 @@
       syncSettingsUI();
       closeSettingsModal();
     });
+    const skipTimeBtn = qs("settingsSkipTimeBtn");
+    const skipHoursInput = qs("settingsSkipHoursInput");
+    if (skipTimeBtn && skipHoursInput) skipTimeBtn.addEventListener("click", () => {
+      skipTimeForward(Number(skipHoursInput.value) || 1);
+      syncSettingsUI();
+      closeSettingsModal();
+    });
     const undoSkipBtn = qs("settingsUndoSkipDayBtn");
     if (undoSkipBtn) undoSkipBtn.addEventListener("click", () => {
       undoSkipDay();

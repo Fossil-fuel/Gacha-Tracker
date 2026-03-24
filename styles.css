@@ -2585,6 +2585,19 @@ input[type="date"] {
   color: var(--text-muted);
 }
 
+.settings-skip-time-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.settings-skip-time-wrap .settings-skip-hours-input {
+  width: 4rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+}
+
 .settings-row-toggle {
   display: flex;
   align-items: center;
