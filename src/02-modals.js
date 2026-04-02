@@ -81,6 +81,8 @@
     state.weekliesAttempted = {};
     state.endgameAttempted = {};
     state.endgameCurrencyEarned = {};
+    state.endgamePendingCurrency = {};
+    state.endgamePendingCycleStartMs = {};
     state.endgameCompletionDates = {};
     state.completionByDate = {};
     state.completionTimestamps = [];
@@ -272,6 +274,202 @@
     }
   }
 
+  let endgameCompleteModalCtx = null;
+
+  function setEndgameCompleteModalOpen(open) {
+    const el = qs("endgameCompleteModal");
+    if (!el) return;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) document.body.style.overflow = "hidden";
+    else if (!calendarDayModal.open) document.body.style.overflow = "";
+  }
+
+  function populateEndgameCompleteModal(gameId, taskId) {
+    const game = getGame(gameId);
+    const task = game && (game.endgame || []).find((t) => (t.id || t.label) === taskId);
+    const titleEl = qs("endgameCompleteModalTitle");
+    const descEl = qs("endgameCompleteModalDesc");
+    const input = qs("endgameCompleteCurrencyInput");
+    if (!task || !input) return;
+    const key = gameId + "." + taskId;
+    syncEndgamePendingForKey(key, game, task);
+    const prefill = getEndgamePendingAmount(key, game, task);
+    if (titleEl) {
+      titleEl.textContent = "Currency earned";
+      titleEl.dataset.gameId = gameId;
+      titleEl.dataset.taskId = taskId;
+    }
+    if (descEl) {
+      const cur = getCurrencyLabel(game);
+      descEl.textContent = (task.label || "Endgame") + " — How much " + cur + " did you earn for completing this cycle?";
+    }
+    const completedCount = getCompletedAmount(state.endgameCompleted, key);
+    const earnedArr = getEndgameEarnedPerCompletion(gameId, taskId);
+    const pastWrap = qs("endgameCompletePastWrap");
+    const pastSummary = qs("endgameCompletePastSummary");
+    const pastList = qs("endgameCompletePastList");
+    const pastToggle = qs("endgameCompletePastToggle");
+    const samePastBtn = qs("endgameCompleteSameAsPastBtn");
+    const curLabel = getCurrencyLabel(game);
+    const lastPastAmount = completedCount > 0 ? (Number(earnedArr[completedCount - 1]) || 0) : 0;
+    if (pastSummary) {
+      if (completedCount > 0) {
+        pastSummary.textContent = "Last completion earned: " + lastPastAmount + " " + curLabel + ".";
+      } else {
+        pastSummary.textContent = "No prior completions recorded for this task.";
+      }
+    }
+    if (pastList) {
+      pastList.innerHTML = "";
+      for (let i = 0; i < completedCount; i++) {
+        const li = document.createElement("li");
+        li.textContent = "Completion " + (i + 1) + ": " + (Number(earnedArr[i]) || 0) + " " + curLabel;
+        pastList.appendChild(li);
+      }
+      pastList.hidden = true;
+    }
+    if (pastToggle) {
+      if (completedCount >= 1) {
+        pastToggle.hidden = false;
+        pastToggle.textContent = "Show past earnings";
+        pastToggle.setAttribute("aria-expanded", "false");
+        pastToggle.title = "Show or hide earnings from each previous completion.";
+        pastToggle.setAttribute("aria-label", "Show past earnings: list amounts from previous completions");
+      } else {
+        pastToggle.hidden = true;
+      }
+    }
+    if (samePastBtn) {
+      if (completedCount > 0) {
+        samePastBtn.hidden = false;
+        samePastBtn.textContent = "Same as past cycle (" + lastPastAmount + ")";
+        samePastBtn.title = "Set amount to last completion's earnings (" + lastPastAmount + " " + curLabel + ").";
+        samePastBtn.setAttribute("aria-label", "Same as past cycle: set to " + lastPastAmount + " " + curLabel);
+      } else {
+        samePastBtn.hidden = true;
+      }
+    }
+    if (pastWrap) pastWrap.hidden = false;
+    input.value = prefill > 0 ? String(prefill) : "";
+    input.min = "0";
+    input.placeholder = "0";
+    const fullBtn = qs("endgameCompleteFullPotentialBtn");
+    const pot = getEndgamePotential(task);
+    if (fullBtn) {
+      if (pot > 0) {
+        fullBtn.hidden = false;
+        const cur = getCurrencyLabel(game);
+        fullBtn.textContent = "Earned full amount (" + pot + ")";
+        fullBtn.title = "Set earned to this task's full potential (" + pot + " " + cur + ").";
+        fullBtn.setAttribute("aria-label", "Earned full amount: set to " + pot + " " + cur);
+      } else {
+        fullBtn.hidden = true;
+      }
+    }
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function applyEndgameCompleteFullPotential() {
+    const titleEl = qs("endgameCompleteModalTitle");
+    const gameId = titleEl && titleEl.dataset.gameId;
+    const taskId = titleEl && titleEl.dataset.taskId;
+    if (!gameId || !taskId) return;
+    const game = getGame(gameId);
+    const task = game && (game.endgame || []).find((t) => (t.id || t.label) === taskId);
+    if (!task) return;
+    const pot = getEndgamePotential(task);
+    const input = qs("endgameCompleteCurrencyInput");
+    if (input && pot > 0) input.value = String(pot);
+  }
+
+  function applyEndgameCompleteSameAsPastCycle() {
+    const titleEl = qs("endgameCompleteModalTitle");
+    const gameId = titleEl && titleEl.dataset.gameId;
+    const taskId = titleEl && titleEl.dataset.taskId;
+    if (!gameId || !taskId) return;
+    const key = gameId + "." + taskId;
+    const completedCount = getCompletedAmount(state.endgameCompleted, key);
+    if (completedCount <= 0) return;
+    const earnedArr = getEndgameEarnedPerCompletion(gameId, taskId);
+    const lastPast = Number(earnedArr[completedCount - 1]) || 0;
+    const input = qs("endgameCompleteCurrencyInput");
+    if (input) input.value = String(lastPast);
+  }
+
+  /**
+   * @param {string} gameId
+   * @param {string} taskId
+   * @param {null|{ dateStr: string, checkboxes: Array, dayData: object, newEndgameKeys: string[], currencyMap: object, idx: number }} calCtx
+   */
+  function openEndgameCompleteModal(gameId, taskId, calCtx) {
+    endgameCompleteModalCtx = calCtx;
+    populateEndgameCompleteModal(gameId, taskId);
+    setEndgameCompleteModalOpen(true);
+  }
+
+  function closeEndgameCompleteModal() {
+    endgameCompleteModalCtx = null;
+    setEndgameCompleteModalOpen(false);
+  }
+
+  function confirmEndgameCompleteModal() {
+    const input = qs("endgameCompleteCurrencyInput");
+    const raw = input && input.value !== undefined && input.value !== null ? input.value : "";
+    const num = raw === "" ? 0 : Math.max(0, Number(raw) || 0);
+    const ctx = endgameCompleteModalCtx;
+    if (ctx) {
+      const keys = ctx.newEndgameKeys;
+      const idx = ctx.idx;
+      const key = keys[idx];
+      ctx.currencyMap[key] = num;
+      if (idx + 1 < keys.length) {
+        ctx.idx = idx + 1;
+        const dot = keys[idx + 1].indexOf(".");
+        const ngid = dot >= 0 ? keys[idx + 1].slice(0, dot) : keys[idx + 1];
+        const ntid = dot >= 0 ? keys[idx + 1].slice(dot + 1) : "";
+        populateEndgameCompleteModal(ngid, ntid);
+        return;
+      }
+      const dateStr = ctx.dateStr;
+      const checkboxes = ctx.checkboxes;
+      const currencyMap = ctx.currencyMap;
+      endgameCompleteModalCtx = null;
+      setEndgameCompleteModalOpen(false);
+      applyCalendarDayModalSave(dateStr, checkboxes, currencyMap);
+      return;
+    }
+    const titleEl = qs("endgameCompleteModalTitle");
+    let gameId = null;
+    let taskId = null;
+    if (titleEl && titleEl.dataset.gameId) {
+      gameId = titleEl.dataset.gameId;
+      taskId = titleEl.dataset.taskId || "";
+    }
+    if (!gameId || !taskId) {
+      closeEndgameCompleteModal();
+      return;
+    }
+    closeEndgameCompleteModal();
+    completeEndgameWithCurrency(gameId, taskId, num);
+  }
+
+  function openEndgameCompleteModalForCalendar(dateStr, checkboxes, dayData, newEndgameKeys) {
+    const firstKey = newEndgameKeys[0];
+    const dot = firstKey.indexOf(".");
+    const gameId = dot >= 0 ? firstKey.slice(0, dot) : firstKey;
+    const taskId = dot >= 0 ? firstKey.slice(dot + 1) : "";
+    const ctx = {
+      dateStr,
+      checkboxes,
+      dayData,
+      newEndgameKeys,
+      currencyMap: {},
+      idx: 0,
+    };
+    openEndgameCompleteModal(gameId, taskId, ctx);
+  }
+
   function closeCalendarDayModal() {
     calendarDayModal.dateStr = null;
     calendarDayModal.checkboxes = null;
@@ -282,6 +480,22 @@
     const dateStr = calendarDayModal.dateStr;
     const checkboxes = calendarDayModal.checkboxes || [];
     if (!dateStr) return;
+    const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
+    const newEndgameKeys = [];
+    checkboxes.forEach(({ check, type, key }) => {
+      if (type !== "endgame") return;
+      const wasCompleted = (dayData.endgame || []).includes(key);
+      if (!wasCompleted && check.checked) newEndgameKeys.push(key);
+    });
+    if (newEndgameKeys.length > 0) {
+      openEndgameCompleteModalForCalendar(dateStr, checkboxes, dayData, newEndgameKeys);
+      return;
+    }
+    applyCalendarDayModalSave(dateStr, checkboxes, null);
+  }
+
+  /** @param {null|Object<string, number>} endgameCurrencyOverrides — key = gameId.taskId, value = earned for new completion */
+  function applyCalendarDayModalSave(dateStr, checkboxes, endgameCurrencyOverrides) {
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
     checkboxes.forEach(({ check, type, key }) => {
       const wasCompleted = type === "dailies"
@@ -308,7 +522,23 @@
             const dot = key.indexOf(".");
             const gameId = dot >= 0 ? key.slice(0, dot) : key;
             const taskId = dot >= 0 ? key.slice(dot + 1) : "";
-            ensureEndgameEarnedArrayLength(gameId, taskId, nowCompleted ? amt + 1 : Math.max(0, amt - 1));
+            if (nowCompleted) {
+              ensureEndgameEarnedArrayLength(gameId, taskId, amt + 1);
+              if (endgameCurrencyOverrides && endgameCurrencyOverrides[key] !== undefined) {
+                const c = endgameCurrencyOverrides[key];
+                setEndgameEarnedAt(gameId, taskId, amt, c, { skipSave: true, skipRender: true });
+                const game = getGame(gameId);
+                const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
+                if (game && task) {
+                  const range = getEndgameCycleDates(task, amt, game);
+                  setEndgameCompletionDate(gameId, taskId, amt, range.start, range.end, { skipSave: true });
+                }
+                if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
+                state.endgamePendingCurrency[key] = 0;
+              }
+            } else {
+              ensureEndgameEarnedArrayLength(gameId, taskId, Math.max(0, amt - 1));
+            }
           }
         }
       }
@@ -835,6 +1065,49 @@
     });
     if (closeBtn) closeBtn.addEventListener("click", closeEarningsModal);
     if (cancelBtn) cancelBtn.addEventListener("click", closeEarningsModal);
+  }
+
+  function initEndgameCompleteModal() {
+    const modalEl = qs("endgameCompleteModal");
+    const confirmBtn = qs("endgameCompleteModalConfirm");
+    const cancelBtn = qs("endgameCompleteModalCancel");
+    const closeBtn = qs("endgameCompleteModalClose");
+    const fullPotentialBtn = qs("endgameCompleteFullPotentialBtn");
+    const input = qs("endgameCompleteCurrencyInput");
+    if (!modalEl) return;
+    modalEl.addEventListener("click", (e) => {
+      if (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true") closeEndgameCompleteModal();
+    });
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmEndgameCompleteModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeEndgameCompleteModal);
+    if (closeBtn) closeBtn.addEventListener("click", closeEndgameCompleteModal);
+    if (fullPotentialBtn) fullPotentialBtn.addEventListener("click", applyEndgameCompleteFullPotential);
+    const sameAsPastBtn = qs("endgameCompleteSameAsPastBtn");
+    if (sameAsPastBtn) sameAsPastBtn.addEventListener("click", applyEndgameCompleteSameAsPastCycle);
+    const pastToggle = qs("endgameCompletePastToggle");
+    const pastList = qs("endgameCompletePastList");
+    if (pastToggle && pastList) {
+      pastToggle.addEventListener("click", () => {
+        const show = pastList.hidden;
+        pastList.hidden = !show;
+        pastToggle.textContent = show ? "Hide past earnings" : "Show past earnings";
+        pastToggle.setAttribute("aria-expanded", show ? "true" : "false");
+        pastToggle.title = show ? "Hide the list of past completion amounts." : "Show or hide earnings from each previous completion.";
+      });
+    }
+    if (input) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmEndgameCompleteModal();
+        }
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      const el = qs("endgameCompleteModal");
+      if (!el || el.hidden) return;
+      if (e.key === "Escape") closeEndgameCompleteModal();
+    });
   }
 
   function initCalendarDayModal() {

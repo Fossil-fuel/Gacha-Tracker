@@ -77,6 +77,7 @@
   initClearGameDataModal();
   initCalendarDayModal();
   initEarningsModal();
+  initEndgameCompleteModal();
   initTimeTrendsDetailModal();
   initClearTimeTrendsModal();
   initSettingsModal();

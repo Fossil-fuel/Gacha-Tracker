@@ -168,6 +168,10 @@
     weekliesAttempted: {},
     endgameAttempted: {},
     endgameCurrencyEarned: {},
+    /** In-progress "earned this cycle" when the current cycle is not yet completed (keyed by gameId.taskId). */
+    endgamePendingCurrency: {},
+    /** Cycle start ms for the pending row; when it differs from the current cycle, pending resets to 0. */
+    endgamePendingCycleStartMs: {},
     endgameCompletionDates: {}, // { "gameId.taskId": [{ start: "YYYY-MM-DD", end: "YYYY-MM-DD" }, ...] }
     completionByDate: {}, // { "YYYY-MM-DD": { dailies: [gameId], weeklies: ["gameId.taskId"], endgame: ["gameId.taskId"] } }
     completionTimestamps: [], // [{ dateStr, hour, gameId, taskType, taskId, taskLabel }] - when tasks were completed (for trend)
@@ -591,6 +595,12 @@
             });
           });
         }
+        if (parsed.endgamePendingCurrency && typeof parsed.endgamePendingCurrency === "object") {
+          state.endgamePendingCurrency = parsed.endgamePendingCurrency;
+        }
+        if (parsed.endgamePendingCycleStartMs && typeof parsed.endgamePendingCycleStartMs === "object") {
+          state.endgamePendingCycleStartMs = parsed.endgamePendingCycleStartMs;
+        }
         if (parsed.dailiesAttempted) {
           state.dailiesAttempted = parsed.dailiesAttempted;
           Object.keys(state.dailiesAttempted).forEach((k) => {
@@ -667,6 +677,8 @@
     if (!state.timestampsSelectedGameIds) state.timestampsSelectedGameIds = {};
     if (!state.timestampsSelectedEndgameTasks) state.timestampsSelectedEndgameTasks = {};
     if (!state.lastProcessedResets) state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
+    if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
+    if (!state.endgamePendingCycleStartMs) state.endgamePendingCycleStartMs = {};
     if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
     const taskIds = new Set((state.extracurricularTasks || []).map((t) => t.id));
@@ -743,6 +755,8 @@
       weekliesAttempted: state.weekliesAttempted,
       endgameAttempted: state.endgameAttempted,
       endgameCurrencyEarned: state.endgameCurrencyEarned,
+      endgamePendingCurrency: state.endgamePendingCurrency,
+      endgamePendingCycleStartMs: state.endgamePendingCycleStartMs,
       endgameCompletionDates: state.endgameCompletionDates,
       completionByDate: state.completionByDate,
       lastProcessedResets: state.lastProcessedResets,
@@ -1145,14 +1159,39 @@
 
   /** Updates display dates for a completion (earnings modal). Does NOT touch completionByDate.
    * Editing prior completion dates cannot affect current-cycle completion logic. */
-  function setEndgameCompletionDate(gameId, taskId, index, start, end) {
+  function setEndgameCompletionDate(gameId, taskId, index, start, end, opts) {
     const key = gameId + "." + taskId;
     if (!state.endgameCompletionDates[key]) state.endgameCompletionDates[key] = [];
     while (state.endgameCompletionDates[key].length <= index) {
       state.endgameCompletionDates[key].push({ start: "", end: "" });
     }
     state.endgameCompletionDates[key][index] = { start: start || "", end: end || "" };
+    if (!opts || !opts.skipSave) save();
+  }
+
+  /** When the calendar cycle changes, reset in-progress pending amount. */
+  function syncEndgamePendingForKey(key, game, task) {
+    if (!game || !task) return;
+    if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
+    if (!state.endgamePendingCycleStartMs) state.endgamePendingCycleStartMs = {};
+    const cs = getCycleStartForDate(task, getDateStr(), game).getTime();
+    if (state.endgamePendingCycleStartMs[key] !== cs) {
+      state.endgamePendingCycleStartMs[key] = cs;
+      state.endgamePendingCurrency[key] = 0;
+    }
+  }
+
+  function getEndgamePendingAmount(key, game, task) {
+    syncEndgamePendingForKey(key, game, task);
+    return Math.max(0, Number(state.endgamePendingCurrency[key]) || 0);
+  }
+
+  function setEndgamePendingAmount(key, game, task, value) {
+    syncEndgamePendingForKey(key, game, task);
+    const n = value === "" || value === null || value === undefined ? 0 : Math.max(0, Number(value) || 0);
+    state.endgamePendingCurrency[key] = n;
     save();
+    renderAll();
   }
 
   /** Returns the dateStr for the daily period that contains `now`. The reset time marks the start of that day:
@@ -2054,6 +2093,12 @@
 
     delete state.lastProcessedResets.dailies[gameId];
     if (state.endgameCurrencyEarned[gameId]) state.endgameCurrencyEarned[gameId] = {};
+    Object.keys(state.endgamePendingCurrency || {}).forEach((k) => {
+      if (k.startsWith(gameId + ".")) delete state.endgamePendingCurrency[k];
+    });
+    Object.keys(state.endgamePendingCycleStartMs || {}).forEach((k) => {
+      if (k.startsWith(gameId + ".")) delete state.endgamePendingCycleStartMs[k];
+    });
 
     Object.keys(state.completionByDate || {}).forEach((dateStr) => {
       const dayData = state.completionByDate[dateStr];

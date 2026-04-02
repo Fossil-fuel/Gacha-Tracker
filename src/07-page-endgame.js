@@ -27,10 +27,10 @@
     check.type = "button";
     check.className = "task-checkbox";
     check.setAttribute("aria-label", doneToday ? "Mark incomplete" : "Mark complete");
-    check.addEventListener("click", () => toggleEndgame(game.id, task.id || task.label));
+    check.addEventListener("click", () => requestToggleEndgame(game.id, task.id || task.label));
     const label1 = document.createElement("span");
     label1.innerHTML = "<strong>Completion Status:</strong> " + (doneToday ? "Complete" : "Incomplete");
-    span.addEventListener("click", () => toggleEndgame(game.id, task.id || task.label));
+    span.addEventListener("click", () => requestToggleEndgame(game.id, task.id || task.label));
     left1.appendChild(check);
     left1.appendChild(label1);
     row1.appendChild(left1);
@@ -68,10 +68,23 @@
     inp.type = "number";
     inp.min = "0";
     inp.placeholder = "0";
-    const currentIdx = completedCount > 0 ? completedCount - 1 : 0;
-    inp.value = completedCount > 0 ? String(earnedArr[currentIdx] || 0) : "";
+    let currentIdx;
+    if (doneToday) {
+      currentIdx = completedCount > 0 ? completedCount - 1 : 0;
+      inp.value = completedCount > 0 ? String(earnedArr[currentIdx] || 0) : "";
+    } else {
+      currentIdx = completedCount;
+      const pending = getEndgamePendingAmount(key, game, task);
+      inp.value = pending > 0 ? String(pending) : "";
+    }
     inp.title = "Amount earned for the current cycle";
-    inp.addEventListener("change", () => setEndgameEarnedAt(game.id, task.id || task.label, currentIdx, inp.value));
+    inp.addEventListener("change", () => {
+      if (doneToday) {
+        setEndgameEarnedAt(game.id, task.id || task.label, currentIdx, inp.value);
+      } else {
+        setEndgamePendingAmount(key, game, task, inp.value);
+      }
+    });
     row2.appendChild(inp);
     sub.appendChild(row2);
 

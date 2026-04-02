@@ -206,6 +206,12 @@
     Object.keys(state.endgameCompletionDates || {}).forEach((k) => {
       if (k.startsWith(gameId + ".")) delete state.endgameCompletionDates[k];
     });
+    Object.keys(state.endgamePendingCurrency || {}).forEach((k) => {
+      if (k.startsWith(gameId + ".")) delete state.endgamePendingCurrency[k];
+    });
+    Object.keys(state.endgamePendingCycleStartMs || {}).forEach((k) => {
+      if (k.startsWith(gameId + ".")) delete state.endgamePendingCycleStartMs[k];
+    });
 
     delete state.lastProcessedResets.dailies[gameId];
     Object.keys(state.lastProcessedResets.weeklies || {}).forEach((k) => {
@@ -320,6 +326,38 @@
     renderAll();
   }
 
+  function requestToggleEndgame(gameId, taskId) {
+    const key = gameId + "." + taskId;
+    const dateStr = getDateStr();
+    if (isEndgameCompletedInCurrentCycle(key, dateStr)) {
+      toggleEndgame(gameId, taskId);
+      return;
+    }
+    openEndgameCompleteModal(gameId, taskId, null);
+  }
+
+  function completeEndgameWithCurrency(gameId, taskId, currencyValue) {
+    const key = gameId + "." + taskId;
+    const dateStr = getDateStr();
+    const amt = getCompletedAmount(state.endgameCompleted, key);
+    const game = getGame(gameId);
+    const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
+    if (!game || !task) return;
+
+    state.endgameCompleted[key] = amt + 1;
+    recordCompletion(dateStr, "endgame", key);
+    ensureEndgameEarnedArrayLength(gameId, taskId, amt + 1);
+    setEndgameEarnedAt(gameId, taskId, amt, currencyValue, { skipSave: true, skipRender: true });
+    const { start, end } = getEndgameCycleDates(task, amt, game);
+    setEndgameCompletionDate(gameId, taskId, amt, start, end, { skipSave: true });
+    const attempted = getAttemptedAmount(state.endgameAttempted, key);
+    if (attempted < state.endgameCompleted[key]) state.endgameAttempted[key] = state.endgameCompleted[key];
+    state.endgamePendingCurrency[key] = 0;
+    processResets();
+    save();
+    renderAll();
+  }
+
   function toggleEndgame(gameId, taskId) {
     const key = gameId + "." + taskId;
     const dateStr = getDateStr();
@@ -371,15 +409,15 @@
     return Array.isArray(arr) ? arr.slice() : [];
   }
 
-  function setEndgameEarnedAt(gameId, taskId, index, value) {
+  function setEndgameEarnedAt(gameId, taskId, index, value, opts) {
     if (!state.endgameCurrencyEarned[gameId]) state.endgameCurrencyEarned[gameId] = {};
     let arr = state.endgameCurrencyEarned[gameId][taskId];
     if (!Array.isArray(arr)) arr = [];
     while (arr.length <= index) arr.push(0);
     arr[index] = Math.max(0, Number(value) || 0);
     state.endgameCurrencyEarned[gameId][taskId] = arr;
-    save();
-    renderAll();
+    if (!opts || !opts.skipSave) save();
+    if (!opts || !opts.skipRender) renderAll();
   }
 
   function ensureEndgameEarnedArrayLength(gameId, taskId, minLen) {

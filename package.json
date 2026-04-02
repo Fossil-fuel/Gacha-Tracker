@@ -1,0 +1,8 @@
+{
+  "name": "gatcha-tracker",
+  "private": true,
+  "scripts": {
+    "dev": "npx --yes serve -l 4000 .",
+    "start": "npx --yes serve -l 4000 ."
+  }
+}

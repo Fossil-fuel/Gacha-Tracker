@@ -2371,6 +2371,19 @@ input[type="date"] {
   width: min(560px, calc(100vw - 2rem));
 }
 
+.endgame-complete-past-wrap {
+  margin-bottom: 0.5rem;
+}
+
+.endgame-complete-past-list {
+  margin: 0.5rem 0 0.75rem 1.25rem;
+  padding: 0;
+  list-style: disc;
+  color: var(--text-muted, var(--border));
+  font-size: 0.9em;
+  line-height: 1.45;
+}
+
 .modal-dialog.modal-dialog-calendar {
   width: max-content;
   max-width: calc(100vw - 2rem);
