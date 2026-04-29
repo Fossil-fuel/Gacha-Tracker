@@ -672,6 +672,15 @@ body {
   margin-left: 0.5rem;
 }
 
+.extracurricular-task-currency-line {
+  display: block;
+  margin-top: 0.35rem;
+  margin-left: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .panel-header-extracurricular .panel-format-toggle-float {
   float: right;
   margin: 0 0 0.5rem 0.75rem;

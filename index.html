@@ -553,6 +553,27 @@
     </div>
   </div>
 
+  <!-- Extracurricular: currency earned when marking complete -->
+  <div id="extracurricularCompleteModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="extracurricularCompleteModalTitle">
+      <div class="modal-header">
+        <h3 id="extracurricularCompleteModalTitle" class="modal-title">Currency earned</h3>
+        <button type="button" class="icon-btn" id="extracurricularCompleteModalClose" aria-label="Close" data-close="true">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="extracurricularCompleteModalDesc" class="modal-desc" style="margin-top: 0;"></p>
+        <label class="settings-label" for="extracurricularCompleteCurrencyInput">Amount</label>
+        <input type="number" id="extracurricularCompleteCurrencyInput" class="settings-input" min="0" placeholder="0" />
+        <button type="button" class="btn btn-ghost" id="extracurricularCompleteFullPotentialBtn" hidden style="margin-top: 0.5rem; width: 100%;">Earned full amount</button>
+        <div class="modal-actions" style="margin-top: 1rem;">
+          <button type="button" class="btn btn-ghost" id="extracurricularCompleteModalCancel">Cancel</button>
+          <button type="button" class="btn btn-add" id="extracurricularCompleteModalConfirm">Save completion</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Settings modal -->
   <div id="settingsModal" class="modal" hidden aria-hidden="true">
     <div class="modal-backdrop" data-close="true"></div>

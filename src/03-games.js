@@ -232,6 +232,7 @@
     (state.extracurricularTasks || []).filter((t) => t.gameId === gameId).forEach((t) => {
       delete state.extracurricularCompleted[t.id];
       if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[t.id];
+      if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[t.id];
     });
     state.extracurricularTasks = (state.extracurricularTasks || []).filter((t) => t.gameId !== gameId);
 
@@ -302,6 +303,26 @@
       unrecordCompletion(dateStr, "dailies", gameId);
     }
     processResets();
+    save();
+    renderAll();
+  }
+
+  function completeExtracurricularWithCurrency(taskId, currencyValue) {
+    const task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
+    if (!task) return;
+    if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
+    state.extracurricularCurrencyEarned[taskId] = Math.max(0, Number(currencyValue) || 0);
+    state.extracurricularCompleted[taskId] = true;
+    if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
+    state.extracurricularCompletedAt[taskId] = getSimulatedNow().toISOString();
+    save();
+    renderAll();
+  }
+
+  function clearExtracurricularCompletion(taskId) {
+    delete state.extracurricularCompleted[taskId];
+    if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
+    if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[taskId];
     save();
     renderAll();
   }
@@ -524,9 +545,14 @@
     (state.extracurricularTasks || []).forEach((t) => {
       if (t.gameId !== game.id) return;
       const cur = Math.max(0, Number(t.currency) || 0);
-      if (cur <= 0) return;
-      xPotential += cur;
-      if (state.extracurricularCompleted[t.id]) xEarned += cur;
+      if (cur > 0) xPotential += cur;
+      if (!state.extracurricularCompleted[t.id]) return;
+      const recorded = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[t.id];
+      if (recorded !== undefined && recorded !== null) {
+        xEarned += Math.max(0, Number(recorded) || 0);
+      } else if (cur > 0) {
+        xEarned += cur;
+      }
     });
 
     return {

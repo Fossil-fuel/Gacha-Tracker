@@ -274,6 +274,29 @@
       currencySection.appendChild(currencyPies);
       container.appendChild(currencySection);
     }
+
+    const exTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === game.id);
+    if (exTasks.length > 0) {
+      const exSection = document.createElement("div");
+      exSection.className = "data-pie-section";
+      const exh = document.createElement("h4");
+      exh.className = "data-section-label";
+      exh.textContent = "Extracurricular " + currencyLabel + " earned";
+      exSection.appendChild(exh);
+      const exPies = document.createElement("div");
+      exPies.className = "pie-row";
+      exTasks.forEach((task) => {
+        const pot = Math.max(0, Number(task.currency) || 0);
+        let earned = 0;
+        if (state.extracurricularCompleted[task.id]) {
+          const rec = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[task.id];
+          earned = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
+        }
+        exPies.appendChild(createExtracurricularCurrencyPieBox(task, earned, pot));
+      });
+      exSection.appendChild(exPies);
+      container.appendChild(exSection);
+    }
   }
 
   function renderSidebarDataList() {

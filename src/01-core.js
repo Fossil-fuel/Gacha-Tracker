@@ -187,6 +187,7 @@
     extracurricularTasks: [],
     extracurricularCompleted: {},
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
+    extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
     extracurricularView: "list",
     extracurricularViewMode: "tasks", // "tasks" | "history" - history shows archived (completed >24h ago)
     themeMode: "preset",
@@ -638,6 +639,7 @@
         if (Array.isArray(parsed.extracurricularTasks)) state.extracurricularTasks = parsed.extracurricularTasks;
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
+        if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
         if (parsed.extracurricularView === "grid" || parsed.extracurricularView === "list") state.extracurricularView = parsed.extracurricularView;
         if (parsed.extracurricularViewMode === "tasks" || parsed.extracurricularViewMode === "history") state.extracurricularViewMode = parsed.extracurricularViewMode;
         if (parsed.themeMode === "custom" || parsed.themeMode === "preset") state.themeMode = parsed.themeMode;
@@ -680,6 +682,7 @@
     if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
     if (!state.endgamePendingCycleStartMs) state.endgamePendingCycleStartMs = {};
     if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
+    if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
     const taskIds = new Set((state.extracurricularTasks || []).map((t) => t.id));
     Object.keys(state.extracurricularCompletedAt || {}).forEach((id) => {
@@ -687,6 +690,9 @@
     });
     Object.keys(state.extracurricularCompleted || {}).forEach((id) => {
       if (!taskIds.has(id)) delete state.extracurricularCompleted[id];
+    });
+    Object.keys(state.extracurricularCurrencyEarned || {}).forEach((id) => {
+      if (!taskIds.has(id)) delete state.extracurricularCurrencyEarned[id];
     });
     (state.games || []).forEach((g) => {
       if (g && g.dailyCurrency == null) g.dailyCurrency = 0;
@@ -777,6 +783,7 @@
       extracurricularTasks: state.extracurricularTasks,
       extracurricularCompleted: state.extracurricularCompleted,
       extracurricularCompletedAt: state.extracurricularCompletedAt,
+      extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
       extracurricularView: state.extracurricularView,
       extracurricularViewMode: state.extracurricularViewMode,
       themeMode: state.themeMode,
@@ -1136,7 +1143,7 @@
   function getExtracurricularTimeRemainingText(task, now) {
     const ms = getExtracurricularTimeRemainingMs(task, now);
     if (ms == null) return "TBD";
-    if (ms <= 0) return "Overdue";
+    if (ms <= 0) return "";
     return formatRemainingMs(ms);
   }
 
@@ -2204,6 +2211,9 @@
         lastProcessedResets: state.lastProcessedResets,
         endgameCurrencyEarned: state.endgameCurrencyEarned,
         endgameCompletionDates: state.endgameCompletionDates,
+        extracurricularCompleted: state.extracurricularCompleted,
+        extracurricularCompletedAt: state.extracurricularCompletedAt,
+        extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
       }));
     }
     state.simulatedDateOffset = (state.simulatedDateOffset || 0) + 1;
@@ -2231,6 +2241,9 @@
         lastProcessedResets: state.lastProcessedResets,
         endgameCurrencyEarned: state.endgameCurrencyEarned,
         endgameCompletionDates: state.endgameCompletionDates,
+        extracurricularCompleted: state.extracurricularCompleted,
+        extracurricularCompletedAt: state.extracurricularCompletedAt,
+        extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
       }));
     }
     state.simulatedHourOffset = (state.simulatedHourOffset || 0) + h;
@@ -2256,6 +2269,9 @@
     state.lastProcessedResets = snap.lastProcessedResets || { dailies: {}, weeklies: {}, endgame: {} };
     state.endgameCurrencyEarned = snap.endgameCurrencyEarned || {};
     state.endgameCompletionDates = snap.endgameCompletionDates || {};
+    state.extracurricularCompleted = snap.extracurricularCompleted || {};
+    state.extracurricularCompletedAt = snap.extracurricularCompletedAt || {};
+    state.extracurricularCurrencyEarned = snap.extracurricularCurrencyEarned || {};
     state.simulatedDateOffset = 0;
     state.simulatedHourOffset = 0;
     state.lastSkipDaySnapshot = null;

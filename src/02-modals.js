@@ -95,6 +95,7 @@
     state.extracurricularTasks = [];
     state.extracurricularCompleted = {};
     state.extracurricularCompletedAt = {};
+    state.extracurricularCurrencyEarned = {};
     state.tab = state.defaultTab || "about";
     save();
     renderAll();
@@ -282,7 +283,10 @@
     el.hidden = !open;
     el.setAttribute("aria-hidden", open ? "false" : "true");
     if (open) document.body.style.overflow = "hidden";
-    else if (!calendarDayModal.open) document.body.style.overflow = "";
+    else if (!calendarDayModal.open) {
+      const ex = qs("extracurricularCompleteModal");
+      if (!ex || ex.hidden) document.body.style.overflow = "";
+    }
   }
 
   function populateEndgameCompleteModal(gameId, taskId) {
@@ -411,6 +415,85 @@
   function closeEndgameCompleteModal() {
     endgameCompleteModalCtx = null;
     setEndgameCompleteModalOpen(false);
+  }
+
+  function setExtracurricularCompleteModalOpen(open) {
+    const el = qs("extracurricularCompleteModal");
+    if (!el) return;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) document.body.style.overflow = "hidden";
+    else if (!calendarDayModal.open) {
+      const eg = qs("endgameCompleteModal");
+      if (!eg || eg.hidden) document.body.style.overflow = "";
+    }
+  }
+
+  function populateExtracurricularCompleteModal(taskId) {
+    const tasks = state.extracurricularTasks || [];
+    const task = tasks.find((t) => t.id === taskId);
+    const titleEl = qs("extracurricularCompleteModalTitle");
+    const descEl = qs("extracurricularCompleteModalDesc");
+    const input = qs("extracurricularCompleteCurrencyInput");
+    const fullBtn = qs("extracurricularCompleteFullPotentialBtn");
+    if (!task || !input) return;
+    const game = task.gameId ? getGame(task.gameId) : null;
+    const curLabel = getCurrencyLabel(game);
+    if (titleEl) {
+      titleEl.textContent = "Currency earned";
+      titleEl.dataset.taskId = taskId;
+    }
+    if (descEl) {
+      descEl.textContent = (task.label || "Task") + " — How much " + curLabel + " did you earn for completing this task?";
+    }
+    const pot = Math.max(0, Number(task.currency) || 0);
+    input.value = pot > 0 ? String(pot) : "";
+    input.min = "0";
+    input.placeholder = "0";
+    if (fullBtn) {
+      if (pot > 0) {
+        fullBtn.hidden = false;
+        fullBtn.textContent = "Earned full amount (" + pot + ")";
+        fullBtn.title = "Set earned to the potential amount set on this task (" + pot + " " + curLabel + ").";
+      } else {
+        fullBtn.hidden = true;
+      }
+    }
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function openExtracurricularCompleteModal(taskId) {
+    populateExtracurricularCompleteModal(taskId);
+    setExtracurricularCompleteModalOpen(true);
+  }
+
+  function closeExtracurricularCompleteModal() {
+    setExtracurricularCompleteModalOpen(false);
+  }
+
+  function confirmExtracurricularCompleteModal() {
+    const titleEl = qs("extracurricularCompleteModalTitle");
+    const taskId = titleEl && titleEl.dataset.taskId;
+    const input = qs("extracurricularCompleteCurrencyInput");
+    const raw = input && input.value !== undefined && input.value !== null ? input.value : "";
+    const num = raw === "" ? 0 : Math.max(0, Number(raw) || 0);
+    if (!taskId) {
+      closeExtracurricularCompleteModal();
+      return;
+    }
+    closeExtracurricularCompleteModal();
+    completeExtracurricularWithCurrency(taskId, num);
+  }
+
+  function applyExtracurricularCompleteFullPotential() {
+    const titleEl = qs("extracurricularCompleteModalTitle");
+    const taskId = titleEl && titleEl.dataset.taskId;
+    const tasks = state.extracurricularTasks || [];
+    const task = taskId && tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const pot = Math.max(0, Number(task.currency) || 0);
+    const input = qs("extracurricularCompleteCurrencyInput");
+    if (input && pot > 0) input.value = String(pot);
   }
 
   function confirmEndgameCompleteModal() {
@@ -1107,6 +1190,36 @@
       const el = qs("endgameCompleteModal");
       if (!el || el.hidden) return;
       if (e.key === "Escape") closeEndgameCompleteModal();
+    });
+  }
+
+  function initExtracurricularCompleteModal() {
+    const modalEl = qs("extracurricularCompleteModal");
+    const confirmBtn = qs("extracurricularCompleteModalConfirm");
+    const cancelBtn = qs("extracurricularCompleteModalCancel");
+    const closeBtn = qs("extracurricularCompleteModalClose");
+    const fullBtn = qs("extracurricularCompleteFullPotentialBtn");
+    const input = qs("extracurricularCompleteCurrencyInput");
+    if (!modalEl) return;
+    modalEl.addEventListener("click", (e) => {
+      if (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true") closeExtracurricularCompleteModal();
+    });
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmExtracurricularCompleteModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeExtracurricularCompleteModal);
+    if (closeBtn) closeBtn.addEventListener("click", closeExtracurricularCompleteModal);
+    if (fullBtn) fullBtn.addEventListener("click", applyExtracurricularCompleteFullPotential);
+    if (input) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmExtracurricularCompleteModal();
+        }
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      const el = qs("extracurricularCompleteModal");
+      if (!el || el.hidden) return;
+      if (e.key === "Escape") closeExtracurricularCompleteModal();
     });
   }
 

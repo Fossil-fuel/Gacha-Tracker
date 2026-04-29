@@ -991,6 +991,30 @@
     return box;
   }
 
+  function createExtracurricularCurrencyPieBox(task, earned, potential) {
+    const pot = Math.max(0, Number(potential) || 0);
+    const e = Math.max(0, Number(earned) || 0);
+    const total = Math.max(pot, e, 1);
+    const earnedPct = total ? (e / total) * 360 : 0;
+    const box = document.createElement("div");
+    box.className = "pie-box";
+    if (total === 0 || (e === 0 && pot === 0)) {
+      box.innerHTML =
+        "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+        "<div class=\"pie-chart pie-chart-empty\"></div>" +
+        "<div class=\"pie-legend\">No currency earned yet</div>";
+      return box;
+    }
+    box.innerHTML =
+      "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+      "<div class=\"pie-chart\" style=\"--pct: " + earnedPct + "deg\"></div>" +
+      "<div class=\"pie-legend pie-legend-split\">" +
+      "<span class=\"pie-legend-item completed\">Earned: " + e + (total ? " (" + Math.round((e / total) * 100) + "%)" : "") + "</span>" +
+      "<span class=\"pie-legend-item skipped\">Potential: " + pot + "</span>" +
+      "</div>";
+    return box;
+  }
+
   function createEndgameCurrencyPieBox(task, earned, attempted) {
     const potential = Math.max(0, Number(task && task.currency) || 0) * Math.max(0, attempted);
     const total = Math.max(potential, earned, 1);

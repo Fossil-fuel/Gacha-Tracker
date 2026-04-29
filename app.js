@@ -304,6 +304,7 @@
     extracurricularTasks: [],
     extracurricularCompleted: {},
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
+    extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
     extracurricularView: "list",
     extracurricularViewMode: "tasks", // "tasks" | "history" - history shows archived (completed >24h ago)
     themeMode: "preset",
@@ -755,6 +756,7 @@
         if (Array.isArray(parsed.extracurricularTasks)) state.extracurricularTasks = parsed.extracurricularTasks;
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
+        if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
         if (parsed.extracurricularView === "grid" || parsed.extracurricularView === "list") state.extracurricularView = parsed.extracurricularView;
         if (parsed.extracurricularViewMode === "tasks" || parsed.extracurricularViewMode === "history") state.extracurricularViewMode = parsed.extracurricularViewMode;
         if (parsed.themeMode === "custom" || parsed.themeMode === "preset") state.themeMode = parsed.themeMode;
@@ -797,6 +799,7 @@
     if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
     if (!state.endgamePendingCycleStartMs) state.endgamePendingCycleStartMs = {};
     if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
+    if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
     const taskIds = new Set((state.extracurricularTasks || []).map((t) => t.id));
     Object.keys(state.extracurricularCompletedAt || {}).forEach((id) => {
@@ -804,6 +807,9 @@
     });
     Object.keys(state.extracurricularCompleted || {}).forEach((id) => {
       if (!taskIds.has(id)) delete state.extracurricularCompleted[id];
+    });
+    Object.keys(state.extracurricularCurrencyEarned || {}).forEach((id) => {
+      if (!taskIds.has(id)) delete state.extracurricularCurrencyEarned[id];
     });
     (state.games || []).forEach((g) => {
       if (g && g.dailyCurrency == null) g.dailyCurrency = 0;
@@ -894,6 +900,7 @@
       extracurricularTasks: state.extracurricularTasks,
       extracurricularCompleted: state.extracurricularCompleted,
       extracurricularCompletedAt: state.extracurricularCompletedAt,
+      extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
       extracurricularView: state.extracurricularView,
       extracurricularViewMode: state.extracurricularViewMode,
       themeMode: state.themeMode,
@@ -1253,7 +1260,7 @@
   function getExtracurricularTimeRemainingText(task, now) {
     const ms = getExtracurricularTimeRemainingMs(task, now);
     if (ms == null) return "TBD";
-    if (ms <= 0) return "Overdue";
+    if (ms <= 0) return "";
     return formatRemainingMs(ms);
   }
 
@@ -2321,6 +2328,9 @@
         lastProcessedResets: state.lastProcessedResets,
         endgameCurrencyEarned: state.endgameCurrencyEarned,
         endgameCompletionDates: state.endgameCompletionDates,
+        extracurricularCompleted: state.extracurricularCompleted,
+        extracurricularCompletedAt: state.extracurricularCompletedAt,
+        extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
       }));
     }
     state.simulatedDateOffset = (state.simulatedDateOffset || 0) + 1;
@@ -2348,6 +2358,9 @@
         lastProcessedResets: state.lastProcessedResets,
         endgameCurrencyEarned: state.endgameCurrencyEarned,
         endgameCompletionDates: state.endgameCompletionDates,
+        extracurricularCompleted: state.extracurricularCompleted,
+        extracurricularCompletedAt: state.extracurricularCompletedAt,
+        extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
       }));
     }
     state.simulatedHourOffset = (state.simulatedHourOffset || 0) + h;
@@ -2373,6 +2386,9 @@
     state.lastProcessedResets = snap.lastProcessedResets || { dailies: {}, weeklies: {}, endgame: {} };
     state.endgameCurrencyEarned = snap.endgameCurrencyEarned || {};
     state.endgameCompletionDates = snap.endgameCompletionDates || {};
+    state.extracurricularCompleted = snap.extracurricularCompleted || {};
+    state.extracurricularCompletedAt = snap.extracurricularCompletedAt || {};
+    state.extracurricularCurrencyEarned = snap.extracurricularCurrencyEarned || {};
     state.simulatedDateOffset = 0;
     state.simulatedHourOffset = 0;
     state.lastSkipDaySnapshot = null;
@@ -2503,6 +2519,7 @@
     state.extracurricularTasks = [];
     state.extracurricularCompleted = {};
     state.extracurricularCompletedAt = {};
+    state.extracurricularCurrencyEarned = {};
     state.tab = state.defaultTab || "about";
     save();
     renderAll();
@@ -2690,7 +2707,10 @@
     el.hidden = !open;
     el.setAttribute("aria-hidden", open ? "false" : "true");
     if (open) document.body.style.overflow = "hidden";
-    else if (!calendarDayModal.open) document.body.style.overflow = "";
+    else if (!calendarDayModal.open) {
+      const ex = qs("extracurricularCompleteModal");
+      if (!ex || ex.hidden) document.body.style.overflow = "";
+    }
   }
 
   function populateEndgameCompleteModal(gameId, taskId) {
@@ -2819,6 +2839,85 @@
   function closeEndgameCompleteModal() {
     endgameCompleteModalCtx = null;
     setEndgameCompleteModalOpen(false);
+  }
+
+  function setExtracurricularCompleteModalOpen(open) {
+    const el = qs("extracurricularCompleteModal");
+    if (!el) return;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) document.body.style.overflow = "hidden";
+    else if (!calendarDayModal.open) {
+      const eg = qs("endgameCompleteModal");
+      if (!eg || eg.hidden) document.body.style.overflow = "";
+    }
+  }
+
+  function populateExtracurricularCompleteModal(taskId) {
+    const tasks = state.extracurricularTasks || [];
+    const task = tasks.find((t) => t.id === taskId);
+    const titleEl = qs("extracurricularCompleteModalTitle");
+    const descEl = qs("extracurricularCompleteModalDesc");
+    const input = qs("extracurricularCompleteCurrencyInput");
+    const fullBtn = qs("extracurricularCompleteFullPotentialBtn");
+    if (!task || !input) return;
+    const game = task.gameId ? getGame(task.gameId) : null;
+    const curLabel = getCurrencyLabel(game);
+    if (titleEl) {
+      titleEl.textContent = "Currency earned";
+      titleEl.dataset.taskId = taskId;
+    }
+    if (descEl) {
+      descEl.textContent = (task.label || "Task") + " — How much " + curLabel + " did you earn for completing this task?";
+    }
+    const pot = Math.max(0, Number(task.currency) || 0);
+    input.value = pot > 0 ? String(pot) : "";
+    input.min = "0";
+    input.placeholder = "0";
+    if (fullBtn) {
+      if (pot > 0) {
+        fullBtn.hidden = false;
+        fullBtn.textContent = "Earned full amount (" + pot + ")";
+        fullBtn.title = "Set earned to the potential amount set on this task (" + pot + " " + curLabel + ").";
+      } else {
+        fullBtn.hidden = true;
+      }
+    }
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function openExtracurricularCompleteModal(taskId) {
+    populateExtracurricularCompleteModal(taskId);
+    setExtracurricularCompleteModalOpen(true);
+  }
+
+  function closeExtracurricularCompleteModal() {
+    setExtracurricularCompleteModalOpen(false);
+  }
+
+  function confirmExtracurricularCompleteModal() {
+    const titleEl = qs("extracurricularCompleteModalTitle");
+    const taskId = titleEl && titleEl.dataset.taskId;
+    const input = qs("extracurricularCompleteCurrencyInput");
+    const raw = input && input.value !== undefined && input.value !== null ? input.value : "";
+    const num = raw === "" ? 0 : Math.max(0, Number(raw) || 0);
+    if (!taskId) {
+      closeExtracurricularCompleteModal();
+      return;
+    }
+    closeExtracurricularCompleteModal();
+    completeExtracurricularWithCurrency(taskId, num);
+  }
+
+  function applyExtracurricularCompleteFullPotential() {
+    const titleEl = qs("extracurricularCompleteModalTitle");
+    const taskId = titleEl && titleEl.dataset.taskId;
+    const tasks = state.extracurricularTasks || [];
+    const task = taskId && tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const pot = Math.max(0, Number(task.currency) || 0);
+    const input = qs("extracurricularCompleteCurrencyInput");
+    if (input && pot > 0) input.value = String(pot);
   }
 
   function confirmEndgameCompleteModal() {
@@ -3515,6 +3614,36 @@
       const el = qs("endgameCompleteModal");
       if (!el || el.hidden) return;
       if (e.key === "Escape") closeEndgameCompleteModal();
+    });
+  }
+
+  function initExtracurricularCompleteModal() {
+    const modalEl = qs("extracurricularCompleteModal");
+    const confirmBtn = qs("extracurricularCompleteModalConfirm");
+    const cancelBtn = qs("extracurricularCompleteModalCancel");
+    const closeBtn = qs("extracurricularCompleteModalClose");
+    const fullBtn = qs("extracurricularCompleteFullPotentialBtn");
+    const input = qs("extracurricularCompleteCurrencyInput");
+    if (!modalEl) return;
+    modalEl.addEventListener("click", (e) => {
+      if (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true") closeExtracurricularCompleteModal();
+    });
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmExtracurricularCompleteModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeExtracurricularCompleteModal);
+    if (closeBtn) closeBtn.addEventListener("click", closeExtracurricularCompleteModal);
+    if (fullBtn) fullBtn.addEventListener("click", applyExtracurricularCompleteFullPotential);
+    if (input) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmExtracurricularCompleteModal();
+        }
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      const el = qs("extracurricularCompleteModal");
+      if (!el || el.hidden) return;
+      if (e.key === "Escape") closeExtracurricularCompleteModal();
     });
   }
 
@@ -4597,6 +4726,7 @@
     (state.extracurricularTasks || []).filter((t) => t.gameId === gameId).forEach((t) => {
       delete state.extracurricularCompleted[t.id];
       if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[t.id];
+      if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[t.id];
     });
     state.extracurricularTasks = (state.extracurricularTasks || []).filter((t) => t.gameId !== gameId);
 
@@ -4667,6 +4797,26 @@
       unrecordCompletion(dateStr, "dailies", gameId);
     }
     processResets();
+    save();
+    renderAll();
+  }
+
+  function completeExtracurricularWithCurrency(taskId, currencyValue) {
+    const task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
+    if (!task) return;
+    if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
+    state.extracurricularCurrencyEarned[taskId] = Math.max(0, Number(currencyValue) || 0);
+    state.extracurricularCompleted[taskId] = true;
+    if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
+    state.extracurricularCompletedAt[taskId] = getSimulatedNow().toISOString();
+    save();
+    renderAll();
+  }
+
+  function clearExtracurricularCompletion(taskId) {
+    delete state.extracurricularCompleted[taskId];
+    if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
+    if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[taskId];
     save();
     renderAll();
   }
@@ -4889,9 +5039,14 @@
     (state.extracurricularTasks || []).forEach((t) => {
       if (t.gameId !== game.id) return;
       const cur = Math.max(0, Number(t.currency) || 0);
-      if (cur <= 0) return;
-      xPotential += cur;
-      if (state.extracurricularCompleted[t.id]) xEarned += cur;
+      if (cur > 0) xPotential += cur;
+      if (!state.extracurricularCompleted[t.id]) return;
+      const recorded = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[t.id];
+      if (recorded !== undefined && recorded !== null) {
+        xEarned += Math.max(0, Number(recorded) || 0);
+      } else if (cur > 0) {
+        xEarned += cur;
+      }
     });
 
     return {
@@ -6492,6 +6647,30 @@
     return box;
   }
 
+  function createExtracurricularCurrencyPieBox(task, earned, potential) {
+    const pot = Math.max(0, Number(potential) || 0);
+    const e = Math.max(0, Number(earned) || 0);
+    const total = Math.max(pot, e, 1);
+    const earnedPct = total ? (e / total) * 360 : 0;
+    const box = document.createElement("div");
+    box.className = "pie-box";
+    if (total === 0 || (e === 0 && pot === 0)) {
+      box.innerHTML =
+        "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+        "<div class=\"pie-chart pie-chart-empty\"></div>" +
+        "<div class=\"pie-legend\">No currency earned yet</div>";
+      return box;
+    }
+    box.innerHTML =
+      "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+      "<div class=\"pie-chart\" style=\"--pct: " + earnedPct + "deg\"></div>" +
+      "<div class=\"pie-legend pie-legend-split\">" +
+      "<span class=\"pie-legend-item completed\">Earned: " + e + (total ? " (" + Math.round((e / total) * 100) + "%)" : "") + "</span>" +
+      "<span class=\"pie-legend-item skipped\">Potential: " + pot + "</span>" +
+      "</div>";
+    return box;
+  }
+
   function createEndgameCurrencyPieBox(task, earned, attempted) {
     const potential = Math.max(0, Number(task && task.currency) || 0) * Math.max(0, attempted);
     const total = Math.max(potential, earned, 1);
@@ -6584,13 +6763,8 @@
   }
 
   function setExtracurricularCompleted(taskId, completed) {
-    state.extracurricularCompleted[taskId] = completed;
-    if (completed) {
-      if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
-      state.extracurricularCompletedAt[taskId] = getSimulatedNow().toISOString();
-    } else {
-      if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
-    }
+    if (completed) openExtracurricularCompleteModal(taskId);
+    else clearExtracurricularCompletion(taskId);
   }
 
   /** Builds a card for the home page checklist, matching the format of weekly/endgame cards (title, potential, completion status, time remaining). */
@@ -6636,34 +6810,33 @@
     check.setAttribute("aria-label", completed ? "Mark incomplete" : "Mark complete");
     check.addEventListener("click", () => {
       setExtracurricularCompleted(task.id, !completed);
-      save();
-      renderAll();
     });
     const label1 = document.createElement("span");
     label1.innerHTML = "<strong>Completion Status:</strong> " + (completed ? "Complete" : "Incomplete");
     span.addEventListener("click", () => {
       setExtracurricularCompleted(task.id, !completed);
-      save();
-      renderAll();
     });
     left1.appendChild(check);
     left1.appendChild(label1);
     row1.appendChild(left1);
     sub.appendChild(row1);
 
-    const remainingRow = document.createElement("div");
-    remainingRow.className = "task-subrow";
-    const leftR = document.createElement("div");
-    leftR.className = "left";
-    const labelR = document.createElement("span");
-    labelR.innerHTML = "<strong>Time remaining:</strong>";
-    leftR.appendChild(labelR);
-    remainingRow.appendChild(leftR);
-    const remainingVal = document.createElement("span");
-    remainingVal.className = "task-remaining";
-    remainingVal.textContent = getExtracurricularTimeRemainingText(task, getSimulatedNow());
-    remainingRow.appendChild(remainingVal);
-    sub.appendChild(remainingRow);
+    const remText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
+    if (remText) {
+      const remainingRow = document.createElement("div");
+      remainingRow.className = "task-subrow";
+      const leftR = document.createElement("div");
+      leftR.className = "left";
+      const labelR = document.createElement("span");
+      labelR.innerHTML = "<strong>Time remaining:</strong>";
+      leftR.appendChild(labelR);
+      remainingRow.appendChild(leftR);
+      const remainingVal = document.createElement("span");
+      remainingVal.className = "task-remaining";
+      remainingVal.textContent = remText;
+      remainingRow.appendChild(remainingVal);
+      sub.appendChild(remainingRow);
+    }
 
     el.appendChild(sub);
     return el;
@@ -6692,9 +6865,14 @@
     checkbox.className = "task-checkbox";
     checkbox.checked = !!completed;
     checkbox.addEventListener("change", () => {
-      setExtracurricularCompleted(task.id, checkbox.checked);
-      save();
-      renderAll();
+      const want = checkbox.checked;
+      if (want === !!state.extracurricularCompleted[task.id]) return;
+      if (want) {
+        checkbox.checked = false;
+        openExtracurricularCompleteModal(task.id);
+      } else {
+        clearExtracurricularCompletion(task.id);
+      }
     });
     top.appendChild(checkbox);
     const labelWrap = document.createElement("div");
@@ -6710,8 +6888,19 @@
     info.textContent = startStr + (endDisplay ? " — " + endDisplay : "");
     labelWrap.appendChild(label);
     labelWrap.appendChild(info);
+    const pot = Math.max(0, Number(task.currency) || 0);
+    let earnedStr = "—";
+    if (completed) {
+      const rec = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[task.id];
+      const e = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
+      earnedStr = String(e);
+    }
+    const currencyLine = document.createElement("span");
+    currencyLine.className = "extracurricular-task-currency-line";
+    currencyLine.textContent = "Potential: " + pot + " · Earned: " + earnedStr;
+    labelWrap.appendChild(currencyLine);
     const remainingText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
-    if (remainingText !== "TBD") {
+    if (remainingText && remainingText !== "TBD") {
       const remainingSpan = document.createElement("span");
       remainingSpan.className = "extracurricular-task-remaining";
       remainingSpan.textContent = " · " + remainingText + " left";
@@ -6950,6 +7139,7 @@
     state.extracurricularTasks = (state.extracurricularTasks || []).filter((t) => t.id !== taskId);
     delete state.extracurricularCompleted[taskId];
     if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
+    if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[taskId];
     save();
     renderAll();
   }
@@ -7295,6 +7485,29 @@
       });
       currencySection.appendChild(currencyPies);
       container.appendChild(currencySection);
+    }
+
+    const exTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === game.id);
+    if (exTasks.length > 0) {
+      const exSection = document.createElement("div");
+      exSection.className = "data-pie-section";
+      const exh = document.createElement("h4");
+      exh.className = "data-section-label";
+      exh.textContent = "Extracurricular " + currencyLabel + " earned";
+      exSection.appendChild(exh);
+      const exPies = document.createElement("div");
+      exPies.className = "pie-row";
+      exTasks.forEach((task) => {
+        const pot = Math.max(0, Number(task.currency) || 0);
+        let earned = 0;
+        if (state.extracurricularCompleted[task.id]) {
+          const rec = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[task.id];
+          earned = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
+        }
+        exPies.appendChild(createExtracurricularCurrencyPieBox(task, earned, pot));
+      });
+      exSection.appendChild(exPies);
+      container.appendChild(exSection);
     }
   }
 
@@ -8198,6 +8411,7 @@
   initCalendarDayModal();
   initEarningsModal();
   initEndgameCompleteModal();
+  initExtracurricularCompleteModal();
   initTimeTrendsDetailModal();
   initClearTimeTrendsModal();
   initSettingsModal();

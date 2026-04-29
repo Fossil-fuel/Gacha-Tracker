@@ -31,13 +31,8 @@
   }
 
   function setExtracurricularCompleted(taskId, completed) {
-    state.extracurricularCompleted[taskId] = completed;
-    if (completed) {
-      if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
-      state.extracurricularCompletedAt[taskId] = getSimulatedNow().toISOString();
-    } else {
-      if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
-    }
+    if (completed) openExtracurricularCompleteModal(taskId);
+    else clearExtracurricularCompletion(taskId);
   }
 
   /** Builds a card for the home page checklist, matching the format of weekly/endgame cards (title, potential, completion status, time remaining). */
@@ -83,34 +78,33 @@
     check.setAttribute("aria-label", completed ? "Mark incomplete" : "Mark complete");
     check.addEventListener("click", () => {
       setExtracurricularCompleted(task.id, !completed);
-      save();
-      renderAll();
     });
     const label1 = document.createElement("span");
     label1.innerHTML = "<strong>Completion Status:</strong> " + (completed ? "Complete" : "Incomplete");
     span.addEventListener("click", () => {
       setExtracurricularCompleted(task.id, !completed);
-      save();
-      renderAll();
     });
     left1.appendChild(check);
     left1.appendChild(label1);
     row1.appendChild(left1);
     sub.appendChild(row1);
 
-    const remainingRow = document.createElement("div");
-    remainingRow.className = "task-subrow";
-    const leftR = document.createElement("div");
-    leftR.className = "left";
-    const labelR = document.createElement("span");
-    labelR.innerHTML = "<strong>Time remaining:</strong>";
-    leftR.appendChild(labelR);
-    remainingRow.appendChild(leftR);
-    const remainingVal = document.createElement("span");
-    remainingVal.className = "task-remaining";
-    remainingVal.textContent = getExtracurricularTimeRemainingText(task, getSimulatedNow());
-    remainingRow.appendChild(remainingVal);
-    sub.appendChild(remainingRow);
+    const remText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
+    if (remText) {
+      const remainingRow = document.createElement("div");
+      remainingRow.className = "task-subrow";
+      const leftR = document.createElement("div");
+      leftR.className = "left";
+      const labelR = document.createElement("span");
+      labelR.innerHTML = "<strong>Time remaining:</strong>";
+      leftR.appendChild(labelR);
+      remainingRow.appendChild(leftR);
+      const remainingVal = document.createElement("span");
+      remainingVal.className = "task-remaining";
+      remainingVal.textContent = remText;
+      remainingRow.appendChild(remainingVal);
+      sub.appendChild(remainingRow);
+    }
 
     el.appendChild(sub);
     return el;
@@ -139,9 +133,14 @@
     checkbox.className = "task-checkbox";
     checkbox.checked = !!completed;
     checkbox.addEventListener("change", () => {
-      setExtracurricularCompleted(task.id, checkbox.checked);
-      save();
-      renderAll();
+      const want = checkbox.checked;
+      if (want === !!state.extracurricularCompleted[task.id]) return;
+      if (want) {
+        checkbox.checked = false;
+        openExtracurricularCompleteModal(task.id);
+      } else {
+        clearExtracurricularCompletion(task.id);
+      }
     });
     top.appendChild(checkbox);
     const labelWrap = document.createElement("div");
@@ -157,8 +156,19 @@
     info.textContent = startStr + (endDisplay ? " — " + endDisplay : "");
     labelWrap.appendChild(label);
     labelWrap.appendChild(info);
+    const pot = Math.max(0, Number(task.currency) || 0);
+    let earnedStr = "—";
+    if (completed) {
+      const rec = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[task.id];
+      const e = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
+      earnedStr = String(e);
+    }
+    const currencyLine = document.createElement("span");
+    currencyLine.className = "extracurricular-task-currency-line";
+    currencyLine.textContent = "Potential: " + pot + " · Earned: " + earnedStr;
+    labelWrap.appendChild(currencyLine);
     const remainingText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
-    if (remainingText !== "TBD") {
+    if (remainingText && remainingText !== "TBD") {
       const remainingSpan = document.createElement("span");
       remainingSpan.className = "extracurricular-task-remaining";
       remainingSpan.textContent = " · " + remainingText + " left";
@@ -397,6 +407,7 @@
     state.extracurricularTasks = (state.extracurricularTasks || []).filter((t) => t.id !== taskId);
     delete state.extracurricularCompleted[taskId];
     if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
+    if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[taskId];
     save();
     renderAll();
   }
