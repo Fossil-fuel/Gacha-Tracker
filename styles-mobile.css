@@ -285,15 +285,16 @@
     padding: 0.6rem;
   }
 
-  /* Data section: horizontal scroll for tables */
+  /* Data section: keep tables compact; scroll only if viewport is narrower than content */
   #dataContainer .data-table-wrap {
+    width: max-content;
+    max-width: 100%;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    max-width: none;
   }
 
   #dataContainer .data-summary-table {
-    min-width: 380px;
+    min-width: 0;
   }
 
   /* Games section: no horizontal scroll on mobile */

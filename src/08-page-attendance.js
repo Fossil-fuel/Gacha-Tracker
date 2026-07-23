@@ -995,14 +995,20 @@
 
   const CURRENCY_PIE_COLORS = ["#34d399", "#7c3aed", "#60a5fa", "#f472b6", "#fbbf24", "#22d3ee", "#a78bfa", "#fb923c"];
 
-  function createCompletionPieBox(title, completed, total, useCleared) {
+  function createCompletionPieBox(title, completed, total, useCleared, subtitle) {
     const skipped = total - completed;
     const pct = total ? (completed / total) * 360 : 0;
     const labelDone = useCleared ? "Cleared" : "Completed";
     const box = document.createElement("div");
     box.className = "pie-box";
+    // Always reserve subtitle space so pie charts align across a row.
+    const subHtml =
+      "<p class=\"pie-box-subtitle" + (subtitle ? " task-counting-since-tag" : "") + "\">" +
+      (subtitle ? escapeHtml(subtitle) : "&nbsp;") +
+      "</p>";
     box.innerHTML =
       "<h3>" + escapeHtml(title) + "</h3>" +
+      subHtml +
       "<div class=\"pie-chart\" style=\"--pct: " + pct + "deg\"></div>" +
       "<div class=\"pie-legend pie-legend-split\">" +
       "<span class=\"pie-legend-item completed\">" + labelDone + ": " + completed + " (" + (total ? Math.round((completed / total) * 100) : 0) + "%)</span>" +
@@ -1035,21 +1041,27 @@
     return box;
   }
 
-  function createEndgameCurrencyPieBox(task, earned, potential) {
+  function createEndgameCurrencyPieBox(task, earned, potential, subtitle) {
     const pot = Math.max(0, Number(potential) || 0);
     const total = Math.max(pot, earned, 1);
     const earnedPct = total ? (earned / total) * 360 : 0;
     const box = document.createElement("div");
     box.className = "pie-box";
+    const subHtml =
+      "<p class=\"pie-box-subtitle" + (subtitle ? " task-counting-since-tag" : "") + "\">" +
+      (subtitle ? escapeHtml(subtitle) : "&nbsp;") +
+      "</p>";
     if (total === 0 || (earned === 0 && pot === 0)) {
       box.innerHTML =
         "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+        subHtml +
         "<div class=\"pie-chart pie-chart-empty\"></div>" +
         "<div class=\"pie-legend\">No currency earned yet</div>";
       return box;
     }
     box.innerHTML =
       "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+      subHtml +
       "<div class=\"pie-chart\" style=\"--pct: " + earnedPct + "deg\"></div>" +
       "<div class=\"pie-legend pie-legend-split\">" +
       "<span class=\"pie-legend-item completed\">Earned: " + earned + (total ? " (" + Math.round((earned / total) * 100) + "%)" : "") + "</span>" +

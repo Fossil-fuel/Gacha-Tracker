@@ -50,6 +50,8 @@
       const cycleEndToggle = qs("taskCycleEndEnabled");
       const cycleEndDateInput = qs("taskCycleEndDate");
       const cycleEndEnabled = !!(cycleEndToggle && cycleEndToggle.checked);
+      const countFromToggle = qs("taskCountFromDateStarted");
+      const countFromDateStarted = !!(countFromToggle && countFromToggle.checked);
       let cycleEndDate = cycleEndEnabled && cycleEndDateInput && isValidDateStr(cycleEndDateInput.value)
         ? cycleEndDateInput.value
         : null;
@@ -81,6 +83,7 @@
           timeLimitEvery,
           timeLimitUnit: taskModal.timeLimitUnit,
           adjustForDST,
+          countFromDateStarted: countFromDateStarted || undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
@@ -90,6 +93,7 @@
             delete merged.cycleEndEnabled;
             delete merged.cycleEndDate;
           }
+          if (!countFromDateStarted) delete merged.countFromDateStarted;
           game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
       } else if (taskModal.taskType === "endgame") {
@@ -110,6 +114,7 @@
           timeLimitEvery,
           timeLimitUnit: taskModal.timeLimitUnit,
           adjustForDST,
+          countFromDateStarted: countFromDateStarted || undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
@@ -129,6 +134,7 @@
             delete merged.cycleEndEnabled;
             delete merged.cycleEndDate;
           }
+          if (!countFromDateStarted) delete merged.countFromDateStarted;
           game.endgame[existingIdx] = merged;
         } else {
           game.endgame.push(next);
@@ -138,6 +144,7 @@
       }
 
       save();
+      if (typeof bumpDataVersion === "function") bumpDataVersion();
       closeTaskModal();
       renderActiveTab();
     });
@@ -687,17 +694,29 @@
     return name || "Currency";
   }
 
-  /** Get completed and attempted counts for only cycles that have fully ended (periodEnd <= now). */
-  function getCompletedAttemptedCompletedCyclesOnly(game, type, key) {
-    const now = getSimulatedNow();
+  /**
+   * Calendar-based completed/attempted for Data tab.
+   * Completed always includes finished-early current cycles.
+   * includeInProgress=false excludes only unfinished current cycles from attempted/potential.
+   */
+  function getCalendarCompletedAttempted(game, type, key, includeInProgress) {
     const history = getTaskTallyHistory(game, type, key);
-    const completed = history
-      .filter((p) => p.periodEnd.getTime() <= now.getTime())
-      .reduce((s, p) => s + p.completed, 0);
+    let completed;
+    if (type === "endgame") {
+      const task = (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
+      completed = task ? getEndgameCompletedPeriodsFromCalendar(game, task, key).length : 0;
+    } else {
+      completed = history.reduce((s, p) => s + p.completed, 0);
+    }
     return {
-      attempted: getTaskAttemptedFromCalendar(game, type, key, false),
       completed,
+      attempted: getTaskAttemptedFromCalendar(game, type, key, includeInProgress),
     };
+  }
+
+  /** @deprecated Use getCalendarCompletedAttempted(game, type, key, false). */
+  function getCompletedAttemptedCompletedCyclesOnly(game, type, key) {
+    return getCalendarCompletedAttempted(game, type, key, false);
   }
 
   /** Get earned for endgame from only completed cycles (first N entries from endgameCurrencyEarned). */
@@ -713,18 +732,14 @@
   function getGameEarnedAndPotential(game, excludeInProgress) {
     if (!game) return null;
     const excl = excludeInProgress !== false && (state.dataExcludeInProgress && state.dataExcludeInProgress[game.id] !== false);
+    const includeInProgress = !excl;
     const dailyPot = getDailyPotential(game);
 
     let dEarned, dPotential;
     if (game.dailies) {
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id);
-        dEarned = ca.completed * dailyPot;
-        dPotential = ca.attempted * dailyPot;
-      } else {
-        dEarned = getCompletedAmount(state.dailiesCompleted, game.id) * dailyPot;
-        dPotential = getAttemptedAmount(state.dailiesAttempted, game.id) * dailyPot;
-      }
+      const ca = getCalendarCompletedAttempted(game, "dailies", game.id, includeInProgress);
+      dEarned = ca.completed * dailyPot;
+      dPotential = ca.attempted * dailyPot;
     } else {
       dEarned = 0;
       dPotential = 0;
@@ -734,28 +749,18 @@
     (game.weeklies || []).forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
       const pot = getWeeklyPotential(t);
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key);
-        wEarned += ca.completed * pot;
-        wPotential += ca.attempted * pot;
-      } else {
-        wEarned += getCompletedAmount(state.weekliesCompleted, key) * pot;
-        wPotential += getAttemptedAmount(state.weekliesAttempted, key) * pot;
-      }
+      const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
+      wEarned += ca.completed * pot;
+      wPotential += ca.attempted * pot;
     });
 
     let eEarned = 0, ePotential = 0;
     (game.endgame || []).forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
       const taskId = t.id || t.label;
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key);
-        eEarned += getEndgameEarnedCompletedCyclesOnly(game.id, taskId, ca.completed);
-        ePotential += getEndgamePotentialSum(game.id, taskId, t, ca.attempted);
-      } else {
-        eEarned += getEndgameEarned(game.id, taskId);
-        ePotential += getEndgamePotentialSum(game.id, taskId, t, getAttemptedAmount(state.endgameAttempted, key));
-      }
+      const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
+      eEarned += getEndgameEarnedCompletedCyclesOnly(game.id, taskId, ca.completed);
+      ePotential += getEndgamePotentialSum(game.id, taskId, t, ca.attempted);
     });
 
     let xEarned = 0, xPotential = 0;

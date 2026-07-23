@@ -57,7 +57,7 @@
     const exclCheck = document.createElement("input");
     exclCheck.type = "checkbox";
     exclCheck.checked = getDataExcludeInProgress(game.id);
-    exclCheck.setAttribute("aria-label", "Exclude in-progress cycles from data");
+    exclCheck.setAttribute("aria-label", "Exclude unfinished current cycles from potential");
     exclCheck.addEventListener("change", () => {
       setDataExcludeInProgress(game.id, exclCheck.checked);
       save();
@@ -66,7 +66,7 @@
     exclToggle.appendChild(exclCheck);
     const exclText = document.createElement("span");
     exclText.className = "data-excl-text";
-    exclText.textContent = "Only completed cycles (exclude in-progress). Turn off to show theoretical data including current-cycle tasks not yet completed.";
+    exclText.textContent = "Exclude unfinished current cycles from potential. Turn off to include theoretical potential for cycles not yet completed.";
     exclToggle.appendChild(exclText);
     exclToggleWrap.appendChild(exclToggle);
     container.appendChild(exclToggleWrap);
@@ -93,8 +93,10 @@
     const toPullsStr = (n) => cpp > 0 ? (n / cpp).toFixed(2) : "—";
     const formatCurr = (earned, potential) => (earned === 0 && potential === 0) ? "—" : String(earned);
     const formatCurrPot = (earned, potential) => (earned === 0 && potential === 0) ? "—" : String(potential);
+    const formatCurrMissed = (earned, potential) => (earned === 0 && potential === 0) ? "—" : String(Math.max(0, potential - earned));
     const formatPulls = (earned, potential) => (earned === 0 && potential === 0) ? "—" : toPullsStr(earned);
     const formatPullsPot = (earned, potential) => (earned === 0 && potential === 0) ? "—" : toPullsStr(potential);
+    const formatPullsMissed = (earned, potential) => (earned === 0 && potential === 0) ? "—" : toPullsStr(Math.max(0, potential - earned));
 
     const makeToggle = (cat, checked) => {
       const t = document.createElement("input");
@@ -122,11 +124,11 @@
     currencyTableWrap.className = "data-table-wrap";
     const currencyTable = document.createElement("table");
     currencyTable.className = "data-summary-table";
-    currencyTable.innerHTML = "<thead><tr><th>Category</th><th class=\"data-toggle-col\">Include</th><th>Earned</th><th>Potential</th></tr></thead>";
+    currencyTable.innerHTML = "<thead><tr><th>Category</th><th class=\"data-toggle-col\">Include</th><th>Earned</th><th>Potential</th><th>Missed</th></tr></thead>";
     const currencyTbody = currencyTable.createTBody();
     const pullsTable = document.createElement("table");
     pullsTable.className = "data-summary-table";
-    pullsTable.innerHTML = "<thead><tr><th>Category</th><th class=\"data-toggle-col\">Include</th><th>Earned</th><th>Potential</th></tr></thead>";
+    pullsTable.innerHTML = "<thead><tr><th>Category</th><th class=\"data-toggle-col\">Include</th><th>Earned</th><th>Potential</th><th>Missed</th></tr></thead>";
     const pullsTbody = pullsTable.createTBody();
     [[ "Dailies", dE, dP, incD ], [ "Weeklies", wE, wP, incW ], [ "Endgame", eE, eP, incE ], [ "Extracurricular", xE, xP, incX ]].forEach(([ cat, earned, potential, inc ]) => {
       const tr = currencyTbody.insertRow();
@@ -136,6 +138,7 @@
       toggleCell.appendChild(makeToggle(cat, inc));
       tr.insertCell().textContent = formatCurr(earned, potential);
       tr.insertCell().textContent = formatCurrPot(earned, potential);
+      tr.insertCell().textContent = formatCurrMissed(earned, potential);
       const pr = pullsTbody.insertRow();
       pr.insertCell().textContent = cat;
       const ptCell = pr.insertCell();
@@ -143,6 +146,7 @@
       ptCell.appendChild(makeToggle(cat, inc));
       pr.insertCell().textContent = formatPulls(earned, potential);
       pr.insertCell().textContent = formatPullsPot(earned, potential);
+      pr.insertCell().textContent = formatPullsMissed(earned, potential);
     });
     const totalCurr = currencyTbody.insertRow();
     totalCurr.className = "data-summary-total";
@@ -150,12 +154,14 @@
     totalCurr.insertCell().className = "data-toggle-cell";
     totalCurr.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : String(inclEarned);
     totalCurr.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : String(inclPotential);
+    totalCurr.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : String(missed);
     const totalPull = pullsTbody.insertRow();
     totalPull.className = "data-summary-total";
     totalPull.insertCell().textContent = "Total";
     totalPull.insertCell().className = "data-toggle-cell";
     totalPull.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : toPullsStr(inclEarned);
     totalPull.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : toPullsStr(inclPotential);
+    totalPull.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : toPullsStr(missed);
     currencyTableWrap.appendChild(currencyTable);
     tablesSection.appendChild(currencyTableWrap);
 
@@ -194,35 +200,27 @@
     container.appendChild(tablesSection);
 
     const excl = getDataExcludeInProgress(game.id);
-    const dCompleted = game.dailies ? (excl ? getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id).completed : getCompletedAmount(state.dailiesCompleted, game.id)) : 0;
-    const dAttempted = game.dailies ? (excl ? getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id).attempted : getAttemptedAmount(state.dailiesAttempted, game.id)) : 0;
+    const includeInProgress = !excl;
+    const dCa = game.dailies ? getCalendarCompletedAttempted(game, "dailies", game.id, includeInProgress) : { completed: 0, attempted: 0 };
+    const dCompleted = dCa.completed;
+    const dAttempted = dCa.attempted;
     const dTotal = game.dailies ? (dAttempted > 0 ? dAttempted : Math.max(dCompleted, 1)) : 0;
     const weeklies = game.weeklies || [];
     let wCompleted = 0, wAttempted = 0;
     weeklies.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key);
-        wCompleted += ca.completed;
-        wAttempted += ca.attempted;
-      } else {
-        wCompleted += getCompletedAmount(state.weekliesCompleted, key);
-        wAttempted += getAttemptedAmount(state.weekliesAttempted, key);
-      }
+      const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
+      wCompleted += ca.completed;
+      wAttempted += ca.attempted;
     });
     const wTotal = wAttempted > 0 ? wAttempted : Math.max(wCompleted, weeklies.length || 1);
     const endgame = game.endgame || [];
     let eCompleted = 0, eAttempted = 0;
     endgame.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key);
-        eCompleted += ca.completed;
-        eAttempted += ca.attempted;
-      } else {
-        eCompleted += getCompletedAmount(state.endgameCompleted, key);
-        eAttempted += getAttemptedAmount(state.endgameAttempted, key);
-      }
+      const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
+      eCompleted += ca.completed;
+      eAttempted += ca.attempted;
     });
     const eTotal = eAttempted > 0 ? eAttempted : Math.max(eCompleted, endgame.length || 1);
 
@@ -231,7 +229,13 @@
     overallRow.innerHTML = "<h4 class=\"data-section-label\">Overall</h4>";
     const overallPies = document.createElement("div");
     overallPies.className = "pie-row";
-    overallPies.appendChild(createCompletionPieBox("Dailies", dCompleted, dTotal, false));
+    overallPies.appendChild(createCompletionPieBox(
+      "Dailies",
+      dCompleted,
+      dTotal,
+      false,
+      game.dailies ? formatCountingSinceLabel(game, "dailies", game.id) : null
+    ));
     overallPies.appendChild(createCompletionPieBox("Weeklies", wCompleted, wTotal, false));
     overallPies.appendChild(createCompletionPieBox("Endgame", eCompleted, eTotal, true));
     overallRow.appendChild(overallPies);
@@ -248,10 +252,10 @@
       wPies.className = "pie-row";
       weeklies.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key) : { completed: getCompletedAmount(state.weekliesCompleted, key), attempted: getAttemptedAmount(state.weekliesAttempted, key) };
+        const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
         const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
         const taskLabel = (task.label || "Weekly") + (isTaskCycleEnded(task, getSimulatedNow(), game) ? " (Ended)" : "");
-        wPies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, false));
+        wPies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, false, formatCountingSinceLabel(game, "weeklies", key)));
       });
       weekliesSection.appendChild(wPies);
       container.appendChild(weekliesSection);
@@ -268,10 +272,10 @@
       ePies.className = "pie-row";
       endgame.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key) : { completed: getCompletedAmount(state.endgameCompleted, key), attempted: getAttemptedAmount(state.endgameAttempted, key) };
+        const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
         const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
         const taskLabel = (task.label || "Endgame") + (isTaskCycleEnded(task, getSimulatedNow(), game) ? " (Ended)" : "");
-        ePies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, true));
+        ePies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, true, formatCountingSinceLabel(game, "endgame", key)));
       });
       endgameSection.appendChild(ePies);
       container.appendChild(endgameSection);
@@ -286,10 +290,10 @@
       currencyPies.className = "pie-row";
       endgame.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key) : { completed: getCompletedAmount(state.endgameCompleted, key), attempted: getAttemptedAmount(state.endgameAttempted, key) };
-        const earned = excl ? getEndgameEarnedCompletedCyclesOnly(game.id, task.id || task.label, ca.completed) : (Number(getEndgameEarned(game.id, task.id || task.label)) || 0);
+        const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
+        const earned = getEndgameEarnedCompletedCyclesOnly(game.id, task.id || task.label, ca.completed);
         const potential = getEndgamePotentialSum(game.id, task.id || task.label, task, ca.attempted);
-        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, potential));
+        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, potential, formatCountingSinceLabel(game, "endgame", key)));
       });
       currencySection.appendChild(currencyPies);
       container.appendChild(currencySection);

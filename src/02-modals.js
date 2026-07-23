@@ -944,6 +944,24 @@
       row2.appendChild(input2);
       extra.appendChild(row2);
 
+      const rowCountFrom = document.createElement("div");
+      rowCountFrom.className = "task-menu-extra-row task-cycle-end-row";
+      const countFromLabel = document.createElement("label");
+      countFromLabel.className = "task-cycle-end-toggle-label";
+      const countFromToggle = document.createElement("input");
+      countFromToggle.type = "checkbox";
+      countFromToggle.id = "taskCountFromDateStarted";
+      countFromToggle.className = "fill-toggle";
+      countFromToggle.checked = !!(task && task.countFromDateStarted);
+      countFromToggle.setAttribute("aria-label", "Count from cycle start date even without a completion");
+      const countFromText = document.createElement("span");
+      countFromText.textContent = "Count from cycle start date (even if incomplete)";
+      countFromLabel.appendChild(countFromToggle);
+      countFromLabel.appendChild(countFromText);
+      countFromLabel.title = "When on, completed/attempted tallies start at the cycle start date above, including skipped cycles before the first calendar completion.";
+      rowCountFrom.appendChild(countFromLabel);
+      extra.appendChild(rowCountFrom);
+
       const rowRemaining = document.createElement("div");
       rowRemaining.className = "task-menu-extra-row task-menu-time-remaining";
       const labelRem = document.createElement("label");

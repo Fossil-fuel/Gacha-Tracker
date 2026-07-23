@@ -9,6 +9,34 @@
     parent.appendChild(badge);
   }
 
+  /** Tag showing when calendar tally counting began (first completion or dateStarted). */
+  function appendCountingSinceTag(parent, game, type, key) {
+    const startStr = getTaskTallyStartDate(game, type, key);
+    const firstComplete = getTaskFirstCalendarCompletionDate(game, type, key);
+    const tag = document.createElement("span");
+    tag.className = "task-counting-since-tag";
+    if (startStr) {
+      tag.textContent = "Counting since: " + formatDate(new Date(startStr + "T12:00:00"));
+      if (firstComplete && firstComplete === startStr) {
+        tag.title = "First calendar completion (" + startStr + "). Completed/attempted tallies start from this date.";
+      } else if (!firstComplete) {
+        tag.title = "Counting from cycle start date (" + startStr + ") even without a completion that day.";
+      } else {
+        tag.title = "Counting from cycle start date (" + startStr + "). First completion was " + firstComplete + ".";
+      }
+    } else {
+      tag.textContent = "Counting since: —";
+      tag.title = "No calendar completions yet. Tallies start after the first completion, or enable “Count from cycle start date” on the task.";
+    }
+    parent.appendChild(tag);
+  }
+
+  function formatCountingSinceLabel(game, type, key) {
+    const startStr = getTaskTallyStartDate(game, type, key);
+    if (!startStr) return "Counting since: —";
+    return "Counting since: " + formatDate(new Date(startStr + "T12:00:00"));
+  }
+
   /** Prevent number inputs from blurring (and firing change) when clicking Sync. */
   function bindSyncButton(btn, onSync) {
     btn.addEventListener("mousedown", (e) => e.preventDefault());
@@ -209,6 +237,11 @@
       attemptRow.appendChild(attemptInput);
       content.appendChild(attemptRow);
 
+      const countingRow = document.createElement("div");
+      countingRow.className = "endgame-currency-row games-changer-row";
+      appendCountingSinceTag(countingRow, selected, "dailies", selected.id);
+      content.appendChild(countingRow);
+
       const syncRow = document.createElement("div");
       syncRow.className = "endgame-currency-row games-changer-row";
       const syncBtn = document.createElement("button");
@@ -348,6 +381,7 @@
         const label = document.createElement("span");
         label.className = "task-label";
         label.textContent = t.label || "";
+        const key = selected.id + "." + (t.id || t.label);
         const potSpan = document.createElement("span");
         potSpan.className = "games-task-potential";
         potSpan.textContent = "Potential: " + getWeeklyPotential(t);
@@ -364,6 +398,7 @@
         info.appendChild(potSpan);
         info.appendChild(resetSpan);
         info.appendChild(dateStartSpan);
+        appendCountingSinceTag(info, selected, "weeklies", key);
         appendCycleEndedBadge(info, t, selected);
         const editBtn = document.createElement("button");
         editBtn.type = "button";
@@ -377,7 +412,6 @@
         const changerRow = document.createElement("div");
         changerRow.className = "games-changer-row";
         changerRow.innerHTML = "<label>Completed amount:</label>";
-        const key = selected.id + "." + (t.id || t.label);
         const changerInput = document.createElement("input");
         changerInput.type = "number";
         changerInput.min = "0";
@@ -454,6 +488,7 @@
         const label = document.createElement("span");
         label.className = "task-label";
         label.textContent = t.label || "";
+        const key = selected.id + "." + (t.id || t.label);
         const potSpan = document.createElement("span");
         potSpan.className = "games-task-potential";
         potSpan.textContent = "Potential: " + getEndgamePotential(t);
@@ -470,6 +505,7 @@
         info.appendChild(potSpan);
         info.appendChild(resetSpan);
         info.appendChild(dateStartSpan);
+        appendCountingSinceTag(info, selected, "endgame", key);
         appendCycleEndedBadge(info, t, selected);
         const editBtn = document.createElement("button");
         editBtn.type = "button";
@@ -483,7 +519,6 @@
         const changerRow = document.createElement("div");
         changerRow.className = "games-changer-row";
         changerRow.innerHTML = "<label>Completed amount:</label>";
-        const key = selected.id + "." + (t.id || t.label);
         const changerInput = document.createElement("input");
         changerInput.type = "number";
         changerInput.min = "0";

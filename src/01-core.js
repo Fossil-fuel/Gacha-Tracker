@@ -180,7 +180,7 @@
     lastProcessedResets: { dailies: {}, weeklies: {}, endgame: {} }, // last period we processed for each task
     attendancePieInclude: {},
     dataPieInclude: {}, // { gameId: { dailies, weeklies, endgame, extracurricular } } - true = include in total/pie
-    dataExcludeInProgress: {}, // { gameId: true } - true = only completed cycles (default); false = include theoretical in-progress
+    dataExcludeInProgress: {}, // { gameId: true } - true = exclude unfinished current cycles (default); false = include them as theoretical potential
     attendanceView: "weekly", // "weekly" | "history" | "timestamps"
     timestampsSelectedGameIds: {}, // { gameId: true } - which games to show in timestamps page; empty = all
     timestampsSelectedEndgameTasks: {}, // { "gameId.taskId": true } - which endgame tasks to show; empty = all
@@ -2076,9 +2076,39 @@
   }
 
   /**
+   * Earliest calendar completion date for a task (YYYY-MM-DD), or null if never completed.
+   * This is when completed/attempted tally history starts counting (unless countFromDateStarted).
+   */
+  function getTaskFirstCalendarCompletionDate(game, type, key) {
+    const matchKey = type === "dailies" ? (key || (game && game.id)) : key;
+    if (!matchKey) return null;
+    let earliestStr = null;
+    Object.keys(state.completionByDate || {}).forEach((dateStr) => {
+      const dayData = state.completionByDate[dateStr] || {};
+      const arr = dayData[type] || [];
+      if (arr.includes(matchKey) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
+    });
+    return earliestStr;
+  }
+
+  /** Effective date tallies start from (first completion, or dateStarted when countFromDateStarted is on). */
+  function getTaskTallyStartDate(game, type, key) {
+    const firstComplete = getTaskFirstCalendarCompletionDate(game, type, key);
+    if (type === "dailies" || !game) return firstComplete;
+    const task = type === "weeklies"
+      ? (game.weeklies || []).find((t) => (game.id + "." + (t.id || t.label)) === key)
+      : (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
+    if (task && task.countFromDateStarted && isValidDateStr(task.dateStarted)) {
+      if (!firstComplete || task.dateStarted < firstComplete) return task.dateStarted;
+    }
+    return firstComplete;
+  }
+
+  /**
    * Get tally history for a task. Each period = 1 attempt; 1 complete if any mark in that period.
    * Returns array of { periodStart, periodEnd, completed }.
-   * Weeklies/endgame start at the earliest calendar completion (cycles before tracking are excluded).
+   * Weeklies/endgame start at the earliest calendar completion, or at dateStarted when
+   * countFromDateStarted is enabled (cycles before tracking are excluded otherwise).
    * Toggling multiple times within a period = 1 complete (not multiple).
    */
   function getTaskTallyHistory(game, type, key) {
@@ -2120,6 +2150,9 @@
         const dayData = state.completionByDate[dateStr] || { weeklies: [] };
         if ((dayData.weeklies || []).includes(key) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
       });
+      if (task.countFromDateStarted && isValidDateStr(task.dateStarted)) {
+        if (!earliestStr || task.dateStarted < earliestStr) earliestStr = task.dateStarted;
+      }
       if (!earliestStr) return result;
       let cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
       const nowMs = now.getTime();
@@ -2141,6 +2174,9 @@
         const dayData = state.completionByDate[dateStr] || { endgame: [] };
         if ((dayData.endgame || []).includes(key) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
       });
+      if (task.countFromDateStarted && isValidDateStr(task.dateStarted)) {
+        if (!earliestStr || task.dateStarted < earliestStr) earliestStr = task.dateStarted;
+      }
       if (!earliestStr) return result;
       let cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
       const nowMs = now.getTime();
@@ -2168,10 +2204,6 @@
     const cached = tallyCacheGet(cacheKey);
     if (cached != null) return cached;
     const history = getTaskTallyHistory(game, type, key);
-    if (type === "dailies") {
-      tallyCacheSet(cacheKey, history.length);
-      return history.length;
-    }
     const now = getSimulatedNow();
     const completed = type === "endgame"
       ? getEndgameCompletedPeriodsFromCalendar(game, (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key), key).length
@@ -2182,6 +2214,7 @@
     } else {
       skipped = history.filter((p) => p.completed === 0 && p.periodEnd.getTime() <= now.getTime()).length;
     }
+    // Unfinished current cycle only — completed-but-still-open cycles stay in `completed`.
     const inProgress = countInProgress
       ? history.filter((p) => p.periodEnd.getTime() > now.getTime() && p.completed === 0).length
       : 0;

@@ -297,7 +297,7 @@
     lastProcessedResets: { dailies: {}, weeklies: {}, endgame: {} }, // last period we processed for each task
     attendancePieInclude: {},
     dataPieInclude: {}, // { gameId: { dailies, weeklies, endgame, extracurricular } } - true = include in total/pie
-    dataExcludeInProgress: {}, // { gameId: true } - true = only completed cycles (default); false = include theoretical in-progress
+    dataExcludeInProgress: {}, // { gameId: true } - true = exclude unfinished current cycles (default); false = include them as theoretical potential
     attendanceView: "weekly", // "weekly" | "history" | "timestamps"
     timestampsSelectedGameIds: {}, // { gameId: true } - which games to show in timestamps page; empty = all
     timestampsSelectedEndgameTasks: {}, // { "gameId.taskId": true } - which endgame tasks to show; empty = all
@@ -2193,9 +2193,39 @@
   }
 
   /**
+   * Earliest calendar completion date for a task (YYYY-MM-DD), or null if never completed.
+   * This is when completed/attempted tally history starts counting (unless countFromDateStarted).
+   */
+  function getTaskFirstCalendarCompletionDate(game, type, key) {
+    const matchKey = type === "dailies" ? (key || (game && game.id)) : key;
+    if (!matchKey) return null;
+    let earliestStr = null;
+    Object.keys(state.completionByDate || {}).forEach((dateStr) => {
+      const dayData = state.completionByDate[dateStr] || {};
+      const arr = dayData[type] || [];
+      if (arr.includes(matchKey) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
+    });
+    return earliestStr;
+  }
+
+  /** Effective date tallies start from (first completion, or dateStarted when countFromDateStarted is on). */
+  function getTaskTallyStartDate(game, type, key) {
+    const firstComplete = getTaskFirstCalendarCompletionDate(game, type, key);
+    if (type === "dailies" || !game) return firstComplete;
+    const task = type === "weeklies"
+      ? (game.weeklies || []).find((t) => (game.id + "." + (t.id || t.label)) === key)
+      : (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
+    if (task && task.countFromDateStarted && isValidDateStr(task.dateStarted)) {
+      if (!firstComplete || task.dateStarted < firstComplete) return task.dateStarted;
+    }
+    return firstComplete;
+  }
+
+  /**
    * Get tally history for a task. Each period = 1 attempt; 1 complete if any mark in that period.
    * Returns array of { periodStart, periodEnd, completed }.
-   * Weeklies/endgame start at the earliest calendar completion (cycles before tracking are excluded).
+   * Weeklies/endgame start at the earliest calendar completion, or at dateStarted when
+   * countFromDateStarted is enabled (cycles before tracking are excluded otherwise).
    * Toggling multiple times within a period = 1 complete (not multiple).
    */
   function getTaskTallyHistory(game, type, key) {
@@ -2237,6 +2267,9 @@
         const dayData = state.completionByDate[dateStr] || { weeklies: [] };
         if ((dayData.weeklies || []).includes(key) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
       });
+      if (task.countFromDateStarted && isValidDateStr(task.dateStarted)) {
+        if (!earliestStr || task.dateStarted < earliestStr) earliestStr = task.dateStarted;
+      }
       if (!earliestStr) return result;
       let cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
       const nowMs = now.getTime();
@@ -2258,6 +2291,9 @@
         const dayData = state.completionByDate[dateStr] || { endgame: [] };
         if ((dayData.endgame || []).includes(key) && (!earliestStr || dateStr < earliestStr)) earliestStr = dateStr;
       });
+      if (task.countFromDateStarted && isValidDateStr(task.dateStarted)) {
+        if (!earliestStr || task.dateStarted < earliestStr) earliestStr = task.dateStarted;
+      }
       if (!earliestStr) return result;
       let cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
       const nowMs = now.getTime();
@@ -2285,10 +2321,6 @@
     const cached = tallyCacheGet(cacheKey);
     if (cached != null) return cached;
     const history = getTaskTallyHistory(game, type, key);
-    if (type === "dailies") {
-      tallyCacheSet(cacheKey, history.length);
-      return history.length;
-    }
     const now = getSimulatedNow();
     const completed = type === "endgame"
       ? getEndgameCompletedPeriodsFromCalendar(game, (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key), key).length
@@ -2299,6 +2331,7 @@
     } else {
       skipped = history.filter((p) => p.completed === 0 && p.periodEnd.getTime() <= now.getTime()).length;
     }
+    // Unfinished current cycle only — completed-but-still-open cycles stay in `completed`.
     const inProgress = countInProgress
       ? history.filter((p) => p.periodEnd.getTime() > now.getTime() && p.completed === 0).length
       : 0;
@@ -3726,6 +3759,24 @@
       row2.appendChild(input2);
       extra.appendChild(row2);
 
+      const rowCountFrom = document.createElement("div");
+      rowCountFrom.className = "task-menu-extra-row task-cycle-end-row";
+      const countFromLabel = document.createElement("label");
+      countFromLabel.className = "task-cycle-end-toggle-label";
+      const countFromToggle = document.createElement("input");
+      countFromToggle.type = "checkbox";
+      countFromToggle.id = "taskCountFromDateStarted";
+      countFromToggle.className = "fill-toggle";
+      countFromToggle.checked = !!(task && task.countFromDateStarted);
+      countFromToggle.setAttribute("aria-label", "Count from cycle start date even without a completion");
+      const countFromText = document.createElement("span");
+      countFromText.textContent = "Count from cycle start date (even if incomplete)";
+      countFromLabel.appendChild(countFromToggle);
+      countFromLabel.appendChild(countFromText);
+      countFromLabel.title = "When on, completed/attempted tallies start at the cycle start date above, including skipped cycles before the first calendar completion.";
+      rowCountFrom.appendChild(countFromLabel);
+      extra.appendChild(rowCountFrom);
+
       const rowRemaining = document.createElement("div");
       rowRemaining.className = "task-menu-extra-row task-menu-time-remaining";
       const labelRem = document.createElement("label");
@@ -5134,6 +5185,8 @@
       const cycleEndToggle = qs("taskCycleEndEnabled");
       const cycleEndDateInput = qs("taskCycleEndDate");
       const cycleEndEnabled = !!(cycleEndToggle && cycleEndToggle.checked);
+      const countFromToggle = qs("taskCountFromDateStarted");
+      const countFromDateStarted = !!(countFromToggle && countFromToggle.checked);
       let cycleEndDate = cycleEndEnabled && cycleEndDateInput && isValidDateStr(cycleEndDateInput.value)
         ? cycleEndDateInput.value
         : null;
@@ -5165,6 +5218,7 @@
           timeLimitEvery,
           timeLimitUnit: taskModal.timeLimitUnit,
           adjustForDST,
+          countFromDateStarted: countFromDateStarted || undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
@@ -5174,6 +5228,7 @@
             delete merged.cycleEndEnabled;
             delete merged.cycleEndDate;
           }
+          if (!countFromDateStarted) delete merged.countFromDateStarted;
           game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
       } else if (taskModal.taskType === "endgame") {
@@ -5194,6 +5249,7 @@
           timeLimitEvery,
           timeLimitUnit: taskModal.timeLimitUnit,
           adjustForDST,
+          countFromDateStarted: countFromDateStarted || undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
@@ -5213,6 +5269,7 @@
             delete merged.cycleEndEnabled;
             delete merged.cycleEndDate;
           }
+          if (!countFromDateStarted) delete merged.countFromDateStarted;
           game.endgame[existingIdx] = merged;
         } else {
           game.endgame.push(next);
@@ -5222,6 +5279,7 @@
       }
 
       save();
+      if (typeof bumpDataVersion === "function") bumpDataVersion();
       closeTaskModal();
       renderActiveTab();
     });
@@ -5771,17 +5829,29 @@
     return name || "Currency";
   }
 
-  /** Get completed and attempted counts for only cycles that have fully ended (periodEnd <= now). */
-  function getCompletedAttemptedCompletedCyclesOnly(game, type, key) {
-    const now = getSimulatedNow();
+  /**
+   * Calendar-based completed/attempted for Data tab.
+   * Completed always includes finished-early current cycles.
+   * includeInProgress=false excludes only unfinished current cycles from attempted/potential.
+   */
+  function getCalendarCompletedAttempted(game, type, key, includeInProgress) {
     const history = getTaskTallyHistory(game, type, key);
-    const completed = history
-      .filter((p) => p.periodEnd.getTime() <= now.getTime())
-      .reduce((s, p) => s + p.completed, 0);
+    let completed;
+    if (type === "endgame") {
+      const task = (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
+      completed = task ? getEndgameCompletedPeriodsFromCalendar(game, task, key).length : 0;
+    } else {
+      completed = history.reduce((s, p) => s + p.completed, 0);
+    }
     return {
-      attempted: getTaskAttemptedFromCalendar(game, type, key, false),
       completed,
+      attempted: getTaskAttemptedFromCalendar(game, type, key, includeInProgress),
     };
+  }
+
+  /** @deprecated Use getCalendarCompletedAttempted(game, type, key, false). */
+  function getCompletedAttemptedCompletedCyclesOnly(game, type, key) {
+    return getCalendarCompletedAttempted(game, type, key, false);
   }
 
   /** Get earned for endgame from only completed cycles (first N entries from endgameCurrencyEarned). */
@@ -5797,18 +5867,14 @@
   function getGameEarnedAndPotential(game, excludeInProgress) {
     if (!game) return null;
     const excl = excludeInProgress !== false && (state.dataExcludeInProgress && state.dataExcludeInProgress[game.id] !== false);
+    const includeInProgress = !excl;
     const dailyPot = getDailyPotential(game);
 
     let dEarned, dPotential;
     if (game.dailies) {
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id);
-        dEarned = ca.completed * dailyPot;
-        dPotential = ca.attempted * dailyPot;
-      } else {
-        dEarned = getCompletedAmount(state.dailiesCompleted, game.id) * dailyPot;
-        dPotential = getAttemptedAmount(state.dailiesAttempted, game.id) * dailyPot;
-      }
+      const ca = getCalendarCompletedAttempted(game, "dailies", game.id, includeInProgress);
+      dEarned = ca.completed * dailyPot;
+      dPotential = ca.attempted * dailyPot;
     } else {
       dEarned = 0;
       dPotential = 0;
@@ -5818,28 +5884,18 @@
     (game.weeklies || []).forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
       const pot = getWeeklyPotential(t);
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key);
-        wEarned += ca.completed * pot;
-        wPotential += ca.attempted * pot;
-      } else {
-        wEarned += getCompletedAmount(state.weekliesCompleted, key) * pot;
-        wPotential += getAttemptedAmount(state.weekliesAttempted, key) * pot;
-      }
+      const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
+      wEarned += ca.completed * pot;
+      wPotential += ca.attempted * pot;
     });
 
     let eEarned = 0, ePotential = 0;
     (game.endgame || []).forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
       const taskId = t.id || t.label;
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key);
-        eEarned += getEndgameEarnedCompletedCyclesOnly(game.id, taskId, ca.completed);
-        ePotential += getEndgamePotentialSum(game.id, taskId, t, ca.attempted);
-      } else {
-        eEarned += getEndgameEarned(game.id, taskId);
-        ePotential += getEndgamePotentialSum(game.id, taskId, t, getAttemptedAmount(state.endgameAttempted, key));
-      }
+      const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
+      eEarned += getEndgameEarnedCompletedCyclesOnly(game.id, taskId, ca.completed);
+      ePotential += getEndgamePotentialSum(game.id, taskId, t, ca.attempted);
     });
 
     let xEarned = 0, xPotential = 0;
@@ -7544,14 +7600,20 @@
 
   const CURRENCY_PIE_COLORS = ["#34d399", "#7c3aed", "#60a5fa", "#f472b6", "#fbbf24", "#22d3ee", "#a78bfa", "#fb923c"];
 
-  function createCompletionPieBox(title, completed, total, useCleared) {
+  function createCompletionPieBox(title, completed, total, useCleared, subtitle) {
     const skipped = total - completed;
     const pct = total ? (completed / total) * 360 : 0;
     const labelDone = useCleared ? "Cleared" : "Completed";
     const box = document.createElement("div");
     box.className = "pie-box";
+    // Always reserve subtitle space so pie charts align across a row.
+    const subHtml =
+      "<p class=\"pie-box-subtitle" + (subtitle ? " task-counting-since-tag" : "") + "\">" +
+      (subtitle ? escapeHtml(subtitle) : "&nbsp;") +
+      "</p>";
     box.innerHTML =
       "<h3>" + escapeHtml(title) + "</h3>" +
+      subHtml +
       "<div class=\"pie-chart\" style=\"--pct: " + pct + "deg\"></div>" +
       "<div class=\"pie-legend pie-legend-split\">" +
       "<span class=\"pie-legend-item completed\">" + labelDone + ": " + completed + " (" + (total ? Math.round((completed / total) * 100) : 0) + "%)</span>" +
@@ -7584,21 +7646,27 @@
     return box;
   }
 
-  function createEndgameCurrencyPieBox(task, earned, potential) {
+  function createEndgameCurrencyPieBox(task, earned, potential, subtitle) {
     const pot = Math.max(0, Number(potential) || 0);
     const total = Math.max(pot, earned, 1);
     const earnedPct = total ? (earned / total) * 360 : 0;
     const box = document.createElement("div");
     box.className = "pie-box";
+    const subHtml =
+      "<p class=\"pie-box-subtitle" + (subtitle ? " task-counting-since-tag" : "") + "\">" +
+      (subtitle ? escapeHtml(subtitle) : "&nbsp;") +
+      "</p>";
     if (total === 0 || (earned === 0 && pot === 0)) {
       box.innerHTML =
         "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+        subHtml +
         "<div class=\"pie-chart pie-chart-empty\"></div>" +
         "<div class=\"pie-legend\">No currency earned yet</div>";
       return box;
     }
     box.innerHTML =
       "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+      subHtml +
       "<div class=\"pie-chart\" style=\"--pct: " + earnedPct + "deg\"></div>" +
       "<div class=\"pie-legend pie-legend-split\">" +
       "<span class=\"pie-legend-item completed\">Earned: " + earned + (total ? " (" + Math.round((earned / total) * 100) + "%)" : "") + "</span>" +
@@ -8182,7 +8250,7 @@
     const exclCheck = document.createElement("input");
     exclCheck.type = "checkbox";
     exclCheck.checked = getDataExcludeInProgress(game.id);
-    exclCheck.setAttribute("aria-label", "Exclude in-progress cycles from data");
+    exclCheck.setAttribute("aria-label", "Exclude unfinished current cycles from potential");
     exclCheck.addEventListener("change", () => {
       setDataExcludeInProgress(game.id, exclCheck.checked);
       save();
@@ -8191,7 +8259,7 @@
     exclToggle.appendChild(exclCheck);
     const exclText = document.createElement("span");
     exclText.className = "data-excl-text";
-    exclText.textContent = "Only completed cycles (exclude in-progress). Turn off to show theoretical data including current-cycle tasks not yet completed.";
+    exclText.textContent = "Exclude unfinished current cycles from potential. Turn off to include theoretical potential for cycles not yet completed.";
     exclToggle.appendChild(exclText);
     exclToggleWrap.appendChild(exclToggle);
     container.appendChild(exclToggleWrap);
@@ -8218,8 +8286,10 @@
     const toPullsStr = (n) => cpp > 0 ? (n / cpp).toFixed(2) : "—";
     const formatCurr = (earned, potential) => (earned === 0 && potential === 0) ? "—" : String(earned);
     const formatCurrPot = (earned, potential) => (earned === 0 && potential === 0) ? "—" : String(potential);
+    const formatCurrMissed = (earned, potential) => (earned === 0 && potential === 0) ? "—" : String(Math.max(0, potential - earned));
     const formatPulls = (earned, potential) => (earned === 0 && potential === 0) ? "—" : toPullsStr(earned);
     const formatPullsPot = (earned, potential) => (earned === 0 && potential === 0) ? "—" : toPullsStr(potential);
+    const formatPullsMissed = (earned, potential) => (earned === 0 && potential === 0) ? "—" : toPullsStr(Math.max(0, potential - earned));
 
     const makeToggle = (cat, checked) => {
       const t = document.createElement("input");
@@ -8247,11 +8317,11 @@
     currencyTableWrap.className = "data-table-wrap";
     const currencyTable = document.createElement("table");
     currencyTable.className = "data-summary-table";
-    currencyTable.innerHTML = "<thead><tr><th>Category</th><th class=\"data-toggle-col\">Include</th><th>Earned</th><th>Potential</th></tr></thead>";
+    currencyTable.innerHTML = "<thead><tr><th>Category</th><th class=\"data-toggle-col\">Include</th><th>Earned</th><th>Potential</th><th>Missed</th></tr></thead>";
     const currencyTbody = currencyTable.createTBody();
     const pullsTable = document.createElement("table");
     pullsTable.className = "data-summary-table";
-    pullsTable.innerHTML = "<thead><tr><th>Category</th><th class=\"data-toggle-col\">Include</th><th>Earned</th><th>Potential</th></tr></thead>";
+    pullsTable.innerHTML = "<thead><tr><th>Category</th><th class=\"data-toggle-col\">Include</th><th>Earned</th><th>Potential</th><th>Missed</th></tr></thead>";
     const pullsTbody = pullsTable.createTBody();
     [[ "Dailies", dE, dP, incD ], [ "Weeklies", wE, wP, incW ], [ "Endgame", eE, eP, incE ], [ "Extracurricular", xE, xP, incX ]].forEach(([ cat, earned, potential, inc ]) => {
       const tr = currencyTbody.insertRow();
@@ -8261,6 +8331,7 @@
       toggleCell.appendChild(makeToggle(cat, inc));
       tr.insertCell().textContent = formatCurr(earned, potential);
       tr.insertCell().textContent = formatCurrPot(earned, potential);
+      tr.insertCell().textContent = formatCurrMissed(earned, potential);
       const pr = pullsTbody.insertRow();
       pr.insertCell().textContent = cat;
       const ptCell = pr.insertCell();
@@ -8268,6 +8339,7 @@
       ptCell.appendChild(makeToggle(cat, inc));
       pr.insertCell().textContent = formatPulls(earned, potential);
       pr.insertCell().textContent = formatPullsPot(earned, potential);
+      pr.insertCell().textContent = formatPullsMissed(earned, potential);
     });
     const totalCurr = currencyTbody.insertRow();
     totalCurr.className = "data-summary-total";
@@ -8275,12 +8347,14 @@
     totalCurr.insertCell().className = "data-toggle-cell";
     totalCurr.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : String(inclEarned);
     totalCurr.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : String(inclPotential);
+    totalCurr.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : String(missed);
     const totalPull = pullsTbody.insertRow();
     totalPull.className = "data-summary-total";
     totalPull.insertCell().textContent = "Total";
     totalPull.insertCell().className = "data-toggle-cell";
     totalPull.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : toPullsStr(inclEarned);
     totalPull.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : toPullsStr(inclPotential);
+    totalPull.insertCell().textContent = (inclEarned === 0 && inclPotential === 0) ? "—" : toPullsStr(missed);
     currencyTableWrap.appendChild(currencyTable);
     tablesSection.appendChild(currencyTableWrap);
 
@@ -8319,35 +8393,27 @@
     container.appendChild(tablesSection);
 
     const excl = getDataExcludeInProgress(game.id);
-    const dCompleted = game.dailies ? (excl ? getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id).completed : getCompletedAmount(state.dailiesCompleted, game.id)) : 0;
-    const dAttempted = game.dailies ? (excl ? getCompletedAttemptedCompletedCyclesOnly(game, "dailies", game.id).attempted : getAttemptedAmount(state.dailiesAttempted, game.id)) : 0;
+    const includeInProgress = !excl;
+    const dCa = game.dailies ? getCalendarCompletedAttempted(game, "dailies", game.id, includeInProgress) : { completed: 0, attempted: 0 };
+    const dCompleted = dCa.completed;
+    const dAttempted = dCa.attempted;
     const dTotal = game.dailies ? (dAttempted > 0 ? dAttempted : Math.max(dCompleted, 1)) : 0;
     const weeklies = game.weeklies || [];
     let wCompleted = 0, wAttempted = 0;
     weeklies.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key);
-        wCompleted += ca.completed;
-        wAttempted += ca.attempted;
-      } else {
-        wCompleted += getCompletedAmount(state.weekliesCompleted, key);
-        wAttempted += getAttemptedAmount(state.weekliesAttempted, key);
-      }
+      const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
+      wCompleted += ca.completed;
+      wAttempted += ca.attempted;
     });
     const wTotal = wAttempted > 0 ? wAttempted : Math.max(wCompleted, weeklies.length || 1);
     const endgame = game.endgame || [];
     let eCompleted = 0, eAttempted = 0;
     endgame.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
-      if (excl) {
-        const ca = getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key);
-        eCompleted += ca.completed;
-        eAttempted += ca.attempted;
-      } else {
-        eCompleted += getCompletedAmount(state.endgameCompleted, key);
-        eAttempted += getAttemptedAmount(state.endgameAttempted, key);
-      }
+      const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
+      eCompleted += ca.completed;
+      eAttempted += ca.attempted;
     });
     const eTotal = eAttempted > 0 ? eAttempted : Math.max(eCompleted, endgame.length || 1);
 
@@ -8356,7 +8422,13 @@
     overallRow.innerHTML = "<h4 class=\"data-section-label\">Overall</h4>";
     const overallPies = document.createElement("div");
     overallPies.className = "pie-row";
-    overallPies.appendChild(createCompletionPieBox("Dailies", dCompleted, dTotal, false));
+    overallPies.appendChild(createCompletionPieBox(
+      "Dailies",
+      dCompleted,
+      dTotal,
+      false,
+      game.dailies ? formatCountingSinceLabel(game, "dailies", game.id) : null
+    ));
     overallPies.appendChild(createCompletionPieBox("Weeklies", wCompleted, wTotal, false));
     overallPies.appendChild(createCompletionPieBox("Endgame", eCompleted, eTotal, true));
     overallRow.appendChild(overallPies);
@@ -8373,10 +8445,10 @@
       wPies.className = "pie-row";
       weeklies.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "weeklies", key) : { completed: getCompletedAmount(state.weekliesCompleted, key), attempted: getAttemptedAmount(state.weekliesAttempted, key) };
+        const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
         const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
         const taskLabel = (task.label || "Weekly") + (isTaskCycleEnded(task, getSimulatedNow(), game) ? " (Ended)" : "");
-        wPies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, false));
+        wPies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, false, formatCountingSinceLabel(game, "weeklies", key)));
       });
       weekliesSection.appendChild(wPies);
       container.appendChild(weekliesSection);
@@ -8393,10 +8465,10 @@
       ePies.className = "pie-row";
       endgame.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key) : { completed: getCompletedAmount(state.endgameCompleted, key), attempted: getAttemptedAmount(state.endgameAttempted, key) };
+        const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
         const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
         const taskLabel = (task.label || "Endgame") + (isTaskCycleEnded(task, getSimulatedNow(), game) ? " (Ended)" : "");
-        ePies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, true));
+        ePies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, true, formatCountingSinceLabel(game, "endgame", key)));
       });
       endgameSection.appendChild(ePies);
       container.appendChild(endgameSection);
@@ -8411,10 +8483,10 @@
       currencyPies.className = "pie-row";
       endgame.forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
-        const ca = excl ? getCompletedAttemptedCompletedCyclesOnly(game, "endgame", key) : { completed: getCompletedAmount(state.endgameCompleted, key), attempted: getAttemptedAmount(state.endgameAttempted, key) };
-        const earned = excl ? getEndgameEarnedCompletedCyclesOnly(game.id, task.id || task.label, ca.completed) : (Number(getEndgameEarned(game.id, task.id || task.label)) || 0);
+        const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
+        const earned = getEndgameEarnedCompletedCyclesOnly(game.id, task.id || task.label, ca.completed);
         const potential = getEndgamePotentialSum(game.id, task.id || task.label, task, ca.attempted);
-        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, potential));
+        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, potential, formatCountingSinceLabel(game, "endgame", key)));
       });
       currencySection.appendChild(currencyPies);
       container.appendChild(currencySection);
@@ -8544,6 +8616,34 @@
       ? "Ended · last cycle " + formatDate(new Date(bounds.endStr + "T12:00:00"))
       : "Ended";
     parent.appendChild(badge);
+  }
+
+  /** Tag showing when calendar tally counting began (first completion or dateStarted). */
+  function appendCountingSinceTag(parent, game, type, key) {
+    const startStr = getTaskTallyStartDate(game, type, key);
+    const firstComplete = getTaskFirstCalendarCompletionDate(game, type, key);
+    const tag = document.createElement("span");
+    tag.className = "task-counting-since-tag";
+    if (startStr) {
+      tag.textContent = "Counting since: " + formatDate(new Date(startStr + "T12:00:00"));
+      if (firstComplete && firstComplete === startStr) {
+        tag.title = "First calendar completion (" + startStr + "). Completed/attempted tallies start from this date.";
+      } else if (!firstComplete) {
+        tag.title = "Counting from cycle start date (" + startStr + ") even without a completion that day.";
+      } else {
+        tag.title = "Counting from cycle start date (" + startStr + "). First completion was " + firstComplete + ".";
+      }
+    } else {
+      tag.textContent = "Counting since: —";
+      tag.title = "No calendar completions yet. Tallies start after the first completion, or enable “Count from cycle start date” on the task.";
+    }
+    parent.appendChild(tag);
+  }
+
+  function formatCountingSinceLabel(game, type, key) {
+    const startStr = getTaskTallyStartDate(game, type, key);
+    if (!startStr) return "Counting since: —";
+    return "Counting since: " + formatDate(new Date(startStr + "T12:00:00"));
   }
 
   /** Prevent number inputs from blurring (and firing change) when clicking Sync. */
@@ -8746,6 +8846,11 @@
       attemptRow.appendChild(attemptInput);
       content.appendChild(attemptRow);
 
+      const countingRow = document.createElement("div");
+      countingRow.className = "endgame-currency-row games-changer-row";
+      appendCountingSinceTag(countingRow, selected, "dailies", selected.id);
+      content.appendChild(countingRow);
+
       const syncRow = document.createElement("div");
       syncRow.className = "endgame-currency-row games-changer-row";
       const syncBtn = document.createElement("button");
@@ -8885,6 +8990,7 @@
         const label = document.createElement("span");
         label.className = "task-label";
         label.textContent = t.label || "";
+        const key = selected.id + "." + (t.id || t.label);
         const potSpan = document.createElement("span");
         potSpan.className = "games-task-potential";
         potSpan.textContent = "Potential: " + getWeeklyPotential(t);
@@ -8901,6 +9007,7 @@
         info.appendChild(potSpan);
         info.appendChild(resetSpan);
         info.appendChild(dateStartSpan);
+        appendCountingSinceTag(info, selected, "weeklies", key);
         appendCycleEndedBadge(info, t, selected);
         const editBtn = document.createElement("button");
         editBtn.type = "button";
@@ -8914,7 +9021,6 @@
         const changerRow = document.createElement("div");
         changerRow.className = "games-changer-row";
         changerRow.innerHTML = "<label>Completed amount:</label>";
-        const key = selected.id + "." + (t.id || t.label);
         const changerInput = document.createElement("input");
         changerInput.type = "number";
         changerInput.min = "0";
@@ -8991,6 +9097,7 @@
         const label = document.createElement("span");
         label.className = "task-label";
         label.textContent = t.label || "";
+        const key = selected.id + "." + (t.id || t.label);
         const potSpan = document.createElement("span");
         potSpan.className = "games-task-potential";
         potSpan.textContent = "Potential: " + getEndgamePotential(t);
@@ -9007,6 +9114,7 @@
         info.appendChild(potSpan);
         info.appendChild(resetSpan);
         info.appendChild(dateStartSpan);
+        appendCountingSinceTag(info, selected, "endgame", key);
         appendCycleEndedBadge(info, t, selected);
         const editBtn = document.createElement("button");
         editBtn.type = "button";
@@ -9020,7 +9128,6 @@
         const changerRow = document.createElement("div");
         changerRow.className = "games-changer-row";
         changerRow.innerHTML = "<label>Completed amount:</label>";
-        const key = selected.id + "." + (t.id || t.label);
         const changerInput = document.createElement("input");
         changerInput.type = "number";
         changerInput.min = "0";
