@@ -1624,6 +1624,9 @@ body {
   gap: 0.5rem;
   margin-top: 0.5rem;
   min-height: 200px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .history-calendar-weekday {
@@ -1783,10 +1786,14 @@ body {
 .history-dwe-tooltip-item.attendance-tooltip-weeklies { color: var(--pie-weeklies); }
 .history-dwe-tooltip-item.attendance-tooltip-endgame { color: var(--pie-endgame); }
 
-/* History calendar scroll wrapper - enables horizontal scroll on narrow viewports */
+/* History calendar: no stray horizontal scrollbar on desktop.
+   Tooltips are position:absolute and would otherwise inflate scrollWidth.
+   Mobile (styles-mobile.css) enables overflow-x: auto when columns need a min width. */
 .history-calendar-scroll-wrap {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: clip;
+  overflow-y: visible;
+  width: 100%;
+  max-width: 100%;
 }
 
 /* Calendar day edit modal */
