@@ -48,6 +48,34 @@ When you add a new weekly/endgame task to a game you already use:
 - **Attempts** = number of cycles/periods that have started (from first completion to now).
 - **Completions** = number of cycles with at least one marked day.
 
+Manual repair tools live under **Settings → Data** and **Settings → Debug** (scan conflicts, safe repair, prefer timestamps, tallies only). Load does not silently rewrite calendar history.
+
+**Export summary** (Settings → Data): Markdown rates/currency report and CSV of completion events — not a full backup (use Export data for that).
+
+**Undo:** Complete/incomplete from the write path push a session undo stack (Settings → Data → Undo last completion, or Ctrl+Z). Import clears the stack.
+
+---
+
+## Fill-remaining & Time Trends
+
+When you complete a **weekly** or **endgame** task:
+
+- The completion day and remaining days in that cycle are marked in `completionByDate` (History shows them as complete).
+- A single completion timestamp records the finish day/hour.
+- **Time Trends** counts that finish (one event per cycle), not every fill-remaining day.
+- History tooltips label later cycle days as “(carried)” when they are fill-only.
+
+---
+
+## Unlock window (`earliestComplete*`)
+
+Weeklies/endgame tasks may set:
+
+- `earliestCompleteDays` — 0-based day index in the cycle before you can mark complete (e.g. `2` = Wednesday for a Monday-start week).
+- Optional `earliestCompleteHour` / `earliestCompleteMinute`.
+
+The UI disables complete until unlocked. Completing early via calendar is blocked with a hint.
+
 ---
 
 ## Editing Prior Endgame Completions

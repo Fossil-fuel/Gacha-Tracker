@@ -3,8 +3,9 @@
     const now = getSimulatedNow();
     const ended = isTaskCycleEnded(task, now, game);
     const doneToday = !ended && isEndgameCompletedInCurrentCycle(key, getDateStr());
+    const locked = !ended && !doneToday && !isTaskCompletionUnlocked("endgame", task, game, now);
     const el = document.createElement(tagName || "li");
-    el.className = "task-item" + (doneToday ? " done" : "") + (ended ? " task-item-ended" : "");
+    el.className = "task-item" + (doneToday ? " done" : "") + (ended ? " task-item-ended" : "") + (locked ? " task-item-locked" : "");
 
     const top = document.createElement("div");
     top.className = "task-top";
@@ -28,12 +29,20 @@
     const check = document.createElement("button");
     check.type = "button";
     check.className = "task-checkbox";
-    check.setAttribute("aria-label", doneToday ? "Mark incomplete" : "Mark complete");
-    if (ended) check.disabled = true;
+    const unlockHint = locked ? getTaskUnlockHint("endgame", task, game, now) : "";
+    const statusId = "endgame-status-" + String(key).replace(/[^a-zA-Z0-9_-]/g, "_");
+    check.setAttribute("aria-label", doneToday ? "Mark incomplete" : (locked ? "Locked. " + unlockHint : "Mark complete"));
+    if (ended || locked) check.disabled = true;
+    if (locked) {
+      check.setAttribute("aria-disabled", "true");
+      check.setAttribute("aria-describedby", statusId);
+      check.title = unlockHint;
+    }
     check.addEventListener("click", () => requestToggleEndgame(game.id, task.id || task.label));
     const label1 = document.createElement("span");
-    label1.innerHTML = "<strong>Completion Status:</strong> " + (ended ? "Ended" : (doneToday ? "Complete" : "Incomplete"));
-    if (!ended) span.addEventListener("click", () => requestToggleEndgame(game.id, task.id || task.label));
+    label1.id = statusId;
+    label1.innerHTML = "<strong>Completion Status:</strong> " + (ended ? "Ended" : (doneToday ? "Complete" : (locked ? ("Locked — " + unlockHint) : "Incomplete")));
+    if (!ended && !locked) span.addEventListener("click", () => requestToggleEndgame(game.id, task.id || task.label));
     left1.appendChild(check);
     left1.appendChild(label1);
     row1.appendChild(left1);

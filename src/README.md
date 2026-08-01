@@ -7,7 +7,8 @@ The app logic is split into separate files for easier reading and editing. Run `
 | File | Contents |
 |------|----------|
 | **00-firebase.js** | Firebase Auth + Firestore for cloud sync (Google/Facebook/Twitter login) |
-| **01-core.js** | Constants, state, storage (load/save), date/time utilities, processResets, task availability helpers |
+| **01-core.js** | Constants, state, storage (load/save), date/time utilities, processResets, completion write path, unlock + integrity repair helpers |
+| **01b-game-presets.js** | **Generated** `GAME_PRESETS` from `presets/*.json` (do not edit by hand; run `node build.js`) |
 | **02-modals.js** | Task modal, game modal, delete game modal, calendar day modal, earnings modal |
 | **03-games.js** | addGame, deleteGame, reallyDeleteGame, toggle functions, currency/earnings helpers |
 | **04-shared.js** | Sidebar time, renderTabs, format toggles |

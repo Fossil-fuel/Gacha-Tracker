@@ -217,10 +217,9 @@
         if (v === old) return;
         state.dailiesCompleted[selected.id] = v;
         const dateStr = getDailyPeriodDateStr(selected, getSimulatedNow());
-        if (v) recordCompletion(dateStr, "dailies", selected.id);
-        else unrecordCompletion(dateStr, "dailies", selected.id);
-        save();
-        renderActiveTab();
+        // Tallies are set explicitly above; write path only syncs calendar/timestamp.
+        if (v) applyTaskCompletion("dailies", selected.id, { dateStr, updateTallies: false });
+        else removeTaskCompletion("dailies", selected.id, { dateStr, updateTallies: false });
       });
       changerRow.appendChild(changerInput);
       content.appendChild(changerRow);

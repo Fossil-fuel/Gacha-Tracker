@@ -32,6 +32,29 @@ html[data-text-size="large"] {
   font-size: 18px;
 }
 
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Compact mode */
 html[data-compact="true"] .sidebar,
 html[data-compact="true"] .main-content {
@@ -714,16 +737,43 @@ body {
 .extracurricular-task-info {
   font-size: 0.85rem;
   color: var(--text-muted);
-  margin-left: 0.5rem;
+  margin-left: 0;
+  word-break: break-word;
 }
 
 .extracurricular-task-currency-line {
   display: block;
-  margin-top: 0.35rem;
-  margin-left: 0.5rem;
+  margin-top: 0.2rem;
+  margin-left: 0;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text);
+  word-break: break-word;
+}
+
+.extracurricular-task-remaining {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+/* Extracurricular cards: stack label / dates / currency so narrow widths never collide */
+#extracurricularContent .task-item-with-changer .task-item-info,
+.games-extracurricular-section .task-item-with-changer .task-item-info {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+.task-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-shrink: 0;
+  align-self: flex-start;
 }
 
 .panel-header-extracurricular .panel-format-toggle-float {
@@ -1319,6 +1369,18 @@ body {
   line-height: 1.4;
 }
 
+.sidebar-last-saved {
+  margin: 0.2rem 0 0;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+  min-height: 1em;
+}
+
+.sidebar-last-saved-error {
+  color: #c45c5c;
+}
+
 /* Buttons */
 .btn {
   padding: 0.5rem 1rem;
@@ -1611,21 +1673,67 @@ body {
   gap: 0.75rem;
 }
 
+.history-month-wrap {
+  position: relative;
+  min-width: 10rem;
+}
+
 .history-month-label {
   font-weight: 600;
   color: var(--text);
   min-width: 10rem;
   text-align: center;
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.history-month-label:hover,
+.history-month-wrap.is-open .history-month-label {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
+.history-month-year-picker {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  min-width: 14rem;
+}
+
+.history-month-year-picker[hidden] {
+  display: none !important;
+}
+
+.history-month-select,
+.history-year-select {
+  min-width: 7rem;
+  flex: 1;
 }
 
 .history-calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(7.25rem, 1fr));
   gap: 0.5rem;
   margin-top: 0.5rem;
   min-height: 200px;
   width: 100%;
-  max-width: 100%;
+  min-width: max-content;
   box-sizing: border-box;
 }
 
@@ -1645,6 +1753,16 @@ body {
   border-radius: var(--radius);
   padding: 0.5rem;
   min-height: 5.5rem;
+  cursor: pointer;
+}
+
+.history-calendar-day:focus {
+  outline: none;
+}
+
+.history-calendar-day:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .history-calendar-day-top {
@@ -1753,47 +1871,128 @@ body {
 .history-dwe-bar-w .history-dwe-fill { background: var(--pie-weeklies); }
 .history-dwe-bar-e .history-dwe-fill { background: var(--pie-endgame); }
 
-/* History calendar: hover tooltip per D/W/E bar */
+.history-dwe-bar-wrap-carried {
+  /* Don't opacity the whole wrap — that made hover tooltips unreadable. */
+  position: relative;
+}
+
+.history-dwe-bar-wrap-carried .history-dwe-bar,
+.history-dwe-bar-wrap-carried .history-dwe-label {
+  opacity: 0.55;
+}
+
+.history-dwe-bar-wrap-carried .history-dwe-fill {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.28) 2px,
+    rgba(0, 0, 0, 0.28) 4px
+  );
+}
+
+.history-dwe-carried-mark {
+  position: absolute;
+  right: 0.15rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--text-muted);
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.history-dwe-bar-wrap-mixed .history-dwe-bar,
+.history-dwe-bar-wrap-mixed .history-dwe-label {
+  opacity: 0.78;
+}
+
+.history-calendar-legend,
+.timestamps-trends-note,
+.timestamps-a11y-summary {
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  max-width: 42rem;
+}
+
+.timestamps-a11y-summary {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* History calendar: solid, readable hover list (one task per line). */
 .history-dwe-tooltip {
   color: var(--text);
   position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%) translateY(-0.35rem);
-  background: var(--bg-elevated);
+  bottom: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 0.4rem 0.6rem;
-  font-size: 0.75rem;
-  white-space: nowrap;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  opacity: 0;
+  background: var(--bg);
+  background-color: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.35;
+  width: max-content;
+  min-width: 8.5rem;
+  max-width: min(22rem, 75vw);
+  white-space: normal;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.15s, visibility 0.15s;
-  z-index: 10;
+  /* Zero footprint when hidden so wide tooltips don't inflate calendar scroll. */
+  overflow: hidden;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-width: 0;
 }
 
 .history-dwe-bar-wrap:hover .history-dwe-tooltip {
-  opacity: 1;
   visibility: visible;
+  overflow: visible;
+  max-height: none;
+  padding: 0.5rem 0.65rem;
+  border-width: 1px;
+}
+
+.history-dwe-tooltip-item {
+  display: block;
+  opacity: 1;
+}
+
+.history-dwe-tooltip-carried-tag {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .history-dwe-tooltip-item.attendance-tooltip-dailies { color: var(--pie-dailies); }
 .history-dwe-tooltip-item.attendance-tooltip-weeklies { color: var(--pie-weeklies); }
 .history-dwe-tooltip-item.attendance-tooltip-endgame { color: var(--pie-endgame); }
 
-/* History calendar: no stray horizontal scrollbar on desktop.
-   Tooltips are position:absolute and would otherwise inflate scrollWidth.
-   Mobile (styles-mobile.css) enables overflow-x: auto when columns need a min width. */
+/* Horizontal scroll when columns would otherwise crush (narrow window / compact).
+   Scrollbar only appears when content is wider than the wrap. */
 .history-calendar-scroll-wrap {
-  overflow-x: clip;
+  overflow-x: auto;
   overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
   width: 100%;
   max-width: 100%;
+}
+
+html[data-compact="true"] .history-calendar-grid {
+  grid-template-columns: repeat(7, minmax(7.75rem, 1fr));
 }
 
 /* Calendar day edit modal */
@@ -1846,6 +2045,35 @@ body {
 .calendar-day-modal-task span {
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.calendar-day-modal-task-carried {
+  opacity: 0.88;
+}
+
+.calendar-day-modal-task-elsewhere {
+  opacity: 0.75;
+}
+
+.calendar-day-modal-carried-tag {
+  font-style: italic;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.calendar-day-modal-elsewhere-tag {
+  font-style: italic;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.calendar-day-modal-carried-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  white-space: normal;
+  max-width: 28rem;
 }
 
 .calendar-day-modal-task-daily span,
@@ -1952,7 +2180,79 @@ body {
 }
 
 .pie-legend-item.skipped::before {
-  background: var(--border);
+  background: var(--pie-missed, var(--border));
+}
+
+.attendance-pie-box {
+  position: relative;
+}
+
+.attendance-pie-chart {
+  cursor: pointer;
+}
+
+.attendance-pie-chart:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.attendance-pie-skipped-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 0.25rem);
+  transform: translateX(-50%);
+  z-index: 20;
+  min-width: 12rem;
+  max-width: 18rem;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--text);
+  pointer-events: none;
+}
+
+.attendance-pie-skipped-tooltip[hidden] {
+  display: none !important;
+}
+
+.attendance-skipped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.attendance-skipped-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.attendance-skipped-game-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.attendance-skipped-task-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+}
+
+.attendance-skipped-task {
+  margin: 0.15rem 0;
+}
+
+.attendance-pie-skipped-tooltip .attendance-skipped-game-title {
+  font-size: 0.8rem;
 }
 
 .pie-chart-empty {
@@ -2248,13 +2548,16 @@ body {
 .games-title-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
   margin-bottom: 1rem;
 }
 
 .games-title-row .games-selected-title {
   margin: 0;
+  flex: 1 1 auto;
+  min-width: min(100%, 10rem);
 }
 
 .games-selected-title {
@@ -2333,24 +2636,37 @@ body {
 
 .task-item-with-changer .task-item-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .task-item-with-changer .task-item-info {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
+  flex-wrap: wrap;
+}
+
+.task-item-with-changer .task-item-top > .icon-btn {
+  flex-shrink: 0;
+}
+
+.task-item-with-changer .task-label {
+  min-width: 0;
+  word-break: break-word;
 }
 
 .task-item-with-changer .games-task-potential,
 .task-item-with-changer .games-task-reset {
   font-size: 0.85rem;
   color: var(--text-muted);
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .games-endgame-date-start,
@@ -2360,7 +2676,10 @@ body {
   border-radius: var(--radius-sm);
   background: rgba(124, 58, 237, 0.25);
   color: var(--text);
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
 }
 
 .games-sub-tabs {
@@ -2418,7 +2737,22 @@ input[type="date"] {
 }
 
 .modal[hidden] {
-  display: none;
+  display: none !important;
+}
+
+.modal:not([hidden]) {
+  --modal-gap-y: max(0.75rem, 3vh);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(var(--modal-gap-y), env(safe-area-inset-top, 0px))
+    max(0.75rem, env(safe-area-inset-right, 0px))
+    max(var(--modal-gap-y), env(safe-area-inset-bottom, 0px))
+    max(0.75rem, env(safe-area-inset-left, 0px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
 }
 
 .modal-backdrop {
@@ -2429,17 +2763,27 @@ input[type="date"] {
 
 .modal-dialog {
   position: relative;
-  width: min(760px, calc(100vw - 2rem));
-  margin: 8vh auto;
+  width: min(760px, calc(100vw - 1.5rem));
+  /* Leave matching gaps above and below (modal padding); do not grow into the bottom edge. */
+  max-height: calc(
+    100vh - 2 * max(0.75rem, 3vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)
+  );
+  max-height: calc(
+    100dvh - 2 * max(0.75rem, 3vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)
+  );
+  margin: 0 auto;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
 }
 
 .modal-dialog.modal-dialog-sm {
-  width: min(560px, calc(100vw - 2rem));
+  width: min(560px, calc(100vw - 1.5rem));
 }
 
 .endgame-complete-past-wrap {
@@ -2468,8 +2812,13 @@ input[type="date"] {
 
 /* Settings modal with sidebar */
 .modal-dialog-settings {
-  width: min(600px, calc(100vw - 2rem));
-  max-height: calc(100vh - 16vh);
+  width: min(600px, calc(100vw - 1.5rem));
+  max-height: calc(
+    100vh - 2 * max(0.75rem, 3vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)
+  );
+  max-height: calc(
+    100dvh - 2 * max(0.75rem, 3vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)
+  );
   display: flex;
   flex-direction: column;
 }
@@ -2562,6 +2911,266 @@ input[type="date"] {
   font-size: 0.8rem;
   color: var(--text-muted);
   margin-top: 0.35rem;
+}
+
+.settings-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.settings-subsection-title {
+  margin: 1.25rem 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.settings-share-card-block {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 0 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.settings-share-card-games {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.75rem;
+}
+
+.settings-share-card-game-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.settings-share-card-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.settings-share-card-custom .settings-label {
+  margin: 0;
+}
+
+.settings-debug-intro {
+  margin: 0 0 1rem;
+}
+
+.settings-debug-repairs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0 0 1rem;
+}
+
+.settings-debug-repairs .settings-row {
+  margin: 0;
+}
+
+.settings-tip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.settings-hover-tooltip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.4rem);
+  z-index: 40;
+  box-sizing: border-box;
+  min-width: 16rem;
+  max-width: min(22rem, 70vw);
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.4;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s, visibility 0.15s;
+}
+
+.settings-hover-tooltip strong {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.settings-tip-wrap:hover .settings-hover-tooltip,
+.settings-tip-wrap:focus-within .settings-hover-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.settings-share-card-preview {
+  margin: 0.65rem 0 0.25rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  align-items: flex-start;
+}
+
+.settings-share-card-preview[hidden] {
+  display: none !important;
+}
+
+.settings-share-card-preview img {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.settings-debug-report {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem 0.9rem;
+  max-height: 280px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 88%, var(--text) 12%);
+  border: 1px solid color-mix(in srgb, var(--border, #888) 70%, transparent);
+  border-radius: 8px;
+}
+
+.completion-time-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: 0.75rem 0 0;
+  max-height: min(50vh, 22rem);
+  overflow: auto;
+}
+
+.completion-time-batch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+}
+
+.completion-time-batch-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-right: 0.15rem;
+}
+
+.completion-time-batch-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.completion-time-batch input[type="time"] {
+  width: 8.5rem;
+}
+
+.completion-time-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+}
+
+.completion-time-row.is-batch-selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+}
+
+.completion-time-row-check {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  cursor: pointer;
+}
+
+.completion-time-row-label {
+  flex: 1 1 10rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.completion-time-row-meta {
+  flex: 1 1 100%;
+  padding-left: 1.6rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.completion-time-row input[type="time"] {
+  width: 8.5rem;
+}
+
+.completion-time-dupe-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+}
+
+.completion-time-dupe-head {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.completion-time-dupe-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.completion-time-dupe-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  padding: 0.25rem 0;
 }
 
 .account-status {
@@ -2944,6 +3553,11 @@ input[type="date"] {
 
 #clearGameDataModal {
   z-index: 1001;
+}
+
+/* Above Settings so Debug → Fill missing times is usable while Settings stays open */
+#completionTimeModal {
+  z-index: 1100;
 }
 
 .modal-dialog-color-wheel {
@@ -3336,7 +3950,8 @@ input[type="date"] {
   border-color: var(--accent-hover);
 }
 
-.timestamps-weeklies-bar-graph {
+.timestamps-weeklies-bar-graph,
+.timestamps-dow-bar-graph {
   grid-template-columns: repeat(7, 1fr);
 }
 
@@ -3352,14 +3967,16 @@ input[type="date"] {
   font-size: 0.85rem;
 }
 
-.timestamps-weeklies-bar-graph .timestamps-bar-col {
+.timestamps-weeklies-bar-graph .timestamps-bar-col,
+.timestamps-dow-bar-graph .timestamps-bar-col {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
 }
 
-.timestamps-weeklies-bar-graph .timestamps-bar-col .timestamps-bar {
+.timestamps-weeklies-bar-graph .timestamps-bar-col .timestamps-bar,
+.timestamps-dow-bar-graph .timestamps-bar-col .timestamps-bar {
   width: 100%;
   min-height: 4px;
 }
@@ -3402,6 +4019,7 @@ input[type="date"] {
   gap: 1rem;
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .modal-title {
@@ -3410,15 +4028,43 @@ input[type="date"] {
   font-weight: 700;
 }
 
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .modal-body {
   padding: 1.25rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .modal-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.5rem;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.85rem 1.25rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+/* Actions still nested in older short modals: sit at end of content, never overlay mid-scroll */
+.modal-body > .modal-actions {
   margin-top: 1rem;
+  margin-left: -1.25rem;
+  margin-right: -1.25rem;
+  margin-bottom: -1.25rem;
+  padding: 0.85rem 1.25rem 1.25rem;
 }
 
 /* Task menu grid (match app theme) */

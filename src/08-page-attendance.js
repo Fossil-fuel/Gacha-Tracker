@@ -19,7 +19,7 @@
     const labels = { dailies: [], weeklies: [], endgame: [] };
     (dayData.dailies || []).forEach((gameId) => {
       const game = getGame(gameId);
-      labels.dailies.push(game ? game.name : gameId);
+      labels.dailies.push({ text: game ? game.name : gameId, carried: false });
     });
     (available.weeklies || []).filter((item) => (dayData.weeklies || []).includes(item.key)).forEach((item) => {
       const key = item.key;
@@ -28,7 +28,11 @@
       const tId = dot >= 0 ? key.slice(dot + 1) : "";
       const game = getGame(gId);
       const task = (game?.weeklies || []).find((t) => (t.id || t.label) === tId);
-      labels.weeklies.push(task ? task.label : tId);
+      const carried = typeof isCarriedCompletionMark === "function" && isCarriedCompletionMark("weeklies", key, dateStr);
+      labels.weeklies.push({
+        text: (task ? task.label : tId) + (carried ? " (carried)" : ""),
+        carried: !!carried,
+      });
     });
     (available.endgame || []).filter((item) => (dayData.endgame || []).includes(item.key)).forEach((item) => {
       const key = item.key;
@@ -37,7 +41,11 @@
       const tId = dot >= 0 ? key.slice(dot + 1) : "";
       const game = getGame(gId);
       const task = (game?.endgame || []).find((t) => (t.id || t.label) === tId);
-      labels.endgame.push(task ? task.label : tId);
+      const carried = typeof isCarriedCompletionMark === "function" && isCarriedCompletionMark("endgame", key, dateStr);
+      labels.endgame.push({
+        text: (task ? task.label : tId) + (carried ? " (carried)" : ""),
+        carried: !!carried,
+      });
     });
     return labels;
   }
@@ -64,34 +72,146 @@
     prevBtn.className = "btn btn-ghost";
     prevBtn.textContent = "‹ Prev";
     prevBtn.addEventListener("click", () => {
+      closeHistoryMonthYearPicker();
       if (month === 0) {
         state.historyMonth = 11;
-        state.historyYear = (state.historyYear != null ? state.historyYear : now.getFullYear()) - 1;
+        state.historyYear = year - 1;
       } else {
         state.historyMonth = month - 1;
+        state.historyYear = year;
       }
       save();
       renderActiveTab();
     });
-    const monthLabel = document.createElement("span");
+    const monthWrap = document.createElement("div");
+    monthWrap.className = "history-month-wrap";
+    const monthLabel = document.createElement("button");
+    monthLabel.type = "button";
     monthLabel.className = "history-month-label";
     monthLabel.textContent = monthNames[month] + " " + year;
+    monthLabel.setAttribute("aria-haspopup", "dialog");
+    monthLabel.setAttribute("aria-expanded", "false");
+    monthLabel.setAttribute("aria-label", "Choose month and year");
+    monthLabel.title = "Click to choose month and year";
+    const picker = document.createElement("div");
+    picker.className = "history-month-year-picker";
+    picker.hidden = true;
+    picker.setAttribute("role", "dialog");
+    picker.setAttribute("aria-label", "Month and year");
+
+    function getHistoryYearOptions() {
+      const years = new Set();
+      const nowY = now.getFullYear();
+      years.add(nowY);
+      years.add(year);
+      Object.keys(state.completionByDate || {}).forEach((ds) => {
+        if (/^\d{4}-/.test(ds)) years.add(Number(ds.slice(0, 4)));
+      });
+      (state.completionTimestamps || []).forEach((t) => {
+        if (t && isValidDateStr(t.dateStr)) years.add(Number(t.dateStr.slice(0, 4)));
+      });
+      for (let y = nowY - 1; y <= nowY + 2; y++) years.add(y);
+      return [...years].filter((y) => Number.isFinite(y) && y >= 1970 && y <= 2100).sort((a, b) => a - b);
+    }
+
+    function closeHistoryMonthYearPicker() {
+      picker.hidden = true;
+      monthLabel.setAttribute("aria-expanded", "false");
+      monthWrap.classList.remove("is-open");
+      if (monthWrap._outsideClose) {
+        document.removeEventListener("click", monthWrap._outsideClose);
+        monthWrap._outsideClose = null;
+      }
+    }
+
+    function openHistoryMonthYearPicker() {
+      picker.hidden = false;
+      monthLabel.setAttribute("aria-expanded", "true");
+      monthWrap.classList.add("is-open");
+      if (yearSelect) yearSelect.focus();
+      if (monthWrap._outsideClose) document.removeEventListener("click", monthWrap._outsideClose);
+      monthWrap._outsideClose = () => closeHistoryMonthYearPicker();
+      setTimeout(() => document.addEventListener("click", monthWrap._outsideClose), 0);
+    }
+
+    const monthSelect = document.createElement("select");
+    monthSelect.className = "history-month-select settings-select";
+    monthSelect.setAttribute("aria-label", "Month");
+    monthNames.forEach((name, i) => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = name;
+      if (i === month) opt.selected = true;
+      monthSelect.appendChild(opt);
+    });
+    const yearSelect = document.createElement("select");
+    yearSelect.className = "history-year-select settings-select";
+    yearSelect.setAttribute("aria-label", "Year");
+    getHistoryYearOptions().forEach((y) => {
+      const opt = document.createElement("option");
+      opt.value = String(y);
+      opt.textContent = String(y);
+      if (y === year) opt.selected = true;
+      yearSelect.appendChild(opt);
+    });
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "btn btn-ghost btn-sm";
+    applyBtn.textContent = "Go";
+    function applyMonthYear() {
+      const nextMonth = Number(monthSelect.value);
+      const nextYear = Number(yearSelect.value);
+      if (!Number.isFinite(nextMonth) || nextMonth < 0 || nextMonth > 11) return;
+      if (!Number.isFinite(nextYear) || nextYear < 1970 || nextYear > 2100) return;
+      state.historyMonth = nextMonth;
+      state.historyYear = nextYear;
+      closeHistoryMonthYearPicker();
+      save();
+      renderActiveTab();
+    }
+    applyBtn.addEventListener("click", applyMonthYear);
+    monthSelect.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        applyMonthYear();
+      }
+    });
+    yearSelect.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        applyMonthYear();
+      }
+    });
+    picker.appendChild(monthSelect);
+    picker.appendChild(yearSelect);
+    picker.appendChild(applyBtn);
+    monthLabel.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (picker.hidden) openHistoryMonthYearPicker();
+      else closeHistoryMonthYearPicker();
+    });
+    picker.addEventListener("click", (e) => e.stopPropagation());
+    monthWrap.appendChild(monthLabel);
+    monthWrap.appendChild(picker);
+
     const nextBtn = document.createElement("button");
     nextBtn.type = "button";
     nextBtn.className = "btn btn-ghost";
     nextBtn.textContent = "Next ›";
     nextBtn.addEventListener("click", () => {
+      closeHistoryMonthYearPicker();
       if (month === 11) {
         state.historyMonth = 0;
-        state.historyYear = (state.historyYear != null ? state.historyYear : now.getFullYear()) + 1;
+        state.historyYear = year + 1;
       } else {
         state.historyMonth = month + 1;
+        state.historyYear = year;
       }
       save();
       renderActiveTab();
     });
     controls.appendChild(prevBtn);
-    controls.appendChild(monthLabel);
+    controls.appendChild(monthWrap);
     controls.appendChild(nextBtn);
     header.appendChild(controls);
     const weeklyBtn = document.createElement("button");
@@ -158,10 +278,14 @@
       const date = createDateInTimezone(year, month + 1, i + 1, 12, 0, recTz);
       cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: i + 1 });
     }
-    function bar(typeLetter, completed, total, labels, typeName) {
+    function bar(typeLetter, completed, total, labelItems, typeName) {
       const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
+      const items = (labelItems || []).map((item) => (typeof item === "string" ? { text: item, carried: false } : item));
       const wrap = document.createElement("div");
       wrap.className = "history-dwe-bar-wrap history-dwe-bar-wrap-" + typeName;
+      const allCarried = items.length > 0 && items.every((i) => i.carried);
+      if (allCarried) wrap.classList.add("history-dwe-bar-wrap-carried");
+      else if (items.some((i) => i.carried)) wrap.classList.add("history-dwe-bar-wrap-mixed");
       const label = document.createElement("span");
       label.className = "history-dwe-label";
       label.textContent = typeLetter;
@@ -170,21 +294,67 @@
       barEl.className = "history-dwe-bar history-dwe-bar-" + typeLetter.toLowerCase();
       barEl.innerHTML = "<span class=\"history-dwe-fill\" style=\"width:" + pct + "%\"></span><span class=\"history-dwe-fraction\">" + escapeHtml(String(completed) + "/" + String(total)) + "</span>";
       wrap.appendChild(barEl);
-      if (labels && labels.length > 0) {
+      if (allCarried) {
+        const mark = document.createElement("span");
+        mark.className = "history-dwe-carried-mark";
+        mark.setAttribute("aria-hidden", "true");
+        mark.title = "Carried from earlier in cycle";
+        mark.textContent = "↻";
+        wrap.appendChild(mark);
+      }
+      if (items.length > 0) {
         const tooltip = document.createElement("div");
         tooltip.className = "history-dwe-tooltip history-dwe-tooltip-" + typeName;
         tooltip.setAttribute("role", "tooltip");
-        const span = document.createElement("span");
-        span.className = "history-dwe-tooltip-item attendance-tooltip-" + typeName;
-        span.textContent = labels.join(", ");
-        tooltip.appendChild(span);
+        items.forEach((i) => {
+          const bit = document.createElement("div");
+          bit.className =
+            "history-dwe-tooltip-item attendance-tooltip-" +
+            typeName +
+            (i.carried ? " history-dwe-tooltip-carried" : "");
+          const base = String(i.text || "").replace(/\s*\(carried\)\s*$/i, "");
+          bit.appendChild(document.createTextNode(base));
+          if (i.carried) {
+            const tag = document.createElement("span");
+            tag.className = "history-dwe-tooltip-carried-tag";
+            tag.textContent = " (carried)";
+            bit.appendChild(tag);
+          }
+          tooltip.appendChild(bit);
+        });
         wrap.appendChild(tooltip);
       }
       return wrap;
     }
-    cellDates.forEach(({ date, dateStr, isCurrentMonth, dayNum }) => {
+    function historyDayAriaLabel(dateStr, dwe, taskLabels) {
+      const dateLabel = typeof formatDate === "function" ? formatDate(dateStr) : dateStr;
+      const parts = [
+        "Dailies " + dwe.dCompleted + " of " + dwe.dTotal,
+        "Weeklies " + dwe.wCompleted + " of " + dwe.wTotal,
+        "Endgame " + dwe.eCompleted + " of " + dwe.eTotal,
+      ];
+      const finishedNames = []
+        .concat(taskLabels.dailies || [])
+        .concat(taskLabels.weeklies || [])
+        .concat(taskLabels.endgame || [])
+        .filter((i) => i && !i.carried)
+        .map((i) => i.text);
+      const carriedNames = []
+        .concat(taskLabels.weeklies || [])
+        .concat(taskLabels.endgame || [])
+        .filter((i) => i && i.carried)
+        .map((i) => i.text);
+      if (finishedNames.length) parts.push("Finished: " + finishedNames.join(", "));
+      if (carriedNames.length) parts.push("Carried: " + carriedNames.join(", "));
+      return dateLabel + ". " + parts.join(". ") + ". Press Enter to edit.";
+    }
+    grid.setAttribute("role", "grid");
+    grid.setAttribute("aria-label", "Completion history calendar");
+    const dayCells = [];
+    cellDates.forEach(({ date, dateStr, isCurrentMonth, dayNum }, cellIndex) => {
       const cell = document.createElement("div");
       cell.className = "history-calendar-day";
+      cell.setAttribute("role", "gridcell");
       if (!isCurrentMonth) cell.classList.add("history-calendar-day-other-month");
       if (dateStr === todayStr) cell.classList.add("history-calendar-day-today");
       if (dateStr > todayStr) cell.classList.add("history-calendar-day-future");
@@ -198,7 +368,8 @@
       editBtn.type = "button";
       editBtn.className = "btn btn-ghost btn-sm history-calendar-day-edit";
       editBtn.textContent = "Edit";
-      editBtn.setAttribute("aria-label", "Edit " + dateStr);
+      editBtn.tabIndex = -1;
+      editBtn.setAttribute("aria-label", "Edit " + (typeof formatDate === "function" ? formatDate(dateStr) : dateStr));
       editBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         openCalendarDayModal(dateStr);
@@ -210,10 +381,50 @@
       cell.appendChild(bar("D", dwe.dCompleted, dwe.dTotal, taskLabels.dailies, "dailies"));
       cell.appendChild(bar("W", dwe.wCompleted, dwe.wTotal, taskLabels.weeklies, "weeklies"));
       cell.appendChild(bar("E", dwe.eCompleted, dwe.eTotal, taskLabels.endgame, "endgame"));
+      cell.setAttribute("aria-label", historyDayAriaLabel(dateStr, dwe, taskLabels));
+      cell.tabIndex = -1;
+      cell.dataset.cellIndex = String(cellIndex);
+      cell.addEventListener("click", (e) => {
+        if (e.target && e.target.closest && e.target.closest(".history-calendar-day-edit")) return;
+        openCalendarDayModal(dateStr);
+      });
+      cell.addEventListener("keydown", (e) => {
+        const cols = 7;
+        let next = cellIndex;
+        if (e.key === "ArrowRight") next = cellIndex + 1;
+        else if (e.key === "ArrowLeft") next = cellIndex - 1;
+        else if (e.key === "ArrowDown") next = cellIndex + cols;
+        else if (e.key === "ArrowUp") next = cellIndex - cols;
+        else if (e.key === "Home") next = cellIndex - (cellIndex % cols);
+        else if (e.key === "End") next = cellIndex - (cellIndex % cols) + (cols - 1);
+        else if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openCalendarDayModal(dateStr);
+          return;
+        } else {
+          return;
+        }
+        e.preventDefault();
+        if (next < 0 || next >= dayCells.length) return;
+        dayCells[cellIndex].tabIndex = -1;
+        dayCells[next].tabIndex = 0;
+        dayCells[next].focus();
+      });
+      dayCells.push(cell);
       grid.appendChild(cell);
     });
+    const focusIdx = Math.max(
+      0,
+      dayCells.findIndex((c) => c.classList.contains("history-calendar-day-today"))
+    );
+    if (dayCells[focusIdx]) dayCells[focusIdx].tabIndex = 0;
     gridWrap.appendChild(grid);
     container.appendChild(gridWrap);
+
+    const legend = document.createElement("p");
+    legend.className = "history-calendar-legend";
+    legend.textContent = "Solid bars = finished that day. Muted bars = still marked complete from an earlier day in the same weekly/endgame cycle (fill-remaining).";
+    container.appendChild(legend);
 
     const todayCell = grid.querySelector(".history-calendar-day-today");
     if (todayCell && gridWrap.scrollWidth > gridWrap.clientWidth) {
@@ -350,10 +561,13 @@
     const pctD = dTotal ? Math.round((dDone / dTotal) * 100) : 0;
     const pctW = wTotal ? Math.round((wDone / wTotal) * 100) : 0;
     const pctE = eTotal ? Math.round((eDone / eTotal) * 100) : 0;
-    pieRow.innerHTML =
-      "<div class=\"pie-box\"><h3>Dailies</h3><div class=\"pie-chart\" style=\"--pct: " + (pctD / 100 * 360) + "deg\"></div><div class=\"pie-legend\">" + dDone + "/" + dTotal + " (" + pctD + "%)</div></div>" +
-      "<div class=\"pie-box\"><h3>Weeklies</h3><div class=\"pie-chart\" style=\"--pct: " + (pctW / 100 * 360) + "deg\"></div><div class=\"pie-legend\">" + wDone + "/" + wTotal + " (" + pctW + "%)</div></div>" +
-      "<div class=\"pie-box\"><h3>Endgame</h3><div class=\"pie-chart\" style=\"--pct: " + (pctE / 100 * 360) + "deg\"></div><div class=\"pie-legend\">" + eDone + "/" + eTotal + " (" + pctE + "%)</div></div>";
+    [
+      { type: "dailies", title: "Dailies", done: dDone, total: dTotal, pct: pctD },
+      { type: "weeklies", title: "Weeklies", done: wDone, total: wTotal, pct: pctW },
+      { type: "endgame", title: "Endgame", done: eDone, total: eTotal, pct: pctE },
+    ].forEach((pie) => {
+      pieRow.appendChild(createAttendanceCategoryPieBox(pie.type, pie.title, pie.done, pie.total, pie.pct));
+    });
     container.appendChild(pieRow);
 
     const calendarSection = document.createElement("div");
@@ -474,14 +688,15 @@
     title.className = "data-section-label";
     title.textContent = "Completion time trends";
     header.appendChild(title);
-    const clearTrendsBtn = document.createElement("button");
-    clearTrendsBtn.type = "button";
-    clearTrendsBtn.className = "btn btn-ghost";
-    clearTrendsBtn.textContent = "Clear Time Trends data";
-    clearTrendsBtn.title = "Remove all completion timestamps (keeps other data)";
-    clearTrendsBtn.style.marginLeft = "0.5rem";
-    clearTrendsBtn.addEventListener("click", () => openClearTimeTrendsModal());
-    header.appendChild(clearTrendsBtn);
+    const syncTrendsBtn = document.createElement("button");
+    syncTrendsBtn.type = "button";
+    syncTrendsBtn.className = "btn btn-ghost";
+    syncTrendsBtn.textContent = "Sync with Calendar";
+    syncTrendsBtn.title =
+      "Fill missing Time Trends stamps from the calendar using your usual hours. Existing stamps stay unchanged.";
+    syncTrendsBtn.style.marginLeft = "0.5rem";
+    syncTrendsBtn.addEventListener("click", () => openClearTimeTrendsModal());
+    header.appendChild(syncTrendsBtn);
     const weeklyBtn = document.createElement("button");
     weeklyBtn.type = "button";
     weeklyBtn.className = "btn btn-ghost";
@@ -494,6 +709,12 @@
     });
     header.appendChild(weeklyBtn);
     container.appendChild(header);
+
+    const trendsNote = document.createElement("p");
+    trendsNote.className = "timestamps-trends-note";
+    trendsNote.textContent =
+      "Charts use the day and hour you finished each weekly/endgame cycle (from completion timestamps). Days marked complete only by fill-remaining are not counted again.";
+    container.appendChild(trendsNote);
 
     const gameLabelRow = document.createElement("div");
     gameLabelRow.style.display = "flex";
@@ -566,9 +787,11 @@
     });
     container.appendChild(gameWrap);
 
+    const trendTimestamps =
+      typeof getTimestampsForTimeTrends === "function" ? getTimestampsForTimeTrends(timestamps) : timestamps;
     const hourCountsByType = { dailies: Array(24).fill(0), weeklies: Array(24).fill(0), endgame: Array(24).fill(0) };
     const hourDetails = Array(24).fill(null).map(() => []);
-    timestamps.forEach((t) => {
+    trendTimestamps.forEach((t) => {
       const h = Number(t.hour);
       if (h >= 0 && h <= 23 && hourCountsByType[t.taskType]) {
         hourCountsByType[t.taskType][h]++;
@@ -580,6 +803,35 @@
       hourCountsByType.dailies[h] + hourCountsByType.weeklies[h] + hourCountsByType.endgame[h]
     );
     const maxCount = Math.max(1, ...hourTotals);
+
+    const dayOfWeekCounts = [0, 0, 0, 0, 0, 0, 0];
+    trendTimestamps.forEach((t) => {
+      if (!t.dateStr) return;
+      const d = new Date(t.dateStr + "T12:00:00");
+      const day = d.getDay();
+      if (day >= 0 && day <= 6) dayOfWeekCounts[day]++;
+    });
+    const peakHour = hourTotals.reduce((best, n, h) => (n > hourTotals[best] ? h : best), 0);
+    const peakDay = dayOfWeekCounts.reduce((best, n, d) => (n > dayOfWeekCounts[best] ? d : best), 0);
+    const dayFullNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const trendsSummary = document.createElement("p");
+    trendsSummary.className = "timestamps-a11y-summary";
+    trendsSummary.setAttribute("role", "status");
+    if (hourTotals[peakHour] <= 0) {
+      trendsSummary.textContent = "No completion timestamps in the current selection.";
+    } else {
+      trendsSummary.textContent =
+        "Most completions by hour: " +
+        peakHour +
+        ":00 (" +
+        hourTotals[peakHour] +
+        "). Busiest weekday: " +
+        dayFullNames[peakDay] +
+        " (" +
+        dayOfWeekCounts[peakDay] +
+        ").";
+    }
+    container.appendChild(trendsSummary);
 
     const barLabel = document.createElement("h4");
     barLabel.className = "data-section-label";
@@ -663,66 +915,80 @@
     }
     container.appendChild(barWrap);
 
-    const weekliesOnly = timestamps.filter((t) => t.taskType === "weeklies");
-    const dayCounts = [0, 0, 0, 0, 0, 0, 0];
-    const dayDetails = [[], [], [], [], [], [], []];
-    weekliesOnly.forEach((t) => {
-      if (!t.dateStr) return;
-      const d = new Date(t.dateStr + "T12:00:00");
-      const day = d.getDay();
-      dayCounts[day]++;
-      const game = getGame(t.gameId);
-      dayDetails[day].push({ gameName: game ? game.name : t.gameId, taskLabel: t.taskLabel, dateStr: t.dateStr });
-    });
-
-    const weekliesLabel = document.createElement("h4");
-    weekliesLabel.className = "data-section-label";
-    weekliesLabel.textContent = "Weeklies completed by day of week";
-    weekliesLabel.style.marginTop = "1.5rem";
-    container.appendChild(weekliesLabel);
-    const maxDayCount = Math.max(1, ...dayCounts);
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const weekliesBarWrap = document.createElement("div");
-    weekliesBarWrap.className = "timestamps-bar-graph timestamps-weeklies-bar-graph";
-    weekliesBarWrap.style.gridTemplateColumns = "repeat(7, 1fr)";
-    weekliesBarWrap.style.minHeight = "120px";
-    weekliesBarWrap.style.alignItems = "end";
-    for (let i = 0; i < 7; i++) {
-      const col = document.createElement("div");
-      col.className = "timestamps-bar-col";
-      col.style.display = "flex";
-      col.style.flexDirection = "column";
-      col.style.justifyContent = "flex-end";
-      col.style.alignItems = "center";
-      col.style.gap = "2px";
-      const spacer = document.createElement("div");
-      spacer.style.flex = "1";
-      spacer.style.minHeight = "0";
-      col.appendChild(spacer);
-      const bar = document.createElement("div");
-      bar.className = "timestamps-bar";
-      bar.style.height = maxDayCount > 0 ? (dayCounts[i] / maxDayCount) * 100 + "px" : "4px";
-      bar.style.background = "var(--pie-weeklies)";
-      col.appendChild(bar);
-      const lbl = document.createElement("span");
-      lbl.className = "timestamps-bar-label";
-      lbl.textContent = dayNames[i];
-      col.appendChild(lbl);
-      const countLbl = document.createElement("span");
-      countLbl.className = "timestamps-bar-count";
-      countLbl.textContent = dayCounts[i];
-      countLbl.style.fontSize = "0.75rem";
-      countLbl.style.fontWeight = "600";
-      countLbl.style.color = "var(--text)";
-      col.appendChild(countLbl);
-      col.title = dayNames[i] + " – " + dayCounts[i] + " completion(s)";
-      col.style.cursor = "pointer";
-      col.addEventListener("click", () => {
-        openTimeTrendsDetailModal(dayNames[i] + " completions", dayDetails[i] || []);
+    function appendDayOfWeekChart(taskType, titleText) {
+      const typed = trendTimestamps.filter((t) => t.taskType === taskType);
+      const dayCounts = [0, 0, 0, 0, 0, 0, 0];
+      const dayDetails = [[], [], [], [], [], [], []];
+      typed.forEach((t) => {
+        if (!t.dateStr) return;
+        const d = new Date(t.dateStr + "T12:00:00");
+        const day = d.getDay();
+        if (day < 0 || day > 6) return;
+        dayCounts[day]++;
+        const game = getGame(t.gameId);
+        dayDetails[day].push({
+          gameName: game ? game.name : t.gameId,
+          taskType: t.taskType,
+          taskLabel: t.taskLabel,
+          dateStr: t.dateStr,
+        });
       });
-      weekliesBarWrap.appendChild(col);
+
+      const sectionLabel = document.createElement("h4");
+      sectionLabel.className = "data-section-label";
+      sectionLabel.textContent = titleText;
+      sectionLabel.style.marginTop = "1.5rem";
+      container.appendChild(sectionLabel);
+
+      const maxDayCount = Math.max(1, ...dayCounts);
+      const dowWrap = document.createElement("div");
+      dowWrap.className = "timestamps-bar-graph timestamps-dow-bar-graph timestamps-" + taskType + "-dow-bar-graph";
+      if (taskType === "weeklies") dowWrap.classList.add("timestamps-weeklies-bar-graph");
+      dowWrap.style.gridTemplateColumns = "repeat(7, 1fr)";
+      dowWrap.style.minHeight = "120px";
+      dowWrap.style.alignItems = "end";
+      for (let i = 0; i < 7; i++) {
+        const col = document.createElement("div");
+        col.className = "timestamps-bar-col";
+        col.style.display = "flex";
+        col.style.flexDirection = "column";
+        col.style.justifyContent = "flex-end";
+        col.style.alignItems = "center";
+        col.style.gap = "2px";
+        const spacer = document.createElement("div");
+        spacer.style.flex = "1";
+        spacer.style.minHeight = "0";
+        col.appendChild(spacer);
+        const bar = document.createElement("div");
+        bar.className = "timestamps-bar";
+        bar.style.height = maxDayCount > 0 ? (dayCounts[i] / maxDayCount) * 100 + "px" : "4px";
+        bar.style.background = "var(--pie-" + taskType + ")";
+        col.appendChild(bar);
+        const lbl = document.createElement("span");
+        lbl.className = "timestamps-bar-label";
+        lbl.textContent = dayNames[i];
+        col.appendChild(lbl);
+        const countLbl = document.createElement("span");
+        countLbl.className = "timestamps-bar-count";
+        countLbl.textContent = String(dayCounts[i]);
+        countLbl.style.fontSize = "0.75rem";
+        countLbl.style.fontWeight = "600";
+        countLbl.style.color = "var(--text)";
+        col.appendChild(countLbl);
+        col.title = dayNames[i] + " – " + dayCounts[i] + " " + taskType + " completion(s)";
+        col.style.cursor = "pointer";
+        col.addEventListener("click", () => {
+          openTimeTrendsDetailModal(dayNames[i] + " " + taskType, dayDetails[i] || []);
+        });
+        dowWrap.appendChild(col);
+      }
+      container.appendChild(dowWrap);
     }
-    container.appendChild(weekliesBarWrap);
+
+    appendDayOfWeekChart("dailies", "Dailies completed by day of week");
+    appendDayOfWeekChart("weeklies", "Weeklies completed by day of week");
+    appendDayOfWeekChart("endgame", "Endgame completed by day of week");
 
     const endgameOnly = timestamps.filter((t) => t.taskType === "endgame");
     const allEndgameTasks = [];
@@ -992,6 +1258,206 @@
     const div = document.createElement("div");
     div.textContent = s;
     return div.innerHTML;
+  }
+
+  /**
+   * Skipped = attempted − completed for included games.
+   * Returns [{ gameId, gameName, tasks: [{ label, skipped, completed, attempted }] }].
+   */
+  function getAttendanceSkippedGroups(type) {
+    const groups = [];
+    (getAllGames() || []).forEach((game) => {
+      if (state.attendancePieInclude && state.attendancePieInclude[game.id] === false) return;
+      const tasks = [];
+      if (type === "dailies") {
+        if (!game.dailies) return;
+        const attempted = getAttemptedAmount(state.dailiesAttempted, game.id);
+        const completed = getCompletedAmount(state.dailiesCompleted, game.id);
+        const skipped = Math.max(0, attempted - completed);
+        if (skipped > 0) {
+          tasks.push({ label: "Dailies", skipped, completed, attempted });
+        }
+      } else if (type === "weeklies") {
+        (game.weeklies || []).forEach((t) => {
+          const key = game.id + "." + (t.id || t.label);
+          const attempted = getAttemptedAmount(state.weekliesAttempted, key);
+          const completed = getCompletedAmount(state.weekliesCompleted, key);
+          const skipped = Math.max(0, attempted - completed);
+          if (skipped > 0) {
+            tasks.push({ label: t.label || t.id || key, skipped, completed, attempted });
+          }
+        });
+      } else if (type === "endgame") {
+        (game.endgame || []).forEach((t) => {
+          const key = game.id + "." + (t.id || t.label);
+          const attempted = getAttemptedAmount(state.endgameAttempted, key);
+          const completed = getCompletedAmount(state.endgameCompleted, key);
+          const skipped = Math.max(0, attempted - completed);
+          if (skipped > 0) {
+            tasks.push({ label: t.label || t.id || key, skipped, completed, attempted });
+          }
+        });
+      }
+      if (tasks.length) {
+        groups.push({ gameId: game.id, gameName: game.name || game.id, tasks });
+      }
+    });
+    return groups;
+  }
+
+  function fillAttendanceSkippedList(container, groups, emptyMessage) {
+    if (!container) return;
+    container.innerHTML = "";
+    container.classList.add("attendance-skipped-list");
+    if (!groups || groups.length === 0) {
+      const p = document.createElement("p");
+      p.className = "attendance-skipped-empty";
+      p.textContent = emptyMessage || "No skipped tasks.";
+      container.appendChild(p);
+      return;
+    }
+    groups.forEach((group) => {
+      const block = document.createElement("div");
+      block.className = "attendance-skipped-game";
+      const title = document.createElement("h4");
+      title.className = "attendance-skipped-game-title";
+      title.textContent = group.gameName;
+      block.appendChild(title);
+      const ul = document.createElement("ul");
+      ul.className = "attendance-skipped-task-list";
+      (group.tasks || []).forEach((task) => {
+        const li = document.createElement("li");
+        li.className = "attendance-skipped-task";
+        li.textContent =
+          task.label +
+          " — " +
+          task.skipped +
+          " skipped (" +
+          task.completed +
+          "/" +
+          task.attempted +
+          ")";
+        ul.appendChild(li);
+      });
+      block.appendChild(ul);
+      container.appendChild(block);
+    });
+  }
+
+  function createAttendanceCategoryPieBox(type, title, done, total, pct) {
+    const skipped = Math.max(0, total - done);
+    const box = document.createElement("div");
+    box.className = "pie-box pie-box-" + type + " attendance-pie-box";
+    const h3 = document.createElement("h3");
+    h3.textContent = title;
+    box.appendChild(h3);
+    const chart = document.createElement("div");
+    chart.className = "pie-chart attendance-pie-chart";
+    chart.style.setProperty("--pct", (pct / 100) * 360 + "deg");
+    chart.tabIndex = 0;
+    chart.setAttribute("role", "button");
+    chart.setAttribute(
+      "aria-label",
+      title +
+        " attendance: " +
+        done +
+        " of " +
+        total +
+        " completed, " +
+        skipped +
+        " skipped. Hover or activate to see skipped tasks by game."
+    );
+    box.appendChild(chart);
+    const legend = document.createElement("div");
+    legend.className = "pie-legend pie-legend-split";
+    legend.innerHTML =
+      "<span class=\"pie-legend-item completed\">Completed: " +
+      done +
+      " (" +
+      (total ? Math.round((done / total) * 100) : 0) +
+      "%)</span>" +
+      "<span class=\"pie-legend-item skipped\">Skipped: " +
+      skipped +
+      " (" +
+      (total ? Math.round((skipped / total) * 100) : 0) +
+      "%)</span>";
+    box.appendChild(legend);
+
+    const table = document.createElement("table");
+    table.className = "sr-only";
+    const donePct = total ? Math.round((done / total) * 100) : 0;
+    const skipPct = total ? Math.round((skipped / total) * 100) : 0;
+    table.innerHTML =
+      "<caption>" +
+      escapeHtml(title) +
+      " attendance</caption>" +
+      "<thead><tr><th scope=\"col\">Status</th><th scope=\"col\">Count</th><th scope=\"col\">Percent</th></tr></thead>" +
+      "<tbody>" +
+      "<tr><th scope=\"row\">Completed</th><td>" +
+      done +
+      "</td><td>" +
+      donePct +
+      "%</td></tr>" +
+      "<tr><th scope=\"row\">Skipped</th><td>" +
+      skipped +
+      "</td><td>" +
+      skipPct +
+      "%</td></tr>" +
+      "</tbody>";
+    box.appendChild(table);
+
+    const tooltip = document.createElement("div");
+    tooltip.className = "attendance-pie-skipped-tooltip";
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.hidden = true;
+    const tooltipBody = document.createElement("div");
+    tooltip.appendChild(tooltipBody);
+    box.appendChild(tooltip);
+
+    function refreshTooltip() {
+      const groups = getAttendanceSkippedGroups(type);
+      fillAttendanceSkippedList(
+        tooltipBody,
+        groups,
+        skipped === 0 ? "No skipped tasks." : "No skipped tasks for included games."
+      );
+    }
+
+    function showTooltip() {
+      refreshTooltip();
+      tooltip.hidden = false;
+      box.classList.add("attendance-pie-box-tooltip-open");
+    }
+
+    function hideTooltip() {
+      tooltip.hidden = true;
+      box.classList.remove("attendance-pie-box-tooltip-open");
+    }
+
+    function openSkippedPopup() {
+      hideTooltip();
+      if (typeof chart.blur === "function") chart.blur();
+      const groups = getAttendanceSkippedGroups(type);
+      if (typeof openAttendanceSkippedModal === "function") {
+        openAttendanceSkippedModal(title + " — skipped tasks", groups, skipped);
+      }
+    }
+
+    box.addEventListener("mouseenter", showTooltip);
+    box.addEventListener("mouseleave", hideTooltip);
+    chart.addEventListener("focus", showTooltip);
+    chart.addEventListener("blur", hideTooltip);
+    chart.addEventListener("click", (e) => {
+      e.preventDefault();
+      openSkippedPopup();
+    });
+    chart.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openSkippedPopup();
+      }
+    });
+    return box;
   }
 
   const CURRENCY_PIE_COLORS = ["#34d399", "#7c3aed", "#60a5fa", "#f472b6", "#fbbf24", "#22d3ee", "#a78bfa", "#fb923c"];

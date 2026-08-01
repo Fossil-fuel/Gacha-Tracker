@@ -5,6 +5,8 @@
     el.hidden = !open;
     el.setAttribute("aria-hidden", open ? "false" : "true");
     document.body.style.overflow = open ? "hidden" : "";
+    if (open) activateModalFocus(el);
+    else deactivateModalFocus();
   }
 
   function setGameModalOpen(open) {
@@ -14,6 +16,8 @@
     el.hidden = !open;
     el.setAttribute("aria-hidden", open ? "false" : "true");
     document.body.style.overflow = open ? "hidden" : "";
+    if (open) activateModalFocus(el);
+    else deactivateModalFocus();
   }
 
   function setDeleteGameModalOpen(open) {
@@ -23,6 +27,97 @@
     el.hidden = !open;
     el.setAttribute("aria-hidden", open ? "false" : "true");
     document.body.style.overflow = open ? "hidden" : "";
+    if (open) activateModalFocus(el);
+    else deactivateModalFocus();
+  }
+
+  const MODAL_FOCUSABLE =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  let modalFocusReturnEl = null;
+  let modalFocusTrapBound = false;
+
+  function listModalFocusable(modalRoot) {
+    if (!modalRoot) return [];
+    const dialog = modalRoot.querySelector(".modal-dialog") || modalRoot;
+    return Array.from(dialog.querySelectorAll(MODAL_FOCUSABLE)).filter((el) => {
+      if (el.hasAttribute("disabled")) return false;
+      if (el.getAttribute("aria-hidden") === "true") return false;
+      if (el.closest("[hidden]")) return false;
+      return true;
+    });
+  }
+
+  function getTopOpenModal() {
+    const open = Array.from(document.querySelectorAll(".modal")).filter((el) => !el.hidden);
+    if (!open.length) return null;
+    let best = null;
+    let bestZ = -Infinity;
+    let bestIdx = -1;
+    open.forEach((el, i) => {
+      let z = parseFloat(window.getComputedStyle(el).zIndex);
+      if (!Number.isFinite(z)) z = 0;
+      if (z > bestZ || (z === bestZ && i > bestIdx)) {
+        best = el;
+        bestZ = z;
+        bestIdx = i;
+      }
+    });
+    return best;
+  }
+
+  function onModalFocusTrapKeydown(e) {
+    if (e.key !== "Tab") return;
+    const modal = getTopOpenModal();
+    if (!modal) return;
+    const focusables = listModalFocusable(modal);
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  function activateModalFocus(modalRoot) {
+    if (!modalRoot) return;
+    if (!modalFocusReturnEl || !modalFocusReturnEl.closest || !modalFocusReturnEl.closest(".modal")) {
+      modalFocusReturnEl = document.activeElement;
+    }
+    const focusables = listModalFocusable(modalRoot);
+    const preferred =
+      focusables.find((el) => el.matches("input, select, textarea") && el.type !== "hidden") ||
+      focusables.find((el) => !el.classList.contains("modal-close")) ||
+      focusables[0];
+    if (preferred) setTimeout(() => preferred.focus(), 0);
+    if (!modalFocusTrapBound) {
+      modalFocusTrapBound = true;
+      document.addEventListener("keydown", onModalFocusTrapKeydown, true);
+    }
+  }
+
+  function deactivateModalFocus() {
+    const stillOpen = getTopOpenModal();
+    if (stillOpen) {
+      activateModalFocus(stillOpen);
+      return;
+    }
+    if (modalFocusTrapBound) {
+      document.removeEventListener("keydown", onModalFocusTrapKeydown, true);
+      modalFocusTrapBound = false;
+    }
+    const ret = modalFocusReturnEl;
+    modalFocusReturnEl = null;
+    if (ret && typeof ret.focus === "function") {
+      setTimeout(() => {
+        try {
+          ret.focus();
+        } catch (_) {}
+      }, 0);
+    }
   }
 
   let clearGameDataModalGameId = null;
@@ -36,6 +131,7 @@
     modal.hidden = false;
     modal.setAttribute("aria-hidden", "false");
     document.body.style.overflow = "hidden";
+    activateModalFocus(modal);
   }
   function closeClearGameDataModal() {
     const modal = qs("clearGameDataModal");
@@ -44,6 +140,7 @@
       modal.hidden = true;
       modal.setAttribute("aria-hidden", "true");
       document.body.style.overflow = "";
+      deactivateModalFocus();
     }
   }
   function confirmClearGameData() {
@@ -62,6 +159,7 @@
     modal.hidden = false;
     modal.setAttribute("aria-hidden", "false");
     document.body.style.overflow = "hidden";
+    activateModalFocus(modal);
   }
   function closeClearDataModal() {
     const modal = qs("clearDataModal");
@@ -70,6 +168,7 @@
       modal.hidden = true;
       modal.setAttribute("aria-hidden", "true");
       if (!settingsModalOpen) document.body.style.overflow = "";
+      deactivateModalFocus();
     }
   }
   function confirmClearData() {
@@ -87,6 +186,7 @@
     state.endgameCompletionDates = {};
     state.completionByDate = {};
     state.completionTimestamps = [];
+    state.historyCompact = null;
     state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     state.lastSimulationSnapshot = null;
     state.lastSkipDaySnapshot = null;
@@ -105,6 +205,8 @@
   }
 
   let calendarDayModal = { open: false, dateStr: null };
+  /** @type {null|{ mode: 'calendar'|'debug', dateStr?: string, checkboxes?: any, currencyMap?: object|null, rows: Array<{type,key,label,dateStr}> }} */
+  let completionTimeModalCtx = null;
 
   function setCalendarDayModalOpen(open) {
     const el = qs("calendarDayModal");
@@ -113,34 +215,394 @@
     el.hidden = !open;
     el.setAttribute("aria-hidden", open ? "false" : "true");
     document.body.style.overflow = open ? "hidden" : "";
+    if (open) activateModalFocus(el);
+    else deactivateModalFocus();
+  }
+
+  function setCompletionTimeModalOpen(open) {
+    const el = qs("completionTimeModal");
+    if (!el) return;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) {
+      document.body.style.overflow = "hidden";
+      activateModalFocus(el);
+    } else {
+      deactivateModalFocus();
+      // Keep scroll lock if Settings (or another modal) is still open underneath.
+      const still = typeof getTopOpenModal === "function" ? getTopOpenModal() : null;
+      if (still) {
+        document.body.style.overflow = "hidden";
+        return;
+      }
+      document.body.style.overflow = "";
+    }
+  }
+
+  function defaultCompletionTimeValue() {
+    const now = typeof getSimulatedNow === "function" ? getSimulatedNow() : new Date();
+    const tz = typeof getAppTimezone === "function" ? getAppTimezone() : null;
+    if (tz && typeof getDatePartsInTimezone === "function") {
+      const p = getDatePartsInTimezone(now, tz);
+      return String(p.hour).padStart(2, "0") + ":" + String(p.minute || 0).padStart(2, "0");
+    }
+    return String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+  }
+
+  function parseTimeInputValue(value) {
+    const m = String(value || "").match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return { hour: 12, minute: 0 };
+    return {
+      hour: Math.max(0, Math.min(23, parseInt(m[1], 10) || 0)),
+      minute: Math.max(0, Math.min(59, parseInt(m[2], 10) || 0)),
+    };
+  }
+
+  function taskLabelForCompletionRow(type, key) {
+    if (type === "dailies") {
+      const game = getGame(key);
+      return (game && game.name) || key;
+    }
+    const dot = key.indexOf(".");
+    const gameId = dot >= 0 ? key.slice(0, dot) : key;
+    const taskId = dot >= 0 ? key.slice(dot + 1) : "";
+    const game = getGame(gameId);
+    const list = type === "weeklies" ? (game && game.weeklies) : (game && game.endgame);
+    const task = (list || []).find((t) => (t.id || t.label) === taskId);
+    const gName = (game && game.name) || gameId;
+    return gName + " — " + ((task && task.label) || taskId);
+  }
+
+  function isMarkedOnCalendarDay(dateStr, type, key) {
+    const dayData = state.completionByDate[dateStr] || {};
+    if (type === "dailies") return (dayData.dailies || []).includes(key);
+    if (type === "weeklies") return (dayData.weeklies || []).includes(key);
+    if (type === "endgame") return (dayData.endgame || []).includes(key);
+    return false;
+  }
+
+  function collectNewlyCompletedFromCalendar(dateStr, checkboxes) {
+    const rows = [];
+    (checkboxes || []).forEach(({ check, type, key }) => {
+      if (!check || !check.checked) return;
+      // Only brand-new marks on this day (not already filled / carried).
+      if (isMarkedOnCalendarDay(dateStr, type, key)) return;
+      rows.push({
+        type,
+        key,
+        label: taskLabelForCompletionRow(type, key),
+        dateStr,
+      });
+    });
+    return rows;
+  }
+
+  function syncCompletionTimeBatchSelectAll() {
+    const selectAll = qs("completionTimeSelectAll");
+    const ctx = completionTimeModalCtx;
+    if (!selectAll || !ctx || !ctx.rows || !ctx.rows.length) return;
+    const checks = ctx.rows.map((r) => r._check).filter(Boolean);
+    const n = checks.filter((c) => c.checked).length;
+    selectAll.checked = n > 0 && n === checks.length;
+    selectAll.indeterminate = n > 0 && n < checks.length;
+  }
+
+  function applyBatchCompletionTimeToSelected() {
+    const ctx = completionTimeModalCtx;
+    if (!ctx || !ctx.rows) return;
+    const batchInput = qs("completionTimeBatchInput");
+    const value = batchInput ? batchInput.value : defaultCompletionTimeValue();
+    let applied = 0;
+    ctx.rows.forEach((row) => {
+      if (!row._check || !row._check.checked) return;
+      if (row._input) row._input.value = value;
+      applied++;
+    });
+    if (!applied) {
+      alert("Select one or more tasks first, then Apply to selected.");
+    }
+  }
+
+  function openCompletionTimeModal(ctx) {
+    completionTimeModalCtx = ctx;
+    const list = qs("completionTimeModalList");
+    const title = qs("completionTimeModalTitle");
+    const desc = qs("completionTimeModalDesc");
+    const batchBar = qs("completionTimeBatchBar");
+    const selectAll = qs("completionTimeSelectAll");
+    const batchInput = qs("completionTimeBatchInput");
+    const confirmBtn = qs("completionTimeModalConfirm");
+    if (!list) return;
+    list.innerHTML = "";
+    const def = defaultCompletionTimeValue();
+    const isDupes = ctx.mode === "debug-dupes";
+    if (title) title.textContent = isDupes ? "Resolve duplicate times" : ctx.mode === "debug" ? "Fill missing times" : "Completion time";
+    if (desc) {
+      desc.textContent = isDupes
+        ? "These tasks have more than one finish timestamp in the same cycle. Pick which one to keep; the others are removed. Calendar marks and tallies stay unchanged."
+        : ctx.mode === "debug"
+          ? "These calendar marks have no finish time. Enter times individually, or select several and use Batch → Apply to selected."
+          : "When did you finish each newly completed task on " +
+            (typeof formatDate === "function" ? formatDate(ctx.dateStr) : ctx.dateStr) +
+            "? Select several to set the same time in one step.";
+    }
+    if (confirmBtn) confirmBtn.textContent = isDupes ? "Keep selected" : "Save times";
+    if (batchBar) batchBar.hidden = isDupes || !(ctx.rows && ctx.rows.length);
+    if (batchInput) batchInput.value = def;
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    }
+
+    if (isDupes) {
+      (ctx.groups || []).forEach((group, gIdx) => {
+        const block = document.createElement("div");
+        block.className = "completion-time-dupe-group";
+        const head = document.createElement("div");
+        head.className = "completion-time-dupe-head";
+        head.textContent = group.label;
+        const meta = document.createElement("div");
+        meta.className = "completion-time-dupe-meta";
+        meta.textContent =
+          (group.type === "dailies" ? "Day " : "Cycle ") +
+          group.cycleStart +
+          (group.type ? " · " + group.type : "");
+        block.appendChild(head);
+        block.appendChild(meta);
+        const radios = [];
+        const stamps = group.stamps || [];
+        const defaultIdx = Math.max(0, stamps.length - 1);
+        stamps.forEach((stamp, sIdx) => {
+          const opt = document.createElement("label");
+          opt.className = "completion-time-dupe-option";
+          const radio = document.createElement("input");
+          radio.type = "radio";
+          radio.name = "completionTimeDupe_" + gIdx;
+          radio.value = String(sIdx);
+          radio.checked = sIdx === defaultIdx;
+          radio.dataset.dateStr = stamp.dateStr;
+          radio.dataset.hour = String(Number(stamp.hour) || 0);
+          radio.dataset.minute = String(Number(stamp.minute) || 0);
+          const text = document.createElement("span");
+          const timeLabel =
+            typeof formatTimeOnly === "function"
+              ? formatTimeOnly(Number(stamp.hour) || 0, Number(stamp.minute) || 0)
+              : String(stamp.hour) + ":" + String(stamp.minute || 0).padStart(2, "0");
+          const dateLabel =
+            typeof formatDate === "function" ? formatDate(stamp.dateStr) : stamp.dateStr;
+          text.textContent = dateLabel + " · " + timeLabel;
+          opt.appendChild(radio);
+          opt.appendChild(text);
+          block.appendChild(opt);
+          radios.push(radio);
+        });
+        list.appendChild(block);
+        group._radios = radios;
+      });
+      setCompletionTimeModalOpen(true);
+      return;
+    }
+
+    (ctx.rows || []).forEach((row, idx) => {
+      const wrap = document.createElement("div");
+      wrap.className = "completion-time-row";
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.className = "completion-time-row-check";
+      check.id = "completionTimeSelect_" + idx;
+      check.setAttribute("aria-label", "Select " + (row.label || "task") + " for batch time");
+      check.addEventListener("change", () => {
+        wrap.classList.toggle("is-batch-selected", check.checked);
+        syncCompletionTimeBatchSelectAll();
+      });
+      const lab = document.createElement("label");
+      lab.className = "completion-time-row-label";
+      lab.htmlFor = "completionTimeInput_" + idx;
+      lab.textContent = row.label;
+      const meta = document.createElement("div");
+      meta.className = "completion-time-row-meta";
+      meta.textContent = row.dateStr + (row.type ? " · " + row.type : "");
+      const input = document.createElement("input");
+      input.type = "time";
+      input.id = "completionTimeInput_" + idx;
+      input.className = "settings-input";
+      input.value = def;
+      input.dataset.idx = String(idx);
+      wrap.appendChild(check);
+      wrap.appendChild(lab);
+      wrap.appendChild(input);
+      wrap.appendChild(meta);
+      list.appendChild(wrap);
+      row._input = input;
+      row._check = check;
+    });
+    setCompletionTimeModalOpen(true);
+  }
+
+  function closeCompletionTimeModal() {
+    completionTimeModalCtx = null;
+    setCompletionTimeModalOpen(false);
+  }
+
+  function confirmCompletionTimeModal() {
+    const ctx = completionTimeModalCtx;
+    if (!ctx) return;
+    if (ctx.mode === "debug-dupes") {
+      const choices = (ctx.groups || []).map((group) => {
+        const radios = group._radios || [];
+        let picked = radios.find((r) => r.checked);
+        if (!picked) picked = radios[radios.length - 1] || radios[0];
+        const keep = picked
+          ? {
+              dateStr: picked.dataset.dateStr,
+              hour: Number(picked.dataset.hour) || 0,
+              minute: Number(picked.dataset.minute) || 0,
+            }
+          : null;
+        return {
+          type: group.type,
+          gameId: group.gameId,
+          taskId: group.taskId,
+          cycleStart: group.cycleStart,
+          keep,
+        };
+      });
+      closeCompletionTimeModal();
+      const result =
+        typeof resolveDuplicateCompletionTimestamps === "function"
+          ? resolveDuplicateCompletionTimestamps(choices)
+          : { ok: false, removed: 0, resolved: 0 };
+      const report = qs("settingsDebugReport");
+      if (report) {
+        const lines = [];
+        lines.push("Resolve duplicate times");
+        lines.push("Groups resolved: " + (result.resolved || 0));
+        lines.push("Timestamps removed: " + (result.removed || 0));
+        lines.push("");
+        if (result.after && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(result.after));
+        } else if (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(scanDataConflicts()));
+        }
+        report.textContent = lines.join("\n");
+      }
+      if (typeof syncSettingsUI === "function") syncSettingsUI();
+      return;
+    }
+    const timesByKey = {};
+    (ctx.rows || []).forEach((row) => {
+      const parsed = parseTimeInputValue(row._input && row._input.value);
+      timesByKey[row.type + "|" + row.key] = parsed;
+      row.hour = parsed.hour;
+      row.minute = parsed.minute;
+    });
+    if (ctx.mode === "debug") {
+      const entries = (ctx.rows || []).map((row) => ({
+        type: row.type,
+        key: row.key,
+        dateStr: row.dateStr,
+        hour: row.hour,
+        minute: row.minute,
+      }));
+      closeCompletionTimeModal();
+      const result =
+        typeof fillMissingCompletionTimes === "function"
+          ? fillMissingCompletionTimes(entries)
+          : { ok: false, added: 0 };
+      const report = qs("settingsDebugReport");
+      if (report) {
+        const lines = [];
+        lines.push("Fill missing times");
+        lines.push("Added: " + (result.added || 0) + " timestamp(s)");
+        lines.push("");
+        if (result.after && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(result.after));
+        } else if (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(scanDataConflicts()));
+        }
+        report.textContent = lines.join("\n");
+      }
+      if (typeof syncSettingsUI === "function") syncSettingsUI();
+      return;
+    }
+
+    // Calendar save path
+    const dateStr = ctx.dateStr;
+    const checkboxes = ctx.checkboxes;
+    const currencyMap = ctx.currencyMap || null;
+    closeCompletionTimeModal();
+    applyCalendarDayModalSave(dateStr, checkboxes, currencyMap, timesByKey);
   }
 
   function openCalendarDayModal(dateStr) {
     calendarDayModal.dateStr = dateStr;
     const titleEl = qs("calendarDayModalTitle");
-    if (titleEl) titleEl.textContent = "Edit " + dateStr;
+    if (titleEl) titleEl.textContent = "Edit " + (typeof formatDate === "function" ? formatDate(dateStr) : dateStr);
     const container = qs("calendarDayModalTasks");
     if (!container) return;
     container.innerHTML = "";
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
     const available = getTasksAvailableOnDate(dateStr);
     const checkboxes = [];
+    let anyCarried = false;
     const addTask = (item, type) => {
-      const isCompleted = type === "dailies"
-        ? dayData.dailies.includes(item.key)
-        : type === "weeklies"
-          ? (dayData.weeklies || []).includes(item.key)
-          : isCompletedInCycleForDate(item.key, "endgame", dateStr);
+      // Checkbox must match the calendar D/W/E bar: marked on THIS day only.
+      // (Endgame used to use cycle-wide completion, so later finishes looked done on earlier days.)
+      const onThisDay =
+        type === "dailies"
+          ? (dayData.dailies || []).includes(item.key)
+          : type === "weeklies"
+            ? (dayData.weeklies || []).includes(item.key)
+            : (dayData.endgame || []).includes(item.key);
+      const cycleFinish =
+        (type === "weeklies" || type === "endgame") && typeof getCompletionDateInCycle === "function"
+          ? getCompletionDateInCycle(item.key, type, dateStr)
+          : null;
+      const carried =
+        !!onThisDay &&
+        (type === "weeklies" || type === "endgame") &&
+        typeof isCarriedCompletionMark === "function" &&
+        isCarriedCompletionMark(type, item.key, dateStr);
+      const finishedLater = !onThisDay && !!cycleFinish && cycleFinish > dateStr;
+      const finishedEarlierUnmarked = !onThisDay && !!cycleFinish && cycleFinish < dateStr;
+      if (carried) anyCarried = true;
       const label = document.createElement("label");
-      label.className = "calendar-day-modal-task calendar-day-modal-task-" + type;
+      label.className =
+        "calendar-day-modal-task calendar-day-modal-task-" +
+        type +
+        (carried ? " calendar-day-modal-task-carried" : "") +
+        (finishedLater || finishedEarlierUnmarked ? " calendar-day-modal-task-elsewhere" : "");
+      if (carried) {
+        label.title = "Carried: finished earlier in this cycle (fill-remaining). Uncheck to clear the cycle.";
+      } else if (finishedLater) {
+        label.title = "Finished later in this cycle (" + cycleFinish + "). Not marked on this day.";
+      } else if (finishedEarlierUnmarked) {
+        label.title = "Finished earlier in this cycle (" + cycleFinish + "), but this day has no fill mark.";
+      }
       const check = document.createElement("input");
       check.type = "checkbox";
-      check.checked = isCompleted;
+      check.checked = onThisDay;
       check.dataset.type = type;
       check.dataset.key = item.key;
       label.appendChild(check);
       const span = document.createElement("span");
-      span.textContent = labelAfterDash(item.label);
+      span.appendChild(document.createTextNode(labelAfterDash(item.label)));
+      if (carried) {
+        const tag = document.createElement("span");
+        tag.className = "calendar-day-modal-carried-tag";
+        tag.textContent = " (carried)";
+        span.appendChild(tag);
+      } else if (finishedLater) {
+        const tag = document.createElement("span");
+        tag.className = "calendar-day-modal-elsewhere-tag";
+        tag.textContent = " (finished later)";
+        span.appendChild(tag);
+      } else if (finishedEarlierUnmarked) {
+        const tag = document.createElement("span");
+        tag.className = "calendar-day-modal-elsewhere-tag";
+        tag.textContent = " (finished earlier)";
+        span.appendChild(tag);
+      }
       label.appendChild(span);
       container.appendChild(label);
       checkboxes.push({ check, type, key: item.key });
@@ -153,6 +615,12 @@
       p.className = "empty-state";
       p.textContent = "No tasks available for this day.";
       container.appendChild(p);
+    } else if (anyCarried) {
+      const hint = document.createElement("p");
+      hint.className = "calendar-day-modal-carried-hint";
+      hint.textContent =
+        "Carried = finished earlier in this cycle; later days stay marked (fill-remaining). The E/W bars count marks on this day only — tasks finished later stay unchecked here.";
+      container.insertBefore(hint, container.firstChild);
     }
     calendarDayModal.checkboxes = checkboxes;
     setCalendarDayModalOpen(true);
@@ -274,6 +742,7 @@
         modalEl.hidden = false;
         modalEl.setAttribute("aria-hidden", "false");
         document.body.style.overflow = "hidden";
+        activateModalFocus(modalEl);
       }
       return;
     }
@@ -379,6 +848,7 @@
       modalEl.hidden = false;
       modalEl.setAttribute("aria-hidden", "false");
       document.body.style.overflow = "hidden";
+      activateModalFocus(modalEl);
     }
   }
 
@@ -391,6 +861,7 @@
       modalEl.hidden = true;
       modalEl.setAttribute("aria-hidden", "true");
       document.body.style.overflow = "";
+      deactivateModalFocus();
     }
   }
 
@@ -401,10 +872,15 @@
     if (!el) return;
     el.hidden = !open;
     el.setAttribute("aria-hidden", open ? "false" : "true");
-    if (open) document.body.style.overflow = "hidden";
-    else if (!calendarDayModal.open) {
-      const ex = qs("extracurricularCompleteModal");
-      if (!ex || ex.hidden) document.body.style.overflow = "";
+    if (open) {
+      document.body.style.overflow = "hidden";
+      activateModalFocus(el);
+    } else {
+      if (!calendarDayModal.open) {
+        const ex = qs("extracurricularCompleteModal");
+        if (!ex || ex.hidden) document.body.style.overflow = "";
+      }
+      deactivateModalFocus();
     }
   }
 
@@ -541,10 +1017,15 @@
     if (!el) return;
     el.hidden = !open;
     el.setAttribute("aria-hidden", open ? "false" : "true");
-    if (open) document.body.style.overflow = "hidden";
-    else if (!calendarDayModal.open) {
-      const eg = qs("endgameCompleteModal");
-      if (!eg || eg.hidden) document.body.style.overflow = "";
+    if (open) {
+      document.body.style.overflow = "hidden";
+      activateModalFocus(el);
+    } else {
+      if (!calendarDayModal.open) {
+        const eg = qs("endgameCompleteModal");
+        if (!eg || eg.hidden) document.body.style.overflow = "";
+      }
+      deactivateModalFocus();
     }
   }
 
@@ -638,7 +1119,18 @@
       const currencyMap = ctx.currencyMap;
       endgameCompleteModalCtx = null;
       setEndgameCompleteModalOpen(false);
-      applyCalendarDayModalSave(dateStr, checkboxes, currencyMap);
+      const timeRows = collectNewlyCompletedFromCalendar(dateStr, checkboxes);
+      if (timeRows.length) {
+        openCompletionTimeModal({
+          mode: "calendar",
+          dateStr,
+          checkboxes,
+          currencyMap,
+          rows: timeRows,
+        });
+        return;
+      }
+      applyCalendarDayModalSave(dateStr, checkboxes, currencyMap, null);
       return;
     }
     const titleEl = qs("endgameCompleteModalTitle");
@@ -686,65 +1178,72 @@
     const newEndgameKeys = [];
     checkboxes.forEach(({ check, type, key }) => {
       if (type !== "endgame") return;
-      const wasCompleted = isCompletedInCycleForDate(key, "endgame", dateStr);
-      if (!wasCompleted && check.checked) newEndgameKeys.push(key);
+      // Currency prompt only when this day gains a new endgame mark (not carried/already marked).
+      if (!isMarkedOnCalendarDay(dateStr, "endgame", key) && check.checked) newEndgameKeys.push(key);
     });
     if (newEndgameKeys.length > 0) {
       openEndgameCompleteModalForCalendar(dateStr, checkboxes, dayData, newEndgameKeys);
       return;
     }
-    applyCalendarDayModalSave(dateStr, checkboxes, null);
+    const timeRows = collectNewlyCompletedFromCalendar(dateStr, checkboxes);
+    if (timeRows.length) {
+      openCompletionTimeModal({
+        mode: "calendar",
+        dateStr,
+        checkboxes,
+        currencyMap: null,
+        rows: timeRows,
+      });
+      return;
+    }
+    applyCalendarDayModalSave(dateStr, checkboxes, null, null);
   }
 
-  /** @param {null|Object<string, number>} endgameCurrencyOverrides — key = gameId.taskId, value = earned for new completion */
-  function applyCalendarDayModalSave(dateStr, checkboxes, endgameCurrencyOverrides) {
-    const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
+  /**
+   * @param {null|Object<string, number>} endgameCurrencyOverrides
+   * @param {null|Object<string, {hour:number, minute:number}>} completionTimesByTypeKey — key = "type|key"
+   */
+  function applyCalendarDayModalSave(dateStr, checkboxes, endgameCurrencyOverrides, completionTimesByTypeKey) {
+    const blocked = [];
+    const times = completionTimesByTypeKey || {};
     checkboxes.forEach(({ check, type, key }) => {
-      const wasCompleted = type === "dailies"
-        ? (dayData.dailies || []).includes(key)
-        : type === "weeklies"
-          ? (dayData.weeklies || []).includes(key)
-          : isCompletedInCycleForDate(key, "endgame", dateStr);
+      // Compare against this day's calendar marks so Save on a pre-finish day
+      // does not wipe a cycle that was completed later.
+      const wasCompleted = isMarkedOnCalendarDay(dateStr, type, key);
       const nowCompleted = check.checked;
-      if (nowCompleted) recordCompletion(dateStr, type, key);
-      else unrecordCompletion(dateStr, type, key);
-      if (wasCompleted !== nowCompleted) {
-        if (type === "dailies") {
-          const amt = getCompletedAmount(state.dailiesCompleted, key);
-          state.dailiesCompleted[key] = nowCompleted ? amt + 1 : Math.max(0, amt - 1);
-          const attempted = getAttemptedAmount(state.dailiesAttempted, key);
-          if (attempted < state.dailiesCompleted[key]) state.dailiesAttempted[key] = state.dailiesCompleted[key];
-        } else if (type === "weeklies" || type === "endgame") {
-          const completedObj = type === "weeklies" ? state.weekliesCompleted : state.endgameCompleted;
-          const attemptedObj = type === "weeklies" ? state.weekliesAttempted : state.endgameAttempted;
-          const amt = getCompletedAmount(completedObj, key);
-          completedObj[key] = nowCompleted ? amt + 1 : Math.max(0, amt - 1);
-          if (nowCompleted && getAttemptedAmount(attemptedObj, key) < completedObj[key]) attemptedObj[key] = completedObj[key];
-          if (type === "endgame") {
-            const dot = key.indexOf(".");
-            const gameId = dot >= 0 ? key.slice(0, dot) : key;
-            const taskId = dot >= 0 ? key.slice(dot + 1) : "";
-            if (nowCompleted) {
-              ensureEndgameEarnedArrayLength(gameId, taskId, amt + 1);
-              if (endgameCurrencyOverrides && endgameCurrencyOverrides[key] !== undefined) {
-                const c = endgameCurrencyOverrides[key];
-                setEndgameEarnedAt(gameId, taskId, amt, c, { skipSave: true, skipRender: true });
-                const game = getGame(gameId);
-                const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
-                if (game && task) {
-                  const range = getEndgameCycleDatesForDate(task, dateStr, game);
-                  setEndgameCompletionDate(gameId, taskId, amt, range.start, range.end, { skipSave: true });
-                }
-                if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
-                state.endgamePendingCurrency[key] = 0;
-              }
-            } else {
-              ensureEndgameEarnedArrayLength(gameId, taskId, Math.max(0, amt - 1));
-            }
-          }
+      if (wasCompleted === nowCompleted) return;
+
+      if (nowCompleted) {
+        const currencyValue =
+          type === "endgame" && endgameCurrencyOverrides && endgameCurrencyOverrides[key] !== undefined
+            ? endgameCurrencyOverrides[key]
+            : undefined;
+        const t = times[type + "|" + key];
+        const result = applyTaskCompletion(type, key, {
+          dateStr,
+          currencyValue,
+          hour: t ? t.hour : undefined,
+          minute: t ? t.minute : undefined,
+          save: false,
+          render: false,
+          processResets: false,
+        });
+        if (result && !result.ok) {
+          check.checked = false;
+          blocked.push(result.reason || key);
         }
+      } else {
+        removeTaskCompletion(type, key, {
+          dateStr,
+          save: false,
+          render: false,
+          processResets: false,
+        });
       }
     });
+    if (blocked.length) {
+      alert("Some tasks are still locked:\n" + blocked.slice(0, 5).join("\n"));
+    }
     processResets();
     save();
     renderActiveTab();
@@ -961,6 +1460,42 @@
       countFromLabel.title = "When on, completed/attempted tallies start at the cycle start date above, including skipped cycles before the first calendar completion.";
       rowCountFrom.appendChild(countFromLabel);
       extra.appendChild(rowCountFrom);
+
+      const rowUnlock = document.createElement("div");
+      rowUnlock.className = "task-menu-extra-row";
+      const labelUnlockDays = document.createElement("label");
+      labelUnlockDays.textContent = "Earliest complete (days after reset)";
+      labelUnlockDays.setAttribute("for", "taskEarliestCompleteDays");
+      labelUnlockDays.title = "How many days after the cycle reset before this task can be marked complete. 0 = same day as reset. Pain Cage uses 2 (day 3).";
+      const inputUnlockDays = document.createElement("input");
+      inputUnlockDays.id = "taskEarliestCompleteDays";
+      inputUnlockDays.type = "number";
+      inputUnlockDays.min = "0";
+      inputUnlockDays.step = "1";
+      inputUnlockDays.value = String(Math.max(0, Number(task && task.earliestCompleteDays) || 0));
+      rowUnlock.appendChild(labelUnlockDays);
+      rowUnlock.appendChild(inputUnlockDays);
+      extra.appendChild(rowUnlock);
+
+      const rowUnlockTime = document.createElement("div");
+      rowUnlockTime.className = "task-menu-extra-row";
+      const labelUnlockTime = document.createElement("label");
+      labelUnlockTime.textContent = "Unlock time on that day";
+      labelUnlockTime.setAttribute("for", "taskEarliestCompleteTime");
+      labelUnlockTime.title = "Time on the unlock day when completion becomes allowed. Leave blank to use the task reset time.";
+      const inputUnlockTime = document.createElement("input");
+      inputUnlockTime.id = "taskEarliestCompleteTime";
+      inputUnlockTime.type = "time";
+      inputUnlockTime.step = "60";
+      if (task && (Number.isFinite(task.earliestCompleteHour) || Number.isFinite(task.earliestCompleteMinute))) {
+        inputUnlockTime.value = timeToStr(task.earliestCompleteHour, task.earliestCompleteMinute);
+      } else {
+        inputUnlockTime.value = "";
+        inputUnlockTime.placeholder = "Same as reset";
+      }
+      rowUnlockTime.appendChild(labelUnlockTime);
+      rowUnlockTime.appendChild(inputUnlockTime);
+      extra.appendChild(rowUnlockTime);
 
       const rowRemaining = document.createElement("div");
       rowRemaining.className = "task-menu-extra-row task-menu-time-remaining";
@@ -1250,11 +1785,13 @@
   function openClearTimeTrendsModal() {
     const modal = qs("clearTimeTrendsModal");
     const container = qs("clearTimeTrendsModalGames");
+    const titleEl = qs("clearTimeTrendsModalTitle");
     if (!modal || !container) return;
     clearTimeTrendsModalOpen = true;
     modal.hidden = false;
     modal.setAttribute("aria-hidden", "false");
     document.body.style.overflow = "hidden";
+    if (titleEl) titleEl.textContent = "Sync Time Trends with Calendar";
     container.innerHTML = "";
     container.className = "clear-time-trends-games timestamps-game-selector";
     container.style.display = "flex";
@@ -1262,12 +1799,13 @@
     container.style.gap = "0.5rem";
     const games = getAllGames();
     const gameIdsWithData = new Set((state.completionTimestamps || []).map((t) => t.gameId));
-    const selected = new Set(gameIdsWithData);
+    const selected = new Set(gameIdsWithData.size ? gameIdsWithData : games.map((g) => g.id));
     games.forEach((game) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "timestamps-game-pill clear-time-trends-pill";
-      btn.textContent = game.name + (gameIdsWithData.has(game.id) ? " (" + (state.completionTimestamps || []).filter((t) => t.gameId === game.id).length + ")" : "");
+      const stampCount = (state.completionTimestamps || []).filter((t) => t.gameId === game.id).length;
+      btn.textContent = game.name + (stampCount ? " (" + stampCount + ")" : "");
       btn.dataset.gameId = game.id;
       btn.setAttribute("aria-pressed", selected.has(game.id) ? "true" : "false");
       if (selected.has(game.id)) btn.classList.add("filled");
@@ -1287,9 +1825,10 @@
     if (games.length === 0) {
       const p = document.createElement("p");
       p.className = "empty-state";
-      p.textContent = "No games to clear.";
+      p.textContent = "No games to sync.";
       container.appendChild(p);
     }
+    activateModalFocus(modal);
   }
   function closeClearTimeTrendsModal() {
     const modal = qs("clearTimeTrendsModal");
@@ -1298,21 +1837,52 @@
       modal.hidden = true;
       modal.setAttribute("aria-hidden", "true");
       if (!settingsModalOpen && !clearDataModalOpen && !timeTrendsDetailModalOpen) document.body.style.overflow = "";
+      deactivateModalFocus();
     }
   }
-  function confirmClearTimeTrends() {
+  function getSelectedTimeTrendsGameIds() {
     const container = qs("clearTimeTrendsModalGames");
-    if (!container) return;
-    const selectedIds = new Set();
+    const selectedIds = [];
+    if (!container) return selectedIds;
     container.querySelectorAll('.clear-time-trends-pill.filled, .clear-time-trends-pill[aria-pressed="true"]').forEach((btn) => {
-      selectedIds.add(btn.dataset.gameId);
+      if (btn.dataset.gameId) selectedIds.push(btn.dataset.gameId);
     });
-    if (selectedIds.size > 0 && state.completionTimestamps) {
-      state.completionTimestamps = state.completionTimestamps.filter((t) => !selectedIds.has(t.gameId));
+    return selectedIds;
+  }
+  function confirmClearTimeTrends() {
+    const selectedIds = getSelectedTimeTrendsGameIds();
+    if (selectedIds.length > 0 && state.completionTimestamps) {
+      const drop = new Set(selectedIds);
+      state.completionTimestamps = state.completionTimestamps.filter((t) => !drop.has(t.gameId));
     }
     save();
     renderActiveTab();
     closeClearTimeTrendsModal();
+  }
+  function confirmSyncTimeTrendsFromCalendar() {
+    const selectedIds = getSelectedTimeTrendsGameIds();
+    if (!selectedIds.length) {
+      alert("Select at least one game to sync.");
+      return;
+    }
+    if (typeof syncTimestampsFromCalendar !== "function") {
+      alert("Sync with Calendar is unavailable.");
+      return;
+    }
+    const result = syncTimestampsFromCalendar({
+      gameIds: selectedIds,
+      skipRender: false,
+      skipSave: false,
+    });
+    closeClearTimeTrendsModal();
+    const parts = [
+      "Synced Time Trends with Calendar.",
+      "Already had times (unchanged): " + (result.kept || 0),
+      "Filled from your usual trend hours: " + (result.added || 0),
+    ];
+    if (result.collapsed) parts.push("Duplicate stamps collapsed: " + result.collapsed);
+    parts.push("Existing Time Trends stamps were left as-is so charts stay familiar.");
+    alert(parts.join("\n"));
   }
 
   let timeTrendsDetailModalOpen = false;
@@ -1346,6 +1916,7 @@
         });
       }
     }
+    activateModalFocus(modal);
   }
   function closeTimeTrendsDetailModal() {
     const modal = qs("timeTrendsDetailModal");
@@ -1354,6 +1925,7 @@
       modal.hidden = true;
       modal.setAttribute("aria-hidden", "true");
       if (!settingsModalOpen && !clearDataModalOpen) document.body.style.overflow = "";
+      deactivateModalFocus();
     }
   }
   function initTimeTrendsDetailModal() {
@@ -1370,18 +1942,105 @@
     });
   }
 
+  let attendanceSkippedModalOpen = false;
+  function openAttendanceSkippedModal(title, groups, skippedTotal) {
+    const modal = qs("attendanceSkippedModal");
+    if (!modal) return;
+    attendanceSkippedModalOpen = true;
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    const titleEl = qs("attendanceSkippedModalTitle");
+    if (titleEl) titleEl.textContent = title || "Skipped tasks";
+    const summaryEl = qs("attendanceSkippedModalSummary");
+    if (summaryEl) {
+      const taskCount = (groups || []).reduce((n, g) => n + ((g.tasks && g.tasks.length) || 0), 0);
+      const skipSum = (groups || []).reduce(
+        (n, g) => n + (g.tasks || []).reduce((s, t) => s + (Number(t.skipped) || 0), 0),
+        0
+      );
+      const total = Number.isFinite(skippedTotal) ? skippedTotal : skipSum;
+      summaryEl.textContent =
+        total <= 0
+          ? "Nothing skipped for included games."
+          : total +
+            " skipped cycle" +
+            (total === 1 ? "" : "s") +
+            " across " +
+            taskCount +
+            " task" +
+            (taskCount === 1 ? "" : "s") +
+            ".";
+    }
+    const listEl = qs("attendanceSkippedModalList");
+    if (listEl && typeof fillAttendanceSkippedList === "function") {
+      fillAttendanceSkippedList(listEl, groups || [], "No skipped tasks.");
+    } else if (listEl) {
+      listEl.innerHTML = "";
+      (groups || []).forEach((group) => {
+        const block = document.createElement("div");
+        block.className = "attendance-skipped-game";
+        const h = document.createElement("h4");
+        h.className = "attendance-skipped-game-title";
+        h.textContent = group.gameName;
+        block.appendChild(h);
+        const ul = document.createElement("ul");
+        ul.className = "attendance-skipped-task-list";
+        (group.tasks || []).forEach((task) => {
+          const li = document.createElement("li");
+          li.textContent =
+            task.label + " — " + task.skipped + " skipped (" + task.completed + "/" + task.attempted + ")";
+          ul.appendChild(li);
+        });
+        block.appendChild(ul);
+        listEl.appendChild(block);
+      });
+    }
+    activateModalFocus(modal);
+  }
+  function closeAttendanceSkippedModal() {
+    const modal = qs("attendanceSkippedModal");
+    if (modal) {
+      attendanceSkippedModalOpen = false;
+      modal.hidden = true;
+      modal.setAttribute("aria-hidden", "true");
+      if (!settingsModalOpen && !clearDataModalOpen && !timeTrendsDetailModalOpen) document.body.style.overflow = "";
+      deactivateModalFocus();
+    }
+  }
+  function initAttendanceSkippedModal() {
+    const modalEl = qs("attendanceSkippedModal");
+    const closeBtn = qs("attendanceSkippedModalClose");
+    if (!modalEl) return;
+    modalEl.addEventListener("click", (e) => {
+      if (
+        e.target.classList.contains("modal-backdrop") ||
+        e.target.getAttribute("data-close") === "attendanceSkippedModal"
+      ) {
+        closeAttendanceSkippedModal();
+      }
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeAttendanceSkippedModal);
+    document.addEventListener("keydown", (e) => {
+      if (!attendanceSkippedModalOpen) return;
+      if (e.key === "Escape") closeAttendanceSkippedModal();
+    });
+  }
+
   function initClearTimeTrendsModal() {
     const modalEl = qs("clearTimeTrendsModal");
     const closeBtn = qs("clearTimeTrendsModalClose");
     const cancelBtn = qs("clearTimeTrendsCancel");
-    const confirmBtn = qs("clearTimeTrendsConfirm");
+    const clearBtn = qs("clearTimeTrendsConfirm");
+    const syncBtn = qs("syncTimeTrendsConfirm");
     if (!modalEl) return;
     modalEl.addEventListener("click", (e) => {
       if (e.target.classList.contains("modal-backdrop") || e.target.getAttribute("data-close") === "clearTimeTrendsModal") closeClearTimeTrendsModal();
     });
     if (closeBtn) closeBtn.addEventListener("click", closeClearTimeTrendsModal);
     if (cancelBtn) cancelBtn.addEventListener("click", closeClearTimeTrendsModal);
-    if (confirmBtn) confirmBtn.addEventListener("click", confirmClearTimeTrends);
+    if (clearBtn) clearBtn.addEventListener("click", confirmClearTimeTrends);
+    if (syncBtn) syncBtn.addEventListener("click", confirmSyncTimeTrendsFromCalendar);
     document.addEventListener("keydown", (e) => {
       if (!clearTimeTrendsModalOpen) return;
       if (e.key === "Escape") closeClearTimeTrendsModal();
@@ -1492,6 +2151,111 @@
       if (!calendarDayModal.open) return;
       if (e.key === "Escape") closeCalendarDayModal();
     });
+
+    initCompletionTimeModal();
+  }
+
+  function initCompletionTimeModal() {
+    const modalEl = qs("completionTimeModal");
+    if (!modalEl || modalEl.dataset.bound === "1") return;
+    modalEl.dataset.bound = "1";
+    const closeBtn = qs("completionTimeModalClose");
+    const cancelBtn = qs("completionTimeModalCancel");
+    const confirmBtn = qs("completionTimeModalConfirm");
+    const selectAll = qs("completionTimeSelectAll");
+    const batchApply = qs("completionTimeBatchApply");
+    modalEl.addEventListener("click", (e) => {
+      if (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true") closeCompletionTimeModal();
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeCompletionTimeModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeCompletionTimeModal);
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmCompletionTimeModal);
+    if (selectAll) {
+      selectAll.addEventListener("change", () => {
+        const ctx = completionTimeModalCtx;
+        if (!ctx || !ctx.rows) return;
+        ctx.rows.forEach((row) => {
+          if (!row._check) return;
+          row._check.checked = selectAll.checked;
+          if (row._check.parentElement) {
+            row._check.parentElement.classList.toggle("is-batch-selected", selectAll.checked);
+          }
+        });
+        selectAll.indeterminate = false;
+      });
+    }
+    if (batchApply) batchApply.addEventListener("click", applyBatchCompletionTimeToSelected);
+    document.addEventListener("keydown", (e) => {
+      const el = qs("completionTimeModal");
+      if (!el || el.hidden) return;
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        closeCompletionTimeModal();
+      }
+    });
+  }
+
+  function openDebugFillMissingTimes() {
+    if (typeof listMissingCompletionTimes !== "function") {
+      alert("Fill missing times is unavailable.");
+      return;
+    }
+    const missing = listMissingCompletionTimes();
+    const report = qs("settingsDebugReport");
+    if (!missing.length) {
+      if (report) {
+        report.textContent =
+          "Fill missing times\n\nNo calendar completions without timestamps were found." +
+          (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function"
+            ? "\n\n" + formatConflictScanReport(scanDataConflicts())
+            : "");
+      }
+      return;
+    }
+    openCompletionTimeModal({
+      mode: "debug",
+      rows: missing.map((row) => ({
+        type: row.type,
+        key: row.key,
+        label: row.label,
+        dateStr: row.dateStr,
+      })),
+    });
+  }
+
+  function openDebugResolveDuplicateTimes() {
+    if (typeof listDuplicateCompletionTimestamps !== "function") {
+      alert("Resolve duplicate times is unavailable.");
+      return;
+    }
+    const groups = listDuplicateCompletionTimestamps();
+    const report = qs("settingsDebugReport");
+    if (!groups.length) {
+      if (report) {
+        report.textContent =
+          "Resolve duplicate times\n\nNo tasks with multiple timestamps in the same cycle were found." +
+          (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function"
+            ? "\n\n" + formatConflictScanReport(scanDataConflicts())
+            : "");
+      }
+      return;
+    }
+    openCompletionTimeModal({
+      mode: "debug-dupes",
+      groups: groups.map((g) => ({
+        type: g.type,
+        key: g.key,
+        gameId: g.gameId,
+        taskId: g.taskId,
+        label: g.label,
+        cycleStart: g.cycleStart,
+        stamps: (g.stamps || []).map((s) => ({
+          dateStr: s.dateStr,
+          hour: s.hour,
+          minute: s.minute,
+        })),
+      })),
+    });
   }
 
   let settingsModalOpen = false;
@@ -1528,6 +2292,9 @@
     renderSettingsCustomLayers();
     renderSettingsSavedPresets();
     syncSettingsUI();
+    syncShareCardCustomRow();
+    renderShareCardGamePills();
+    activateModalFocus(modalEl);
   }
 
   function closeSettingsModal() {
@@ -1537,6 +2304,7 @@
     modalEl.hidden = true;
     modalEl.setAttribute("aria-hidden", "true");
     document.body.style.overflow = "";
+    deactivateModalFocus();
   }
 
   function renderSettingsPresetGrid() {
@@ -1863,7 +2631,7 @@
     input.value = "My theme";
     modal.hidden = false;
     modal.setAttribute("aria-hidden", "false");
-    setTimeout(() => input.focus(), 0);
+    activateModalFocus(modal);
   }
 
   function closeSavePresetModal() {
@@ -1871,6 +2639,7 @@
     if (modal) {
       modal.hidden = true;
       modal.setAttribute("aria-hidden", "true");
+      deactivateModalFocus();
     }
   }
 
@@ -1900,6 +2669,7 @@
     msg.textContent = 'Are you sure you want to delete "' + (preset ? preset.name : "this preset") + '"? This cannot be undone.';
     modal.hidden = false;
     modal.setAttribute("aria-hidden", "false");
+    activateModalFocus(modal);
   }
 
   function closeDeletePresetModal() {
@@ -1907,6 +2677,7 @@
     if (modal) {
       modal.hidden = true;
       modal.setAttribute("aria-hidden", "true");
+      deactivateModalFocus();
     }
   }
 
@@ -2001,6 +2772,11 @@
     if (undoRow) undoRow.hidden = !state.lastSimulationSnapshot;
     const undoSkipRow = qs("settingsUndoSkipDayRow");
     if (undoSkipRow) undoSkipRow.hidden = !state.lastSkipDaySnapshot;
+    updateCompletionUndoUI();
+    const schemaEl = qs("settingsDebugSchemaVersion");
+    if (schemaEl) {
+      schemaEl.textContent = String(Number(state.schemaVersion) || 0) + " / target " + (typeof SCHEMA_VERSION !== "undefined" ? SCHEMA_VERSION : 2);
+    }
     const standardTab = document.querySelector('.settings-tab-btn[data-color-tab="standard"]');
     const customTab = document.querySelector('.settings-tab-btn[data-color-tab="custom"]');
     const standardPanel = qs("settings-color-standard");
@@ -2022,6 +2798,106 @@
       customPanel.classList.toggle("active", isCustom);
       customPanel.hidden = !isCustom;
     }
+  }
+
+  function updateCompletionUndoUI() {
+    const btn = document.getElementById("settingsUndoCompletionBtn");
+    const hint = document.getElementById("settingsUndoCompletionHint");
+    const can = typeof canUndoCompletion === "function" && canUndoCompletion();
+    if (btn) {
+      btn.disabled = !can;
+      const label = typeof getCompletionUndoLabel === "function" ? getCompletionUndoLabel() : "";
+      btn.title = can ? "Undo: " + label : "Nothing to undo";
+    }
+    if (hint) {
+      hint.textContent = can
+        ? "Next undo: " + (typeof getCompletionUndoLabel === "function" ? getCompletionUndoLabel() : "") + " (Ctrl+Z)"
+        : "Ctrl+Z also undoes the last complete/incomplete (this session)";
+    }
+  }
+
+  function downloadTextFile(filename, text, mime) {
+    const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  const shareCardSelected = new Set();
+
+  function syncShareCardCustomRow() {
+    const daysEl = qs("settingsShareCardDays");
+    const row = qs("settingsShareCardCustomRow");
+    if (!row) return;
+    const custom = daysEl && daysEl.value === "custom";
+    row.hidden = !custom;
+    if (custom) {
+      const today = typeof getDateStr === "function" ? getDateStr() : new Date().toISOString().slice(0, 10);
+      const startEl = qs("settingsShareCardStart");
+      const endEl = qs("settingsShareCardEnd");
+      if (startEl && !startEl.value) {
+        const d = new Date(today + "T12:00:00");
+        d.setDate(d.getDate() - 89);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        startEl.value = y + "-" + m + "-" + day;
+      }
+      if (endEl && !endEl.value) endEl.value = today;
+    }
+  }
+
+  function renderShareCardGamePills() {
+    const wrap = qs("settingsShareCardGames");
+    if (!wrap) return;
+    const games = typeof getAllGames === "function" ? getAllGames() : [];
+    if (shareCardSelected.size === 0 && games.length) {
+      games.forEach((g) => shareCardSelected.add(g.id));
+    }
+    // Drop ids for games that no longer exist
+    Array.from(shareCardSelected).forEach((id) => {
+      if (!games.some((g) => g.id === id)) shareCardSelected.delete(id);
+    });
+    wrap.innerHTML = "";
+    if (!games.length) {
+      const p = document.createElement("p");
+      p.className = "settings-hint";
+      p.textContent = "No games yet. Add one in Games first.";
+      wrap.appendChild(p);
+      return;
+    }
+    games.forEach((game) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "timestamps-game-pill";
+      btn.textContent = game.name;
+      const on = shareCardSelected.has(game.id);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      if (on) btn.classList.add("filled");
+      btn.addEventListener("click", () => {
+        if (shareCardSelected.has(game.id)) shareCardSelected.delete(game.id);
+        else shareCardSelected.add(game.id);
+        renderShareCardGamePills();
+      });
+      wrap.appendChild(btn);
+    });
+  }
+
+  function getShareCardExportOpts() {
+    const daysEl = qs("settingsShareCardDays");
+    const mode = daysEl ? daysEl.value : "90";
+    const opts = { gameIds: Array.from(shareCardSelected) };
+    if (mode === "custom") {
+      const startEl = qs("settingsShareCardStart");
+      const endEl = qs("settingsShareCardEnd");
+      opts.startStr = startEl && startEl.value;
+      opts.endStr = endEl && endEl.value;
+    } else {
+      opts.days = Number(mode) || 90;
+    }
+    return opts;
   }
 
   function updateAccountUI(user) {
@@ -2172,6 +3048,91 @@
       a.click();
       URL.revokeObjectURL(a.href);
     });
+    const exportMdBtn = qs("settingsExportSummaryMdBtn");
+    if (exportMdBtn) exportMdBtn.addEventListener("click", () => {
+      const md = buildExportSummaryMarkdown({ days: 90 });
+      downloadTextFile("gacha-tracker-summary-" + new Date().toISOString().slice(0, 10) + ".md", md, "text/markdown;charset=utf-8");
+    });
+    const exportCsvBtn = qs("settingsExportSummaryCsvBtn");
+    if (exportCsvBtn) exportCsvBtn.addEventListener("click", () => {
+      const csv = buildExportSummaryCsv({ days: 90 });
+      downloadTextFile("gacha-tracker-completions-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv;charset=utf-8");
+    });
+
+    const shareDaysEl = qs("settingsShareCardDays");
+    if (shareDaysEl) shareDaysEl.addEventListener("change", syncShareCardCustomRow);
+    const shareAllBtn = qs("settingsShareCardSelectAllBtn");
+    if (shareAllBtn) shareAllBtn.addEventListener("click", () => {
+      const games = typeof getAllGames === "function" ? getAllGames() : [];
+      shareCardSelected.clear();
+      games.forEach((g) => shareCardSelected.add(g.id));
+      renderShareCardGamePills();
+    });
+    const shareNoneBtn = qs("settingsShareCardSelectNoneBtn");
+    if (shareNoneBtn) shareNoneBtn.addEventListener("click", () => {
+      shareCardSelected.clear();
+      renderShareCardGamePills();
+    });
+    const shareExportBtn = qs("settingsShareCardExportBtn");
+    if (shareExportBtn) shareExportBtn.addEventListener("click", () => {
+      if (typeof downloadShareCardPng !== "function") {
+        alert("Share card export is unavailable.");
+        return;
+      }
+      const result = downloadShareCardPng(getShareCardExportOpts());
+      if (!result.ok) alert(result.reason || "Could not export share card.");
+    });
+
+    function updateShareCardPreview() {
+      const wrap = qs("settingsShareCardPreview");
+      const img = qs("settingsShareCardPreviewImg");
+      const meta = qs("settingsShareCardPreviewMeta");
+      if (!wrap || !img) return;
+      if (typeof buildShareCardModel !== "function" || typeof renderShareCardCanvas !== "function") {
+        wrap.hidden = false;
+        if (meta) meta.textContent = "Preview unavailable.";
+        return;
+      }
+      const model = buildShareCardModel(getShareCardExportOpts());
+      if (!model.ok) {
+        wrap.hidden = false;
+        img.removeAttribute("src");
+        if (meta) meta.textContent = model.reason || "Nothing to preview.";
+        return;
+      }
+      const rendered = renderShareCardCanvas(model);
+      if (!rendered.ok) {
+        wrap.hidden = false;
+        img.removeAttribute("src");
+        if (meta) meta.textContent = rendered.reason || "Could not render preview.";
+        return;
+      }
+      img.src = rendered.canvas.toDataURL("image/png");
+      wrap.hidden = false;
+      if (meta) {
+        meta.textContent =
+          rendered.width +
+          "×" +
+          rendered.height +
+          " · " +
+          model.gameCount +
+          " game" +
+          (model.gameCount === 1 ? "" : "s");
+      }
+    }
+
+    const sharePreviewBtn = qs("settingsShareCardPreviewBtn");
+    if (sharePreviewBtn) sharePreviewBtn.addEventListener("click", () => updateShareCardPreview());
+
+    const undoCompletionBtn = qs("settingsUndoCompletionBtn");
+    if (undoCompletionBtn) undoCompletionBtn.addEventListener("click", () => {
+      const result = undoLastCompletion();
+      if (!result.ok) {
+        alert(result.reason || "Nothing to undo");
+        return;
+      }
+      syncSettingsUI();
+    });
     const importInput = qs("settingsImportInput");
     if (importInput) importInput.addEventListener("change", (e) => {
       const file = e.target.files && e.target.files[0];
@@ -2189,9 +3150,16 @@
             if (state[k] !== undefined && k !== "lastSimulationSnapshot") state[k] = data[k];
           });
           state.lastSimulationSnapshot = null;
+          if (typeof clearCompletionUndoStack === "function") clearCompletionUndoStack();
           save();
           load();
           renderAll();
+          const report = qs("settingsDebugReport");
+          if (report && typeof formatConflictScanReport === "function" && typeof scanDataConflicts === "function") {
+            report.textContent =
+              "Import complete. Suggested next step: open Debug and scan for conflicts.\n\n" +
+              formatConflictScanReport(scanDataConflicts());
+          }
           closeSettingsModal();
         } catch (err) {
           alert("Failed to import: " + (err.message || "Invalid file"));
@@ -2200,6 +3168,149 @@
       };
       reader.readAsText(file);
     });
+
+    function showRepairResult(result) {
+      const report = qs("settingsDebugReport");
+      if (!report) return;
+      const lines = [];
+      lines.push("Repair mode: " + (result.mode || "safe"));
+      lines.push("Actions:");
+      (result.actions || []).forEach((a) => lines.push("  • " + a));
+      lines.push("");
+      lines.push("Before — " + result.before.counts.total + " conflict(s)");
+      lines.push("After  — " + result.after.counts.total + " conflict(s)");
+      const infoLeft = result.after.counts.info || 0;
+      const warnLeft = (result.after.counts.warn || 0) + (result.after.counts.error || 0);
+      if (infoLeft && !warnLeft) {
+        lines.push("");
+        lines.push(
+          "Remaining items are [info] only (usually calendar marks without timestamps). Those are not auto-fixed."
+        );
+      }
+      lines.push("");
+      lines.push(formatConflictScanReport(result.after));
+      report.textContent = lines.join("\n");
+      syncSettingsUI();
+    }
+
+    const repairDataBtn = qs("settingsRepairDataBtn");
+    if (repairDataBtn) repairDataBtn.addEventListener("click", () => {
+      if (!confirm("Repair current data?\n\nThis rebuilds completion days from timestamps, clamps unlock windows, fills remaining cycle days, and syncs tallies.")) return;
+      const result = runIntegrityRepair("safe");
+      showRepairResult(result);
+      alert(
+        "Repair finished.\nConflicts: " +
+          result.before.counts.total +
+          " → " +
+          result.after.counts.total +
+          "\n\nSee Settings → Debug for the full report."
+      );
+    });
+
+    const debugScanBtn = qs("settingsDebugScanBtn");
+    if (debugScanBtn) debugScanBtn.addEventListener("click", () => {
+      const report = qs("settingsDebugReport");
+      if (report) report.textContent = formatConflictScanReport(scanDataConflicts());
+      syncSettingsUI();
+    });
+    const debugRepairSafeBtn = qs("settingsDebugRepairSafeBtn");
+    if (debugRepairSafeBtn) debugRepairSafeBtn.addEventListener("click", () => {
+      if (!confirm("Run safe integrity repair on current data?")) return;
+      showRepairResult(runIntegrityRepair("safe"));
+    });
+    const debugRepairTsBtn = qs("settingsDebugRepairTimestampsBtn");
+    if (debugRepairTsBtn) debugRepairTsBtn.addEventListener("click", () => {
+      if (!confirm("Repair preferring timestamps (rebuild early calendar marks from timestamps)?")) return;
+      showRepairResult(runIntegrityRepair("prefer-timestamps"));
+    });
+    const debugRepairTalliesBtn = qs("settingsDebugRepairTalliesBtn");
+    if (debugRepairTalliesBtn) debugRepairTalliesBtn.addEventListener("click", () => {
+      if (!confirm("Rebuild all completed/attempted tallies from the calendar only?")) return;
+      showRepairResult(runIntegrityRepair("tallies-only"));
+    });
+    const debugFillTimesBtn = qs("settingsDebugFillMissingTimesBtn");
+    if (debugFillTimesBtn) debugFillTimesBtn.addEventListener("click", () => openDebugFillMissingTimes());
+    const debugResolveDupesBtn = qs("settingsDebugResolveDuplicateTimesBtn");
+    if (debugResolveDupesBtn) debugResolveDupesBtn.addEventListener("click", () => openDebugResolveDuplicateTimes());
+
+    function getSelectedCompactMonths() {
+      const sel = qs("settingsCompactMonths");
+      return sel ? Number(sel.value) || 12 : 12;
+    }
+
+    function formatCompactPreview(preview) {
+      if (!preview) return "No preview.";
+      const lines = [];
+      lines.push("Compact preview");
+      lines.push("Keep calendar after: " + preview.cutoffDateStr + " (drop on/before)");
+      lines.push("Months: " + preview.months);
+      lines.push("Calendar days to remove: " + preview.removedCalendarDays);
+      lines.push("Completion marks to remove: " + preview.removedMarks);
+      lines.push("Tallies: unchanged (archived baselines keep Sync correct)");
+      if (preview.existingCutoff) lines.push("Existing archive cutoff: " + preview.existingCutoff);
+      if (preview.removedCalendarDays === 0) lines.push("Nothing to compact for this range.");
+      return lines.join("\n");
+    }
+
+    const compactPreviewBtn = qs("settingsCompactPreviewBtn");
+    if (compactPreviewBtn) compactPreviewBtn.addEventListener("click", () => {
+      const report = qs("settingsDebugReport");
+      if (!report || typeof previewHistoryCompact !== "function") return;
+      report.textContent = formatCompactPreview(previewHistoryCompact(getSelectedCompactMonths()));
+    });
+
+    const compactApplyBtn = qs("settingsCompactApplyBtn");
+    if (compactApplyBtn) compactApplyBtn.addEventListener("click", () => {
+      if (typeof previewHistoryCompact !== "function" || typeof applyHistoryCompact !== "function") return;
+      const months = getSelectedCompactMonths();
+      const preview = previewHistoryCompact(months);
+      const report = qs("settingsDebugReport");
+      if (report) report.textContent = formatCompactPreview(preview);
+      if (preview.removedCalendarDays === 0) {
+        alert("Nothing to compact for the selected range.");
+        return;
+      }
+      if (
+        !confirm(
+          "Compact history older than " +
+            months +
+            " month(s)?\n\n" +
+            "Remove " +
+            preview.removedCalendarDays +
+            " calendar day(s) and " +
+            preview.removedMarks +
+            " mark(s) on/before " +
+            preview.cutoffDateStr +
+            ".\nTallies stay the same; Sync will use archived baselines.\n\nContinue?"
+        )
+      ) {
+        return;
+      }
+      if (confirm("Download a full JSON backup before compacting?\n\nOK = download then compact\nCancel = compact without new download")) {
+        const data = JSON.stringify(buildSavePayload(), null, 2);
+        const blob = new Blob([data], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "gacha-tracker-pre-compact-" + new Date().toISOString().slice(0, 10) + ".json";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+      const result = applyHistoryCompact(months);
+      if (report) {
+        const lines = [formatCompactPreview(result.preview || preview)];
+        if (result.ok) {
+          lines.push("");
+          lines.push("Applied. New archive cutoff: " + (result.historyCompact && result.historyCompact.cutoffDateStr));
+        } else {
+          lines.push("");
+          lines.push("Not applied: " + (result.reason || "unknown"));
+        }
+        report.textContent = lines.join("\n");
+      }
+      if (result.ok) alert("History compacted. Tallies unchanged.");
+      else alert(result.reason || "Compact did not run.");
+    });
+
     const simulateBtn = qs("settingsSimulateBtn");
     if (simulateBtn) simulateBtn.addEventListener("click", () => {
       runSimulation();
@@ -2290,6 +3401,9 @@
     document.addEventListener("keydown", (e) => {
       if (!settingsModalOpen && !clearDataModalOpen) return;
       if (e.key === "Escape") {
+        const top = typeof getTopOpenModal === "function" ? getTopOpenModal() : null;
+        // Nested modals (Fill missing times, etc.) handle their own Escape.
+        if (top && top.id && top.id !== "settingsModal" && top.id !== "clearDataModal") return;
         if (clearDataModalOpen) {
           closeClearDataModal();
         } else if (colorPickerEditingLayerId) {

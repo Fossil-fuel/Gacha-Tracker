@@ -52,6 +52,18 @@
       const cycleEndEnabled = !!(cycleEndToggle && cycleEndToggle.checked);
       const countFromToggle = qs("taskCountFromDateStarted");
       const countFromDateStarted = !!(countFromToggle && countFromToggle.checked);
+      const unlockDaysInput = qs("taskEarliestCompleteDays");
+      const unlockTimeInput = qs("taskEarliestCompleteTime");
+      const earliestCompleteDays = Math.max(0, Number(unlockDaysInput && unlockDaysInput.value) || 0);
+      let earliestCompleteHour;
+      let earliestCompleteMinute;
+      let hasUnlockTime = false;
+      if (unlockTimeInput && unlockTimeInput.value) {
+        const parts = parseTimeStr(unlockTimeInput.value);
+        earliestCompleteHour = parts.hour;
+        earliestCompleteMinute = parts.minute;
+        hasUnlockTime = true;
+      }
       let cycleEndDate = cycleEndEnabled && cycleEndDateInput && isValidDateStr(cycleEndDateInput.value)
         ? cycleEndDateInput.value
         : null;
@@ -84,6 +96,9 @@
           timeLimitUnit: taskModal.timeLimitUnit,
           adjustForDST,
           countFromDateStarted: countFromDateStarted || undefined,
+          earliestCompleteDays: earliestCompleteDays || undefined,
+          earliestCompleteHour: hasUnlockTime ? earliestCompleteHour : undefined,
+          earliestCompleteMinute: hasUnlockTime ? earliestCompleteMinute : undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
@@ -94,6 +109,11 @@
             delete merged.cycleEndDate;
           }
           if (!countFromDateStarted) delete merged.countFromDateStarted;
+          if (!earliestCompleteDays) delete merged.earliestCompleteDays;
+          if (!hasUnlockTime) {
+            delete merged.earliestCompleteHour;
+            delete merged.earliestCompleteMinute;
+          }
           game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
       } else if (taskModal.taskType === "endgame") {
@@ -115,6 +135,9 @@
           timeLimitUnit: taskModal.timeLimitUnit,
           adjustForDST,
           countFromDateStarted: countFromDateStarted || undefined,
+          earliestCompleteDays: earliestCompleteDays || undefined,
+          earliestCompleteHour: hasUnlockTime ? earliestCompleteHour : undefined,
+          earliestCompleteMinute: hasUnlockTime ? earliestCompleteMinute : undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
@@ -135,6 +158,11 @@
             delete merged.cycleEndDate;
           }
           if (!countFromDateStarted) delete merged.countFromDateStarted;
+          if (!earliestCompleteDays) delete merged.earliestCompleteDays;
+          if (!hasUnlockTime) {
+            delete merged.earliestCompleteHour;
+            delete merged.earliestCompleteMinute;
+          }
           game.endgame[existingIdx] = merged;
         } else {
           game.endgame.push(next);
@@ -353,20 +381,66 @@
   function toggleDaily(gameId) {
     const game = getGame(gameId);
     const dateStr = game ? getDailyPeriodDateStr(game, getSimulatedNow()) : getDateStr();
-    const amt = getCompletedAmount(state.dailiesCompleted, gameId);
-    const isMarkingComplete = !isCompletedToday("dailies", gameId);
+    const isMarkingComplete = !(state.completionByDate[dateStr] && (state.completionByDate[dateStr].dailies || []).includes(gameId));
     if (isMarkingComplete) {
-      state.dailiesCompleted[gameId] = amt + 1;
-      recordCompletion(dateStr, "dailies", gameId);
-      const attempted = getAttemptedAmount(state.dailiesAttempted, gameId);
-      if (attempted < state.dailiesCompleted[gameId]) state.dailiesAttempted[gameId] = state.dailiesCompleted[gameId];
+      applyTaskCompletion("dailies", gameId, { dateStr });
     } else {
-      state.dailiesCompleted[gameId] = Math.max(0, amt - 1);
-      unrecordCompletion(dateStr, "dailies", gameId);
+      removeTaskCompletion("dailies", gameId, { dateStr });
     }
-    processResets();
-    save();
-    renderActiveTab();
+  }
+
+  function toggleWeekly(gameId, taskId) {
+    const game = getGame(gameId);
+    const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
+    if (task && isTaskCycleEnded(task, getSimulatedNow(), game)) return;
+    const key = gameId + "." + taskId;
+    const dateStr = getDateStr();
+    const isMarkingComplete = !isWeeklyCompletedInCurrentCycle(key, dateStr);
+    if (isMarkingComplete) {
+      const result = applyTaskCompletion("weeklies", key, { dateStr });
+      if (result && !result.ok && result.reason) alert(result.reason);
+    } else {
+      removeTaskCompletion("weeklies", key, { dateStr });
+    }
+  }
+
+  function requestToggleEndgame(gameId, taskId) {
+    const game = getGame(gameId);
+    const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
+    if (task && isTaskCycleEnded(task, getSimulatedNow(), game)) return;
+    const key = gameId + "." + taskId;
+    const dateStr = getDateStr();
+    if (isEndgameCompletedInCurrentCycle(key, dateStr)) {
+      toggleEndgame(gameId, taskId);
+      return;
+    }
+    if (task && !isTaskCompletionUnlocked("endgame", task, game)) {
+      alert(getTaskUnlockHint("endgame", task, game));
+      return;
+    }
+    openEndgameCompleteModal(gameId, taskId, null);
+  }
+
+  function completeEndgameWithCurrency(gameId, taskId, currencyValue) {
+    const key = gameId + "." + taskId;
+    const dateStr = getDateStr();
+    const result = applyTaskCompletion("endgame", key, {
+      dateStr,
+      currencyValue,
+    });
+    if (result && !result.ok && result.reason) alert(result.reason);
+  }
+
+  function toggleEndgame(gameId, taskId) {
+    const key = gameId + "." + taskId;
+    const dateStr = getDateStr();
+    const isMarkingComplete = !isEndgameCompletedInCurrentCycle(key, dateStr);
+    if (isMarkingComplete) {
+      const result = applyTaskCompletion("endgame", key, { dateStr });
+      if (result && !result.ok && result.reason) alert(result.reason);
+    } else {
+      removeTaskCompletion("endgame", key, { dateStr });
+    }
   }
 
   function completeExtracurricularWithCurrency(taskId, currencyValue) {
@@ -461,89 +535,6 @@
     });
 
     parent.appendChild(footer);
-  }
-
-  function toggleWeekly(gameId, taskId) {
-    const game = getGame(gameId);
-    const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
-    if (task && isTaskCycleEnded(task, getSimulatedNow(), game)) return;
-    const key = gameId + "." + taskId;
-    const dateStr = getDateStr();
-    const amt = getCompletedAmount(state.weekliesCompleted, key);
-    const isMarkingComplete = !isWeeklyCompletedInCurrentCycle(key, dateStr);
-    if (isMarkingComplete) {
-      state.weekliesCompleted[key] = amt + 1;
-      recordCompletion(dateStr, "weeklies", key);
-      const attempted = getAttemptedAmount(state.weekliesAttempted, key);
-      if (attempted < state.weekliesCompleted[key]) state.weekliesAttempted[key] = state.weekliesCompleted[key];
-    } else {
-      const completedDateStr = getWeeklyCompletionDateInCurrentCycle(key, dateStr);
-      if (completedDateStr) unrecordCompletion(completedDateStr, "weeklies", key);
-      state.weekliesCompleted[key] = Math.max(0, amt - 1);
-    }
-    processResets();
-    save();
-    renderActiveTab();
-  }
-
-  function requestToggleEndgame(gameId, taskId) {
-    const game = getGame(gameId);
-    const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
-    if (task && isTaskCycleEnded(task, getSimulatedNow(), game)) return;
-    const key = gameId + "." + taskId;
-    const dateStr = getDateStr();
-    if (isEndgameCompletedInCurrentCycle(key, dateStr)) {
-      toggleEndgame(gameId, taskId);
-      return;
-    }
-    openEndgameCompleteModal(gameId, taskId, null);
-  }
-
-  function completeEndgameWithCurrency(gameId, taskId, currencyValue) {
-    const key = gameId + "." + taskId;
-    const dateStr = getDateStr();
-    const amt = getCompletedAmount(state.endgameCompleted, key);
-    const game = getGame(gameId);
-    const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
-    if (!game || !task) return;
-
-    state.endgameCompleted[key] = amt + 1;
-    recordCompletion(dateStr, "endgame", key);
-    ensureEndgameEarnedArrayLength(gameId, taskId, amt + 1);
-    snapshotEndgamePotentialAt(gameId, taskId, amt, getEndgamePotential(task));
-    setEndgameEarnedAt(gameId, taskId, amt, currencyValue, { skipSave: true, skipRender: true });
-    const { start, end } = getEndgameCycleDatesForDate(task, dateStr, game);
-    setEndgameCompletionDate(gameId, taskId, amt, start, end, { skipSave: true });
-    const attempted = getAttemptedAmount(state.endgameAttempted, key);
-    if (attempted < state.endgameCompleted[key]) state.endgameAttempted[key] = state.endgameCompleted[key];
-    state.endgamePendingCurrency[key] = 0;
-    processResets();
-    save();
-    renderActiveTab();
-  }
-
-  function toggleEndgame(gameId, taskId) {
-    const key = gameId + "." + taskId;
-    const dateStr = getDateStr();
-    const amt = getCompletedAmount(state.endgameCompleted, key);
-    const isMarkingComplete = !isEndgameCompletedInCurrentCycle(key, dateStr);
-    if (isMarkingComplete) {
-      state.endgameCompleted[key] = amt + 1;
-      recordCompletion(dateStr, "endgame", key);
-      ensureEndgameEarnedArrayLength(gameId, taskId, amt + 1);
-      snapshotEndgamePotentialAt(gameId, taskId, amt, getEndgamePotential(task));
-      const attempted = getAttemptedAmount(state.endgameAttempted, key);
-      if (attempted < state.endgameCompleted[key]) state.endgameAttempted[key] = state.endgameCompleted[key];
-    } else {
-      const completedDateStr = getEndgameCompletionDateInCurrentCycle(key, dateStr);
-      if (completedDateStr) unrecordCompletion(completedDateStr, "endgame", key);
-      state.endgameCompleted[key] = Math.max(0, amt - 1);
-      ensureEndgameEarnedArrayLength(gameId, taskId, Math.max(0, amt - 1));
-      ensureEndgamePotentialArrayLength(gameId, taskId, getAttemptedAmount(state.endgameAttempted, key));
-    }
-    processResets();
-    save();
-    renderActiveTab();
   }
 
   function getDailyEarned(gameId) {

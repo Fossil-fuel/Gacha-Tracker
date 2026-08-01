@@ -171,7 +171,7 @@
     if (remainingText && remainingText !== "TBD") {
       const remainingSpan = document.createElement("span");
       remainingSpan.className = "extracurricular-task-remaining";
-      remainingSpan.textContent = " · " + remainingText + " left";
+      remainingSpan.textContent = remainingText + " left";
       labelWrap.appendChild(remainingSpan);
     }
     top.appendChild(labelWrap);
@@ -388,6 +388,7 @@
       modal.hidden = false;
       modal.setAttribute("aria-hidden", "false");
       document.body.style.overflow = "hidden";
+      if (typeof activateModalFocus === "function") activateModalFocus(modal);
     }
     extracurricularTaskModalState.task = task;
     if (nameInput) setTimeout(() => nameInput.focus(), 0);
@@ -399,6 +400,7 @@
       modal.hidden = true;
       modal.setAttribute("aria-hidden", "true");
       document.body.style.overflow = "";
+      if (typeof deactivateModalFocus === "function") deactivateModalFocus();
     }
     extracurricularTaskModalState.task = null;
   }

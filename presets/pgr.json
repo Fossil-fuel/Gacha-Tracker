@@ -1,0 +1,74 @@
+{
+  "id": "pgr",
+  "name": "Punishing Grey Raven",
+  "server": "america",
+  "resetHour": 0,
+  "resetMinute": 0,
+  "dailies": true,
+  "dailyCurrency": 30,
+  "currencyPerPull": 250,
+  "currencyName": "Black Cards",
+  "weeklies": [
+    {
+      "id": "missions",
+      "label": "Missions",
+      "weekStartDay": 1,
+      "weekStartHour": 0,
+      "weekStartMinute": 0,
+      "currency": 1000,
+      "dateStarted": "2026-03-17",
+      "frequencyEvery": 1,
+      "frequencyUnit": "week",
+      "timeLimitEvery": 1,
+      "timeLimitUnit": "week",
+      "adjustForDST": true
+    },
+    {
+      "id": "operation_guardians",
+      "label": "Operation Guardians",
+      "weekStartDay": 1,
+      "weekStartHour": 0,
+      "weekStartMinute": 0,
+      "currency": 0,
+      "dateStarted": "2026-03-17",
+      "frequencyEvery": 1,
+      "frequencyUnit": "week",
+      "timeLimitEvery": 1,
+      "timeLimitUnit": "week",
+      "adjustForDST": true
+    }
+  ],
+  "endgame": [
+    {
+      "id": "warzone",
+      "label": "WarZone",
+      "currency": 0,
+      "weekStartDay": 1,
+      "weekStartHour": 0,
+      "weekStartMinute": 0,
+      "dateStarted": "2026-03-17",
+      "frequencyEvery": 1,
+      "frequencyUnit": "week",
+      "timeLimitEvery": 1,
+      "timeLimitUnit": "week",
+      "adjustForDST": true
+    },
+    {
+      "id": "pain_cage",
+      "label": "Pain Cage",
+      "currency": 50,
+      "weekStartDay": 1,
+      "weekStartHour": 0,
+      "weekStartMinute": 0,
+      "dateStarted": "2026-03-17",
+      "frequencyEvery": 1,
+      "frequencyUnit": "week",
+      "timeLimitEvery": 1,
+      "timeLimitUnit": "week",
+      "adjustForDST": true,
+      "earliestCompleteDays": 2,
+      "earliestCompleteHour": 0,
+      "earliestCompleteMinute": 0
+    }
+  ]
+}

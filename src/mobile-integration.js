@@ -1,7 +1,7 @@
 /**
- * Mobile integration - layout and behavior for viewports <= 768px.
- * All changes are scoped to mobile via CSS media queries and viewport checks.
- * PC display/format is unaffected.
+ * Mobile / narrow layout integration.
+ * - ≤1100px: right sidebar hidden → Settings clone in the top bar (CSS).
+ * - ≤768px: off-canvas left nav + hamburger/overlay.
  */
 (function () {
   "use strict";
@@ -102,9 +102,21 @@
     btn.setAttribute("title", "Settings");
     btn.innerHTML = settingsBtn.innerHTML;
     btn.addEventListener("click", function () {
+      closeSidebar();
       settingsBtn.click();
     });
     return btn;
+  }
+
+  /** Always inject top-bar Settings; CSS shows it whenever .sidebar-right is hidden (≤1100px). */
+  function ensureMobileSettingsButton() {
+    if (mobileSettingsBtn) return;
+    mobileSettingsBtn = createMobileSettingsButton();
+    if (!mobileSettingsBtn) return;
+    const topBarActions = document.querySelector(".top-bar-actions");
+    if (topBarActions) {
+      topBarActions.insertBefore(mobileSettingsBtn, topBarActions.firstChild);
+    }
   }
 
   function closeSidebarOnNavClick() {
@@ -113,18 +125,32 @@
 
     sidebar.addEventListener("click", function (e) {
       if (!isMobile()) return;
-      const target = e.target.closest(".tab, .sidebar-data-item, .sidebar-game-item, .sidebar-brand, #aboutNavTitle");
+      const target = e.target.closest(".tab, .sidebar-data-item, .sidebar-game-item, .sidebar-brand, #aboutNavTitle, #sidebarSettingsBtn");
       if (target) closeSidebar();
     });
     navListenersAttached = true;
   }
 
-  function init() {
-    if (!isMobile()) {
-      closeSidebar();
-      return;
-    }
+  function closeSidebarWhenModalOpens() {
+    document.addEventListener(
+      "click",
+      function (e) {
+        if (!isMobile()) return;
+        if (!document.body.classList.contains(BODY_CLASS_OPEN)) return;
+        const opener = e.target.closest(
+          "button, [role='button'], .history-calendar-day, .attendance-pie-chart, .timestamps-bar-col"
+        );
+        if (!opener) return;
+        // Defer: modal open happens in same click handlers; close drawer so it never covers dialogs.
+        setTimeout(function () {
+          if (document.querySelector(".modal:not([hidden])")) closeSidebar();
+        }, 0);
+      },
+      true
+    );
+  }
 
+  function initMobileChrome() {
     const breadcrumbBar = document.querySelector(".breadcrumb-bar");
     if (!breadcrumbBar) return;
 
@@ -138,24 +164,26 @@
       document.body.appendChild(overlayEl);
     }
 
-    if (!mobileSettingsBtn) {
-      mobileSettingsBtn = createMobileSettingsButton();
-      if (mobileSettingsBtn) {
-        const topBarActions = document.querySelector(".top-bar-actions");
-        if (topBarActions) {
-          topBarActions.insertBefore(mobileSettingsBtn, topBarActions.firstChild);
-        }
-      }
-    }
-
     closeSidebarOnNavClick();
   }
 
+  function init() {
+    ensureMobileSettingsButton();
+
+    if (!isMobile()) {
+      closeSidebar();
+      return;
+    }
+
+    initMobileChrome();
+  }
+
   function handleResize() {
+    ensureMobileSettingsButton();
     if (!isMobile()) {
       closeSidebar();
     } else {
-      init();
+      initMobileChrome();
     }
   }
 
@@ -173,6 +201,8 @@
     }
     window.addEventListener("resize", handleResize);
     document.addEventListener("keydown", onEscape);
+
+    closeSidebarWhenModalOpens();
 
     if (window.visualViewport) {
       updateVisualViewport();

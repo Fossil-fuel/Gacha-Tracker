@@ -97,7 +97,8 @@ function ensureDay(state, dateStr) {
 }
 
 /** Mark complete: dailies = that day only; weeklies/endgame = fill remaining (+ unlock clamp). */
-function markComplete(state, type, key, dateStr, hour) {
+function markComplete(state, type, key, dateStr, hour, minute) {
+  const before = captureUndoSlice(state, type, key);
   const game = getGame(state);
   let completion = dateStr;
 
@@ -118,7 +119,11 @@ function markComplete(state, type, key, dateStr, hour) {
   }
 
   const already = state.completionTimestamps.some(
-    (t) => t.taskType === type && t.gameId === (type === "dailies" ? key : key.split(".")[0]) && t.dateStr === completion && (type === "dailies" || t.taskId === key.split(".").slice(1).join("."))
+    (t) =>
+      t.taskType === type &&
+      t.gameId === (type === "dailies" ? key : key.split(".")[0]) &&
+      t.dateStr === completion &&
+      (type === "dailies" || t.taskId === key.split(".").slice(1).join("."))
   );
   if (!already) {
     const gameId = type === "dailies" ? key : key.slice(0, key.indexOf("."));
@@ -126,16 +131,29 @@ function markComplete(state, type, key, dateStr, hour) {
     state.completionTimestamps.push({
       dateStr: completion,
       hour: Number.isFinite(hour) ? hour : 12,
+      minute: Number.isFinite(minute) ? minute : 0,
       gameId,
       taskType: type,
       taskId,
       taskLabel: taskId || game.name,
     });
   }
+  if (type === "dailies") {
+    state.dailiesCompleted[key] = (Number(state.dailiesCompleted[key]) || 0) + 1;
+    state.dailiesAttempted[key] = Math.max(Number(state.dailiesAttempted[key]) || 0, state.dailiesCompleted[key]);
+  } else if (type === "weeklies") {
+    state.weekliesCompleted[key] = (Number(state.weekliesCompleted[key]) || 0) + 1;
+    state.weekliesAttempted[key] = Math.max(Number(state.weekliesAttempted[key]) || 0, state.weekliesCompleted[key]);
+  } else {
+    state.endgameCompleted[key] = (Number(state.endgameCompleted[key]) || 0) + 1;
+    state.endgameAttempted[key] = Math.max(Number(state.endgameAttempted[key]) || 0, state.endgameCompleted[key]);
+  }
+  pushUndo(state, "Complete " + key, before);
   return completion;
 }
 
 function markIncomplete(state, type, key, dateStr) {
+  const before = captureUndoSlice(state, type, key);
   const game = getGame(state);
   let dates = [dateStr];
   if (type !== "dailies") {
@@ -173,6 +191,14 @@ function markIncomplete(state, type, key, dateStr) {
       break;
     }
   }
+  if (type === "dailies") {
+    state.dailiesCompleted[key] = Math.max(0, (Number(state.dailiesCompleted[key]) || 0) - 1);
+  } else if (type === "weeklies") {
+    state.weekliesCompleted[key] = Math.max(0, (Number(state.weekliesCompleted[key]) || 0) - 1);
+  } else {
+    state.endgameCompleted[key] = Math.max(0, (Number(state.endgameCompleted[key]) || 0) - 1);
+  }
+  pushUndo(state, "Incomplete " + key, before);
 }
 
 /** History: which dates in a month show a mark for a task (fill-remaining included). */
@@ -186,6 +212,14 @@ function historyMarksInMonth(state, type, key, year, month /* 1-12 */) {
       if ((state.completionByDate[ds][type] || []).includes(key)) out.push(ds);
     });
   return out;
+}
+
+/** History: true when dateStr is fill-remaining after an earlier finish in the same cycle. */
+function historyIsCarried(state, type, key, dateStr) {
+  if (type === "dailies") return false;
+  if (!(state.completionByDate[dateStr] && state.completionByDate[dateStr][type] || []).includes(key)) return false;
+  const completion = historyCompletionDayInCycle(state, type, key, dateStr);
+  return !!(completion && completion < dateStr);
 }
 
 /** History: true completion day for a cycle = timestamp if any, else earliest calendar mark. */
@@ -282,10 +316,12 @@ function trendHourCounts(events) {
   return c;
 }
 
-/** Calendar sync: recompute completed/attempted from marks up to today. */
+/** Calendar sync: recompute completed/attempted from marks up to today (+ compact baselines). */
 function syncTalliesFromCalendar(state, type, key) {
   const game = getGame(state);
   const today = state.today;
+  const baselines = (state.historyCompact && state.historyCompact.baselines) || {};
+  const base = (bucket) => Number((baselines[bucket] && baselines[bucket][key]) || 0) || 0;
 
   if (type === "dailies") {
     let completed = 0;
@@ -309,6 +345,8 @@ function syncTalliesFromCalendar(state, type, key) {
     } else {
       attempted = 0;
     }
+    completed += base("dailiesCompleted");
+    attempted += base("dailiesAttempted");
     state.dailiesCompleted[key] = completed;
     state.dailiesAttempted[key] = attempted;
     return { completed, attempted };
@@ -326,14 +364,16 @@ function syncTalliesFromCalendar(state, type, key) {
       if ((state.completionByDate[ds][type] || []).includes(key) && (!earliest || ds < earliest)) earliest = ds;
     });
   if (!earliest || !anchor) {
+    const completed = base(type === "weeklies" ? "weekliesCompleted" : "endgameCompleted");
+    const attempted = base(type === "weeklies" ? "weekliesAttempted" : "endgameAttempted");
     if (type === "weeklies") {
-      state.weekliesCompleted[key] = 0;
-      state.weekliesAttempted[key] = 0;
+      state.weekliesCompleted[key] = completed;
+      state.weekliesAttempted[key] = attempted;
     } else {
-      state.endgameCompleted[key] = 0;
-      state.endgameAttempted[key] = 0;
+      state.endgameCompleted[key] = completed;
+      state.endgameAttempted[key] = attempted;
     }
-    return { completed: 0, attempted: 0 };
+    return { completed, attempted };
   }
 
   let completed = 0;
@@ -357,6 +397,9 @@ function syncTalliesFromCalendar(state, type, key) {
     // safety
     if (attempted > 500) break;
   }
+
+  completed += base(type === "weeklies" ? "weekliesCompleted" : "endgameCompleted");
+  attempted += base(type === "weeklies" ? "weekliesAttempted" : "endgameAttempted");
 
   if (type === "weeklies") {
     state.weekliesCompleted[key] = completed;
@@ -418,6 +461,404 @@ function getDataTotals(state, game) {
   };
 }
 
+function cloneJson(v) {
+  return v == null ? v : JSON.parse(JSON.stringify(v));
+}
+
+function captureUndoSlice(state, type, key) {
+  const markedDates = [];
+  Object.keys(state.completionByDate || {})
+    .sort()
+    .forEach((ds) => {
+      if ((state.completionByDate[ds][type] || []).includes(key)) markedDates.push(ds);
+    });
+  const gameId = type === "dailies" ? key : key.slice(0, key.indexOf("."));
+  const taskId = type === "dailies" ? "" : key.slice(key.indexOf(".") + 1);
+  const timestamps = (state.completionTimestamps || [])
+    .filter((t) => t.taskType === type && t.gameId === gameId && (type === "dailies" || t.taskId === taskId))
+    .map(cloneJson);
+  const completedMap =
+    type === "dailies" ? state.dailiesCompleted : type === "weeklies" ? state.weekliesCompleted : state.endgameCompleted;
+  const attemptedMap =
+    type === "dailies" ? state.dailiesAttempted : type === "weeklies" ? state.weekliesAttempted : state.endgameAttempted;
+  return {
+    type,
+    key,
+    markedDates,
+    timestamps,
+    completed: Number(completedMap[key]) || 0,
+    attempted: Number(attemptedMap[key]) || 0,
+  };
+}
+
+function restoreUndoSlice(state, slice) {
+  const { type, key } = slice;
+  const gameId = type === "dailies" ? key : key.slice(0, key.indexOf("."));
+  const taskId = type === "dailies" ? "" : key.slice(key.indexOf(".") + 1);
+  Object.keys(state.completionByDate || {}).forEach((ds) => {
+    const arr = state.completionByDate[ds][type];
+    if (!arr) return;
+    const i = arr.indexOf(key);
+    if (i >= 0) arr.splice(i, 1);
+  });
+  (slice.markedDates || []).forEach((ds) => {
+    const day = ensureDay(state, ds);
+    if (!day[type].includes(key)) day[type].push(key);
+  });
+  state.completionTimestamps = (state.completionTimestamps || []).filter(
+    (t) => !(t.taskType === type && t.gameId === gameId && (type === "dailies" || t.taskId === taskId))
+  );
+  (slice.timestamps || []).forEach((t) => state.completionTimestamps.push(cloneJson(t)));
+  if (type === "dailies") {
+    state.dailiesCompleted[key] = slice.completed;
+    state.dailiesAttempted[key] = slice.attempted;
+  } else if (type === "weeklies") {
+    state.weekliesCompleted[key] = slice.completed;
+    state.weekliesAttempted[key] = slice.attempted;
+  } else {
+    state.endgameCompleted[key] = slice.completed;
+    state.endgameAttempted[key] = slice.attempted;
+  }
+}
+
+function pushUndo(state, label, before) {
+  if (!state._undoStack) state._undoStack = [];
+  state._undoStack.push({ label, before });
+  while (state._undoStack.length > 40) state._undoStack.shift();
+}
+
+function undoLast(state) {
+  if (!state._undoStack || !state._undoStack.length) return { ok: false, reason: "Nothing to undo" };
+  const entry = state._undoStack.pop();
+  restoreUndoSlice(state, entry.before);
+  return { ok: true, label: entry.label };
+}
+
+/**
+ * Lightweight share-card model for tests (mirrors buildShareCardModel: Games tallies for rates).
+ */
+function buildShareCardModel(state, opts) {
+  const o = opts || {};
+  const today = state.today;
+  const days = Math.max(1, Number(o.days) || 90);
+  const endStr = today;
+  const startStr = math.addDays(today, -(days - 1));
+  const game = getGame(state);
+  const games = o.gameIds && o.gameIds.length
+    ? [game].filter((g) => o.gameIds.includes(g.id))
+    : [game];
+  if (!games.length) return { ok: false, reason: "Select at least one game" };
+  const rateParts = (done, possible) => {
+    const d = Math.max(0, Number(done) || 0);
+    const p = Math.max(0, Number(possible) || 0);
+    return { done: d, possible: p, pct: p > 0 ? Math.round((d / p) * 100) : null };
+  };
+  const blocks = games.map((g) => {
+    const wKey = taskKey(g, g.weeklies[0]);
+    const eKey = taskKey(g, g.endgame[0]);
+    const dDone = Number(state.dailiesCompleted[g.id]) || 0;
+    const dPossible = Number(state.dailiesAttempted[g.id]) || 0;
+    const wDone = Number(state.weekliesCompleted[wKey]) || 0;
+    const wPossible = Number(state.weekliesAttempted[wKey]) || 0;
+    const eDone = Number(state.endgameCompleted[eKey]) || 0;
+    const ePossible = Number(state.endgameAttempted[eKey]) || 0;
+    const dPot = Number(g.dailyCurrency) || 0;
+    const wPot = Number(g.weeklies[0].currency) || 0;
+    const ePot = Number(g.endgame[0].currency) || 0;
+    const earned =
+      dDone * dPot + wDone * wPot + eDone * ePot;
+    const potential =
+      dPossible * dPot + wPossible * wPot + ePossible * ePot;
+    return {
+      id: g.id,
+      name: g.name,
+      dailies: [{ label: "Dailies", ...rateParts(dDone, dPossible) }],
+      weeklies: [{ label: g.weeklies[0].label, ...rateParts(wDone, wPossible) }],
+      endgame: [{ label: g.endgame[0].label, ...rateParts(eDone, ePossible) }],
+      currency: { earned, potential, currencyName: g.currencyName || "" },
+    };
+  });
+  const currency = blocks.reduce(
+    (acc, b) => ({
+      earned: acc.earned + b.currency.earned,
+      potential: acc.potential + b.currency.potential,
+      currencyName: blocks.length === 1 ? b.currency.currencyName : "",
+    }),
+    { earned: 0, potential: 0, currencyName: "" }
+  );
+  return {
+    ok: true,
+    title: blocks.length === 1 ? blocks[0].name : "Last " + days + " days",
+    subtitle: "Games tallies · finish days Last " + days + " days",
+    startStr,
+    endStr,
+    days,
+    games: blocks,
+    finishDays: [0, 0, 0, 0, 0, 0, 0],
+    currency,
+  };
+}
+function dropCalendarMarksOnOrBefore(state, cutoffDateStr) {
+  Object.keys(state.completionByDate || {}).forEach((ds) => {
+    if (ds <= cutoffDateStr) delete state.completionByDate[ds];
+  });
+  state.completionTimestamps = (state.completionTimestamps || []).filter((t) => t.dateStr > cutoffDateStr);
+}
+
+/**
+ * Sync-safe compact: archive marks on/before cutoff into baselines so Sync keeps tallies.
+ */
+function applyHistoryCompactSafe(state, cutoffDateStr) {
+  const game = getGame(state);
+  const keys = {
+    dailies: game.dailies ? [game.id] : [],
+    weeklies: (game.weeklies || []).map((t) => taskKey(game, t)),
+    endgame: (game.endgame || []).map((t) => taskKey(game, t)),
+  };
+  keys.dailies.forEach((k) => syncTalliesFromCalendar(state, "dailies", k));
+  keys.weeklies.forEach((k) => syncTalliesFromCalendar(state, "weeklies", k));
+  keys.endgame.forEach((k) => syncTalliesFromCalendar(state, "endgame", k));
+
+  const full = {
+    dailiesCompleted: Object.assign({}, state.dailiesCompleted),
+    dailiesAttempted: Object.assign({}, state.dailiesAttempted),
+    weekliesCompleted: Object.assign({}, state.weekliesCompleted),
+    weekliesAttempted: Object.assign({}, state.weekliesAttempted),
+    endgameCompleted: Object.assign({}, state.endgameCompleted),
+    endgameAttempted: Object.assign({}, state.endgameAttempted),
+  };
+
+  const saved = state.completionByDate;
+  const filtered = {};
+  Object.keys(saved || {}).forEach((ds) => {
+    if (ds > cutoffDateStr) filtered[ds] = saved[ds];
+  });
+  const prev = state.historyCompact;
+  state.completionByDate = filtered;
+  state.historyCompact = null;
+  keys.dailies.forEach((k) => syncTalliesFromCalendar(state, "dailies", k));
+  keys.weeklies.forEach((k) => syncTalliesFromCalendar(state, "weeklies", k));
+  keys.endgame.forEach((k) => syncTalliesFromCalendar(state, "endgame", k));
+  const after = {
+    dailiesCompleted: Object.assign({}, state.dailiesCompleted),
+    dailiesAttempted: Object.assign({}, state.dailiesAttempted),
+    weekliesCompleted: Object.assign({}, state.weekliesCompleted),
+    weekliesAttempted: Object.assign({}, state.weekliesAttempted),
+    endgameCompleted: Object.assign({}, state.endgameCompleted),
+    endgameAttempted: Object.assign({}, state.endgameAttempted),
+  };
+
+  function sub(a, b) {
+    const out = {};
+    new Set([].concat(Object.keys(a || {}), Object.keys(b || {}))).forEach((k) => {
+      const n = (Number(a[k]) || 0) - (Number(b[k]) || 0);
+      if (n > 0) out[k] = n;
+    });
+    return out;
+  }
+
+  state.completionByDate = saved;
+  state.historyCompact = prev;
+  dropCalendarMarksOnOrBefore(state, cutoffDateStr);
+  state.historyCompact = {
+    cutoffDateStr,
+    baselines: {
+      dailiesCompleted: sub(full.dailiesCompleted, after.dailiesCompleted),
+      dailiesAttempted: sub(full.dailiesAttempted, after.dailiesAttempted),
+      weekliesCompleted: sub(full.weekliesCompleted, after.weekliesCompleted),
+      weekliesAttempted: sub(full.weekliesAttempted, after.weekliesAttempted),
+      endgameCompleted: sub(full.endgameCompleted, after.endgameCompleted),
+      endgameAttempted: sub(full.endgameAttempted, after.endgameAttempted),
+    },
+  };
+  state.dailiesCompleted = full.dailiesCompleted;
+  state.dailiesAttempted = full.dailiesAttempted;
+  state.weekliesCompleted = full.weekliesCompleted;
+  state.weekliesAttempted = full.weekliesAttempted;
+  state.endgameCompleted = full.endgameCompleted;
+  state.endgameAttempted = full.endgameAttempted;
+  return state.historyCompact;
+}
+
+function buildExportSummaryMarkdown(state, opts) {
+  const o = opts || {};
+  const days = Math.max(1, Number(o.days) || 90);
+  const today = state.today;
+  const start = math.addDays(today, -(days - 1));
+  const game = getGame(state);
+  const lines = [];
+  lines.push("# Gacha Tracker summary");
+  lines.push("Exported: " + today);
+  lines.push("");
+  lines.push("## Completion rates (last " + days + " days)");
+  let dailyDone = 0;
+  for (let i = 0; i < days; i++) {
+    const ds = math.addDays(start, i);
+    if ((state.completionByDate[ds] && state.completionByDate[ds].dailies || []).includes(game.id)) dailyDone++;
+  }
+  const wKey = taskKey(game, game.weeklies[0]);
+  const events = getTrendEvents(state, "weeklies", wKey).filter((e) => e.dateStr >= start && e.dateStr <= today);
+  lines.push(
+    "| " +
+      game.name +
+      " | " +
+      dailyDone +
+      "/" +
+      days +
+      " | weeklies " +
+      events.length +
+      " events | — |"
+  );
+  lines.push("");
+  lines.push("## Currency (lifetime tallies)");
+  const totals = getDataTotals(state, game);
+  lines.push(game.name + ": earned " + totals.total.earned + " / potential " + totals.total.potential);
+  return lines.join("\n");
+}
+
+function buildExportSummaryCsv(state, opts) {
+  const o = opts || {};
+  const today = state.today;
+  const days = o.days != null ? Math.max(1, Number(o.days) || 90) : null;
+  const start = days != null ? math.addDays(today, -(days - 1)) : null;
+  const rows = ["game,taskType,task,completedOn,hour,dayOfWeek"];
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const game = getGame(state);
+  (state.completionTimestamps || [])
+    .filter((t) => !start || (t.dateStr >= start && t.dateStr <= today))
+    .forEach((t) => {
+      const dow = dayNames[new Date(t.dateStr + "T12:00:00").getDay()];
+      rows.push(
+        '"' +
+          game.name +
+          '",' +
+          t.taskType +
+          ',"' +
+          (t.taskLabel || t.taskId || "") +
+          '",' +
+          t.dateStr +
+          "," +
+          t.hour +
+          "," +
+          dow
+      );
+    });
+  return rows.join("\n");
+}
+
+/**
+ * Attendance pie skipped breakdown: games with tasks where attempted > completed.
+ * includeMap: { gameId: false } to exclude (default include).
+ */
+function getAttendanceSkippedGroups(state, type, includeMap) {
+  const include = includeMap || {};
+  const groups = [];
+  (state.games || []).forEach((game) => {
+    if (include[game.id] === false) return;
+    const tasks = [];
+    if (type === "dailies") {
+      if (!game.dailies) return;
+      const attempted = Number(state.dailiesAttempted[game.id]) || 0;
+      const completed = Number(state.dailiesCompleted[game.id]) || 0;
+      const skipped = Math.max(0, attempted - completed);
+      if (skipped > 0) tasks.push({ label: "Dailies", skipped, completed, attempted });
+    } else if (type === "weeklies") {
+      (game.weeklies || []).forEach((t) => {
+        const key = taskKey(game, t);
+        const attempted = Number(state.weekliesAttempted[key]) || 0;
+        const completed = Number(state.weekliesCompleted[key]) || 0;
+        const skipped = Math.max(0, attempted - completed);
+        if (skipped > 0) tasks.push({ label: t.label || t.id, skipped, completed, attempted });
+      });
+    } else if (type === "endgame") {
+      (game.endgame || []).forEach((t) => {
+        const key = taskKey(game, t);
+        const attempted = Number(state.endgameAttempted[key]) || 0;
+        const completed = Number(state.endgameCompleted[key]) || 0;
+        const skipped = Math.max(0, attempted - completed);
+        if (skipped > 0) tasks.push({ label: t.label || t.id, skipped, completed, attempted });
+      });
+    }
+    if (tasks.length) groups.push({ gameId: game.id, gameName: game.name, tasks });
+  });
+  return groups;
+}
+
+/** Persistable subset mirroring app buildSavePayload fields used by core features. */
+function buildSavePayload(state) {
+  return {
+    games: state.games,
+    completionByDate: state.completionByDate,
+    completionTimestamps: state.completionTimestamps,
+    dailiesCompleted: state.dailiesCompleted,
+    dailiesAttempted: state.dailiesAttempted,
+    weekliesCompleted: state.weekliesCompleted,
+    weekliesAttempted: state.weekliesAttempted,
+    endgameCompleted: state.endgameCompleted,
+    endgameAttempted: state.endgameAttempted,
+    endgameCurrencyEarned: state.endgameCurrencyEarned,
+    endgameCurrencyPotential: state.endgameCurrencyPotential,
+    historyCompact: state.historyCompact || null,
+    dataVersion: state.dataVersion || 0,
+    schemaVersion: state.schemaVersion || 0,
+  };
+}
+
+/** In-memory localStorage stand-in + save/load round-trip. */
+function createSaveStore() {
+  const bag = Object.create(null);
+  return {
+    setItem(key, value) {
+      bag[key] = String(value);
+    },
+    getItem(key) {
+      return Object.prototype.hasOwnProperty.call(bag, key) ? bag[key] : null;
+    },
+    removeItem(key) {
+      delete bag[key];
+    },
+    _bag: bag,
+  };
+}
+
+function saveState(store, state, key) {
+  const k = key || "gacha-tracker";
+  const payload = buildSavePayload(state);
+  payload.dataVersion = (Number(payload.dataVersion) || 0) + 1;
+  state.dataVersion = payload.dataVersion;
+  store.setItem(k, JSON.stringify(payload));
+  return payload;
+}
+
+function loadState(store, key) {
+  const k = key || "gacha-tracker";
+  const raw = store.getItem(k);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  const state = createFixture({ today: "2026-07-31" });
+  if (parsed.games) state.games = parsed.games;
+  if (parsed.completionByDate) state.completionByDate = parsed.completionByDate;
+  if (Array.isArray(parsed.completionTimestamps)) state.completionTimestamps = parsed.completionTimestamps;
+  ["dailiesCompleted", "dailiesAttempted", "weekliesCompleted", "weekliesAttempted", "endgameCompleted", "endgameAttempted"].forEach(
+    (field) => {
+      if (parsed[field]) state[field] = parsed[field];
+    }
+  );
+  if (parsed.endgameCurrencyEarned) state.endgameCurrencyEarned = parsed.endgameCurrencyEarned;
+  if (parsed.endgameCurrencyPotential) state.endgameCurrencyPotential = parsed.endgameCurrencyPotential;
+  if (parsed.historyCompact) state.historyCompact = parsed.historyCompact;
+  state.dataVersion = Number(parsed.dataVersion) || 0;
+  state.schemaVersion = Number(parsed.schemaVersion) || 0;
+  return state;
+}
+
+function syncAllTallies(state) {
+  const game = getGame(state);
+  if (game.dailies) syncTalliesFromCalendar(state, "dailies", game.id);
+  (game.weeklies || []).forEach((t) => syncTalliesFromCalendar(state, "weeklies", taskKey(game, t)));
+  (game.endgame || []).forEach((t) => syncTalliesFromCalendar(state, "endgame", taskKey(game, t)));
+}
+
 module.exports = {
   createFixture,
   getGame,
@@ -426,9 +867,24 @@ module.exports = {
   markIncomplete,
   historyMarksInMonth,
   historyCompletionDayInCycle,
+  historyIsCarried,
   getTrendEvents,
   trendDayOfWeekCounts,
   trendHourCounts,
   syncTalliesFromCalendar,
+  syncAllTallies,
   getDataTotals,
+  captureUndoSlice,
+  pushUndo,
+  undoLast,
+  dropCalendarMarksOnOrBefore,
+  applyHistoryCompactSafe,
+  buildShareCardModel,
+  buildExportSummaryMarkdown,
+  buildExportSummaryCsv,
+  getAttendanceSkippedGroups,
+  buildSavePayload,
+  createSaveStore,
+  saveState,
+  loadState,
 };

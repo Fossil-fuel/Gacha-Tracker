@@ -1,0 +1,28 @@
+{
+  "id": "akendfield",
+  "name": "Arknights: Endfield",
+  "server": "america",
+  "resetHour": 4,
+  "resetMinute": 0,
+  "dailies": true,
+  "dailyCurrency": 200,
+  "currencyPerPull": 500,
+  "currencyName": "Oroberyls",
+  "weeklies": [
+    {
+      "id": "weekly_routine",
+      "label": "Weekly Routine",
+      "weekStartDay": 1,
+      "weekStartHour": 4,
+      "weekStartMinute": 0,
+      "currency": 500,
+      "frequencyEvery": 1,
+      "frequencyUnit": "week",
+      "timeLimitEvery": 1,
+      "timeLimitUnit": "week",
+      "dateStarted": "2026-03-10",
+      "adjustForDST": true
+    }
+  ],
+  "endgame": []
+}

@@ -72,6 +72,43 @@ module.exports = {
       })
     );
 
+    checks.push(
+      check("History: carried days are after true completion day", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 18);
+        assert.equal(sim.historyIsCarried(state, "weeklies", key, "2026-07-22"), false, "finish day is not carried");
+        assert.equal(sim.historyIsCarried(state, "weeklies", key, "2026-07-26"), true, "Sunday fill is carried");
+        assert.equal(sim.historyIsCarried(state, "weeklies", key, "2026-07-21"), false, "unmarked day is not carried");
+      })
+    );
+
+    checks.push(
+      check("History: D/W/E day count is on-day marks only (carried count, pre-finish days do not)", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const wKey = sim.taskKey(game, game.weeklies[0]);
+        const eKey = sim.taskKey(game, game.endgame[0]);
+        // Finish weekly Wed; endgame on Friday of same week
+        sim.markComplete(state, "weeklies", wKey, "2026-07-22", 12);
+        sim.markComplete(state, "endgame", eKey, "2026-07-24", 12);
+
+        function dayHas(type, key, ds) {
+          return !!(state.completionByDate[ds] && (state.completionByDate[ds][type] || []).includes(key));
+        }
+        // Pre-finish day: cycle is complete later, but no mark yet — bar must not count it
+        assert.equal(dayHas("weeklies", wKey, "2026-07-21"), false, "Tue before weekly finish unmarked");
+        assert.equal(dayHas("endgame", eKey, "2026-07-22"), false, "Wed before endgame finish unmarked");
+        // Finish day + carried fill days count
+        assert.equal(dayHas("weeklies", wKey, "2026-07-22"), true, "weekly finish day marked");
+        assert.equal(dayHas("weeklies", wKey, "2026-07-26"), true, "weekly carried Sunday marked");
+        assert.equal(dayHas("endgame", eKey, "2026-07-24"), true, "endgame finish day marked");
+        assert.equal(sim.historyIsCarried(state, "weeklies", wKey, "2026-07-26"), true, "Sunday weekly is carried");
+        assert.equal(sim.historyIsCarried(state, "endgame", eKey, "2026-07-26"), true, "Sunday endgame is carried");
+      })
+    );
+
     // ── Time Trends ─────────────────────────────────────────
     checks.push(
       check("Time Trends: one event per cycle; DOW follows completion day not fill days", () => {
@@ -225,6 +262,179 @@ module.exports = {
         assert.ok(marks.includes("2026-07-22"), "day 3 in history");
         const events = sim.getTrendEvents(state, "endgame", key);
         assert.equal(events[0].dateStr, "2026-07-22", "trends use day 3");
+      })
+    );
+
+    checks.push(
+      check("Write path: complete then incomplete restores empty cycle marks", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 14);
+        assert.ok(sim.historyMarksInMonth(state, "weeklies", key, 2026, 7).length > 0, "marks after complete");
+        sim.markIncomplete(state, "weeklies", key, "2026-07-22");
+        assert.equal(sim.historyMarksInMonth(state, "weeklies", key, 2026, 7).length, 0, "marks cleared after incomplete");
+        assert.equal(
+          state.completionTimestamps.filter((t) => t.taskType === "weeklies" && t.taskId === "weekly_a").length,
+          0,
+          "timestamp removed on incomplete"
+        );
+      })
+    );
+
+    checks.push(
+      check("Undo: restores calendar, timestamp, and tallies after complete", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 14);
+        assert.ok(sim.historyMarksInMonth(state, "weeklies", key, 2026, 7).length > 0, "marked after complete");
+        assert.equal(state.weekliesCompleted[key], 1, "tally after complete");
+        const undone = sim.undoLast(state);
+        assert.equal(undone.ok, true, "undo ok");
+        assert.equal(sim.historyMarksInMonth(state, "weeklies", key, 2026, 7).length, 0, "marks restored empty");
+        assert.equal(state.weekliesCompleted[key], 0, "tally restored");
+        assert.equal(
+          state.completionTimestamps.filter((t) => t.taskType === "weeklies" && t.taskId === "weekly_a").length,
+          0,
+          "timestamp restored away"
+        );
+      })
+    );
+
+    checks.push(
+      check("Undo: undoing incomplete re-applies the prior completion", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 14);
+        sim.markIncomplete(state, "weeklies", key, "2026-07-22");
+        assert.equal(sim.historyMarksInMonth(state, "weeklies", key, 2026, 7).length, 0, "cleared");
+        const undone = sim.undoLast(state);
+        assert.equal(undone.ok, true, "undo incomplete");
+        assert.ok(sim.historyMarksInMonth(state, "weeklies", key, 2026, 7).includes("2026-07-22"), "completion day back");
+        assert.equal(state.weekliesCompleted[key], 1, "tally back to 1");
+      })
+    );
+
+    checks.push(
+      check("Export summary: markdown and CSV include game and completions", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "dailies", game.id, "2026-07-30", 8);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 20);
+        const md = sim.buildExportSummaryMarkdown(state, { days: 90 });
+        assert.ok(md.indexOf("# Gacha Tracker summary") === 0, "markdown title");
+        assert.ok(md.includes(game.name), "includes game name");
+        assert.ok(md.includes("Currency"), "includes currency section");
+        const csv = sim.buildExportSummaryCsv(state, { days: 90 });
+        assert.ok(csv.indexOf("game,taskType,task,completedOn,hour,dayOfWeek") === 0, "csv header");
+        assert.ok(csv.includes("2026-07-22"), "csv has weekly completion day");
+        assert.ok(csv.includes("weeklies"), "csv has weeklies row");
+      })
+    );
+
+    checks.push(
+      check("Share card model: selected game lists dailies/weeklies/endgame tasks", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "dailies", game.id, "2026-07-30", 8);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 20);
+        const empty = sim.buildShareCardModel(state, { days: 90, gameIds: ["nope"] });
+        assert.equal(empty.ok, false, "unknown game id fails");
+        const model = sim.buildShareCardModel(state, { days: 90, gameIds: [game.id] });
+        assert.ok(model.ok, "model ok");
+        assert.equal(model.title, game.name, "single-game title is game name");
+        assert.equal(model.games.length, 1, "one game block");
+        assert.ok(model.games[0].dailies.length >= 1, "dailies task row");
+        assert.ok(model.games[0].weeklies.some((t) => t.label === game.weeklies[0].label), "weekly task listed");
+        assert.ok(model.games[0].endgame.some((t) => t.label === game.endgame[0].label), "endgame task listed");
+        assert.ok(model.currency, "includes currency earned/potential summary");
+        assert.equal(typeof model.currency.earned, "number", "currency.earned is a number");
+        assert.equal(typeof model.currency.potential, "number", "currency.potential is a number");
+        assert.equal(
+          model.games[0].weeklies[0].done,
+          Number(state.weekliesCompleted[key]) || 0,
+          "share card weekly done matches Games tally"
+        );
+        assert.equal(
+          model.games[0].weeklies[0].possible,
+          Number(state.weekliesAttempted[key]) || 0,
+          "share card weekly possible matches Games attempted"
+        );
+      })
+    );
+
+    checks.push(
+      check("Compact hazard: Sync after dropping old marks undercounts vs kept tallies", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "weeklies", key, "2026-07-08", 12);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 12);
+        assert.equal(state.weekliesCompleted[key], 2, "two completes recorded in tallies");
+        // Naive compact: delete older calendar days but leave tallies at 2
+        sim.dropCalendarMarksOnOrBefore(state, "2026-07-14");
+        state.weekliesCompleted[key] = 2;
+        state.weekliesAttempted[key] = 2;
+        const synced = sim.syncTalliesFromCalendar(state, "weeklies", key);
+        assert.equal(synced.completed, 1, "sync only sees remaining cycle");
+        assert.ok(synced.completed < 2, "documents why compact must not rely on Sync alone");
+      })
+    );
+
+    checks.push(
+      check("Compact safe: Sync keeps tallies after archive baselines", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "weeklies", key, "2026-07-08", 12);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 12);
+        assert.equal(state.weekliesCompleted[key], 2, "two completes before compact");
+        sim.applyHistoryCompactSafe(state, "2026-07-14");
+        assert.ok(!state.completionByDate["2026-07-08"], "old day removed");
+        assert.ok(state.completionByDate["2026-07-22"], "recent day kept");
+        assert.equal(state.weekliesCompleted[key], 2, "tallies unchanged after compact");
+        const synced = sim.syncTalliesFromCalendar(state, "weeklies", key);
+        assert.equal(synced.completed, 2, "Sync retains archived cycle via baselines");
+        assert.equal(
+          state.historyCompact.baselines.weekliesCompleted[key],
+          1,
+          "one cycle archived in baseline"
+        );
+      })
+    );
+
+    checks.push(
+      check("Attendance pie: skipped groups list tasks under each game", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const wKey = sim.taskKey(game, game.weeklies[0]);
+        const eKey = sim.taskKey(game, game.endgame[0]);
+        state.weekliesAttempted[wKey] = 4;
+        state.weekliesCompleted[wKey] = 2;
+        state.endgameAttempted[eKey] = 3;
+        state.endgameCompleted[eKey] = 3;
+        state.dailiesAttempted[game.id] = 10;
+        state.dailiesCompleted[game.id] = 7;
+
+        const dGroups = sim.getAttendanceSkippedGroups(state, "dailies");
+        assert.equal(dGroups.length, 1, "one game with daily skips");
+        assert.equal(dGroups[0].gameName, game.name, "game title present");
+        assert.equal(dGroups[0].tasks[0].label, "Dailies", "dailies under game");
+        assert.equal(dGroups[0].tasks[0].skipped, 3, "3 daily skips");
+
+        const wGroups = sim.getAttendanceSkippedGroups(state, "weeklies");
+        assert.equal(wGroups[0].tasks[0].label, "Weekly A", "weekly task under game");
+        assert.equal(wGroups[0].tasks[0].skipped, 2, "2 weekly skips");
+
+        const eGroups = sim.getAttendanceSkippedGroups(state, "endgame");
+        assert.equal(eGroups.length, 0, "fully completed endgame omitted");
+
+        const excluded = sim.getAttendanceSkippedGroups(state, "dailies", { [game.id]: false });
+        assert.equal(excluded.length, 0, "excluded games omitted from pie skip list");
       })
     );
 

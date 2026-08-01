@@ -2,7 +2,7 @@
 <html lang="en" data-theme="purple">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Gacha Tracker</title>
   <meta name="description" content="Track completion and currency earned through checklists and manual inputs." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -86,7 +86,7 @@
                 <li><strong>Weeklies</strong> — Track weekly content with configurable reset schedules.</li>
                 <li><strong>Endgame</strong> — Track endgame modes with partial credit and currency earned per completion.</li>
                 <li><strong>Extracurricular</strong> — Custom tasks for events, story, or other reminders with start/end dates.</li>
-                <li><strong>Attendance</strong> — Weekly participation view and history with pie charts.</li>
+                <li><strong>Attendance</strong> — Weekly view with completion pies (hover or click a pie for skipped tasks by game), History calendar, and Time Trends.</li>
                 <li><strong>Data</strong> — Breakdown of currency earned across games and task types.</li>
                 <li><strong>Games</strong> — Add, edit, or remove games. Start from presets or build custom.</li>
               </ul>
@@ -95,8 +95,12 @@
               <h3 class="about-section-title">Other Features</h3>
               <ul class="about-feature-list about-feature-list-compact">
                 <li>Server regions (America, Asia, Europe) and DST handling for reset times</li>
+                <li>Unlock windows on weeklies/endgame (e.g. earliest day/time you can mark complete)</li>
+                <li>Fill-remaining: finishing a weekly/endgame marks the rest of that cycle complete in History</li>
                 <li>Custom themes (presets and custom colors)</li>
-                <li>Export/import data as JSON</li>
+                <li>Export/import data as JSON; Markdown/CSV summary export; Settings → Data / Debug for repair tools</li>
+                <li>Undo last completion (Ctrl+Z) for complete/incomplete this session</li>
+                <li>Game presets as JSON (`presets/`) — contribute a file without editing core JS</li>
                 <li>Optional 30-day simulation for testing</li>
                 <li>List and grid views for tasks</li>
               </ul>
@@ -113,8 +117,8 @@
                 <li><strong>Server regions</strong> — Each game has a server (America, Asia, or Europe). Reset times follow that server's clock. For example, if a game resets at 4:00 AM server time, it resets at 4:00 AM in that region.</li>
                 <li><strong>Daylight Saving Time</strong> — For America and Europe servers, the tracker can adjust reset times when DST changes (e.g. 4:00 AM during DST, 3:00 AM when DST ends). Asia has no DST. You can turn this on or off per task or in settings.</li>
                 <li><strong>What counts as "today"</strong> — A daily period runs from one reset to the next. So if dailies reset at 3:00 AM, then 2:59 AM still belongs to yesterday's tasks; 3:00 AM starts today's.</li>
-                <li><strong>Weeklies</strong> — Each weekly task has a start day (e.g. Monday) and time. The week runs from that moment for 7 days. The "time remaining" shows how long until the current week ends.</li>
-                <li><strong>Endgame</strong> — Endgame tasks use cycles (e.g. every 2 weeks). Each cycle has a deadline. Time remaining is until the end of the current cycle.</li>
+                <li><strong>Weeklies</strong> — Each weekly task has a start day (e.g. Monday) and time. The week runs from that moment for 7 days. The "time remaining" shows how long until the current week ends. Completing a weekly marks that day through the end of the cycle in History; Time Trends still counts only the finish day.</li>
+                <li><strong>Endgame</strong> — Endgame tasks use cycles (e.g. every 2 weeks). Each cycle has a deadline. Time remaining is until the end of the current cycle. Same fill-remaining / Trends rules as weeklies. Optional unlock fields block marking complete before a day/time in the cycle.</li>
               </ul>
               <p class="about-time-hint">The sidebar shows your current time, the next reset countdown, and a comparison of reset times with and without DST. Check Settings → Time to sync your timezone or change how dates and times are displayed.</p>
             </section>
@@ -246,6 +250,7 @@
         <div class="sidebar-countdown" id="resetCountdown"></div>
         <div class="sidebar-reset-compare" id="sidebarResetCompare" aria-label="Reset times W/ DST and W/O DST"></div>
         <p class="sidebar-hint" id="sidebarHint">Dailies reset time. Data saved in this browser.</p>
+        <div class="sidebar-last-saved" id="sidebarLastSaved" aria-live="polite"></div>
         <div class="sidebar-dst-dates" id="sidebarDstDates" aria-label="DST transition dates"></div>
       </div>
     </aside>
@@ -260,7 +265,8 @@
         <button type="button" class="icon-btn" id="taskModalClose" aria-label="Close">×</button>
       </div>
 
-      <form id="taskModalForm" class="modal-body">
+      <form id="taskModalForm" class="modal-form">
+        <div class="modal-body">
         <div class="task-menu-grid" role="group" aria-label="Task schedule settings">
           <!-- Row 1: Task name -->
           <div class="task-menu-cell span-7 task-menu-name">
@@ -308,6 +314,7 @@
         </div>
 
         <div id="taskModalExtra" class="task-menu-extra"></div>
+        </div>
 
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="taskModalCancel">Cancel</button>
@@ -325,7 +332,8 @@
         <h3 id="dailyTaskModalTitle" class="modal-title">Daily task</h3>
         <button type="button" class="icon-btn" id="dailyTaskModalClose" aria-label="Close">×</button>
       </div>
-      <form id="dailyTaskModalForm" class="modal-body">
+      <form id="dailyTaskModalForm" class="modal-form">
+        <div class="modal-body">
         <div class="endgame-currency-rows">
           <div class="endgame-currency-row">
             <label for="dailyTaskName">Task name</label>
@@ -358,6 +366,7 @@
             <input id="dailyTaskAttempted" type="number" min="0" placeholder="0" />
           </div>
         </div>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="dailyTaskModalCancel">Cancel</button>
           <button type="submit" class="btn btn-add" id="dailyTaskModalSave">Save</button>
@@ -384,6 +393,34 @@
     </div>
   </div>
 
+  <!-- Completion time (calendar new marks + Debug fill missing) -->
+  <div id="completionTimeModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="completionTimeModalTitle">
+      <div class="modal-header">
+        <h3 id="completionTimeModalTitle" class="modal-title">Completion time</h3>
+        <button type="button" class="icon-btn" id="completionTimeModalClose" aria-label="Close" data-close="true">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="completionTimeModalDesc" class="modal-desc" style="margin-top: 0;">When did you finish each task?</p>
+        <div id="completionTimeBatchBar" class="completion-time-batch" hidden>
+          <span class="completion-time-batch-label">Batch</span>
+          <label class="completion-time-batch-select-all">
+            <input type="checkbox" id="completionTimeSelectAll" />
+            <span>Select all</span>
+          </label>
+          <input type="time" id="completionTimeBatchInput" class="settings-input" aria-label="Batch completion time" />
+          <button type="button" class="btn btn-ghost" id="completionTimeBatchApply">Apply to selected</button>
+        </div>
+        <div id="completionTimeModalList" class="completion-time-modal-list"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="completionTimeModalCancel">Cancel</button>
+          <button type="button" class="btn btn-add" id="completionTimeModalConfirm">Save times</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Extracurricular task add/edit modal -->
   <div id="extracurricularTaskModal" class="modal" hidden aria-hidden="true">
     <div class="modal-backdrop" data-close="true"></div>
@@ -392,7 +429,8 @@
         <h3 id="extracurricularTaskModalTitle" class="modal-title">Add task</h3>
         <button type="button" class="icon-btn" id="extracurricularTaskModalClose" aria-label="Close">×</button>
       </div>
-      <form id="extracurricularTaskModalForm" class="modal-body">
+      <form id="extracurricularTaskModalForm" class="modal-form">
+        <div class="modal-body">
         <div class="form-row">
           <label for="extracurricularTaskName">Task name</label>
           <input id="extracurricularTaskName" type="text" placeholder="Task name" autocomplete="off" required />
@@ -434,6 +472,7 @@
           <label for="extracurricularTaskCurrency">Currency (optional, for Data tab)</label>
           <input id="extracurricularTaskCurrency" type="number" min="0" placeholder="0" />
         </div>
+        </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="extracurricularTaskModalCancel">Cancel</button>
           <button type="submit" class="btn btn-add" id="extracurricularTaskModalSave">Save</button>
@@ -451,7 +490,8 @@
         <button type="button" class="icon-btn" id="gameModalClose" aria-label="Close">×</button>
       </div>
 
-      <form id="gameModalForm" class="modal-body">
+      <form id="gameModalForm" class="modal-form">
+        <div class="modal-body">
         <div class="game-add-options" role="group" aria-label="Add game">
           <button type="button" class="game-add-option" data-preset="custom" aria-pressed="true">
             <span class="game-add-title">Custom</span>
@@ -495,6 +535,7 @@
             <option value="europe">Europe (UTC+1)</option>
           </select>
           <span id="game-server-desc" class="settings-hint">Server region determines reset time base. Reset is 4am server time (3am when DST inactive).</span>
+        </div>
         </div>
 
         <div class="modal-actions">
@@ -592,6 +633,7 @@
           <button type="button" class="settings-nav-item active" data-settings-section="appearance" aria-current="page">Appearance</button>
           <button type="button" class="settings-nav-item" data-settings-section="time">Time</button>
           <button type="button" class="settings-nav-item" data-settings-section="data">Data</button>
+          <button type="button" class="settings-nav-item" data-settings-section="debug">Debug</button>
           <button type="button" class="settings-nav-item" data-settings-section="display">Display</button>
           <button type="button" class="settings-nav-item" data-settings-section="behavior">Behavior</button>
         </nav>
@@ -686,10 +728,58 @@
               <button type="button" class="btn btn-ghost" id="settingsExportBtn">Export data</button>
               <span class="settings-hint">Download your data as a JSON file</span>
             </div>
+            <div class="settings-row settings-row-actions">
+              <button type="button" class="btn btn-ghost" id="settingsExportSummaryMdBtn">Export summary (Markdown)</button>
+              <button type="button" class="btn btn-ghost" id="settingsExportSummaryCsvBtn">Export completions (CSV)</button>
+            </div>
+            <span class="settings-hint">Readable report / spreadsheet of finishes — not a full backup. Last 90 days for rates; CSV lists completion events.</span>
+            <div class="settings-share-card-block">
+              <h5 class="settings-subsection-title">Share card (PNG)</h5>
+              <span class="settings-hint">Rates and currency match Games completed/attempted tallies. Timeframe only filters the finish-day chart (Time Trends). Not a backup.</span>
+              <div class="settings-row">
+                <label class="settings-label" for="settingsShareCardDays">Finish-day timeframe</label>
+                <select id="settingsShareCardDays" class="settings-select" aria-label="Share card timeframe">
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90" selected>Last 90 days</option>
+                  <option value="custom">Custom dates</option>
+                </select>
+              </div>
+              <div class="settings-row settings-share-card-custom" id="settingsShareCardCustomRow" hidden>
+                <label class="settings-label" for="settingsShareCardStart">From</label>
+                <input type="date" id="settingsShareCardStart" class="settings-input" aria-label="Share card start date" />
+                <label class="settings-label" for="settingsShareCardEnd">To</label>
+                <input type="date" id="settingsShareCardEnd" class="settings-input" aria-label="Share card end date" />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">Games</span>
+                <div class="settings-share-card-game-actions">
+                  <button type="button" class="btn btn-ghost btn-sm" id="settingsShareCardSelectAllBtn">Select all</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="settingsShareCardSelectNoneBtn">Clear</button>
+                </div>
+              </div>
+              <div id="settingsShareCardGames" class="settings-share-card-games timestamps-game-selector" role="group" aria-label="Games to include on share card"></div>
+              <div class="settings-row settings-row-actions">
+                <button type="button" class="btn btn-ghost" id="settingsShareCardPreviewBtn">Preview</button>
+                <button type="button" class="btn btn-ghost" id="settingsShareCardExportBtn">Export share card (PNG)</button>
+              </div>
+              <div id="settingsShareCardPreview" class="settings-share-card-preview" hidden>
+                <img id="settingsShareCardPreviewImg" alt="Share card preview" />
+                <span class="settings-hint" id="settingsShareCardPreviewMeta"></span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <button type="button" class="btn btn-ghost" id="settingsUndoCompletionBtn" disabled>Undo last completion</button>
+              <span class="settings-hint" id="settingsUndoCompletionHint">Ctrl+Z also undoes the last complete/incomplete (this session)</span>
+            </div>
             <div class="settings-row">
               <label class="settings-label" for="settingsImportInput">Import data</label>
               <input type="file" id="settingsImportInput" accept=".json,application/json" class="settings-file-input" />
-              <span class="settings-hint">Replace current data with imported file</span>
+              <span class="settings-hint">Replace current data with imported file. After import, use Debug → Scan if charts look wrong.</span>
+            </div>
+            <div class="settings-row">
+              <button type="button" class="btn btn-ghost" id="settingsRepairDataBtn">Repair current data</button>
+              <span class="settings-hint">Fixes early unlock marks, rebuilds calendar from timestamps, fills remaining days, and syncs tallies</span>
             </div>
             <div class="settings-row">
               <button type="button" class="btn btn-ghost" id="settingsSimulateBtn">Run 30-day simulation</button>
@@ -719,6 +809,76 @@
               <button type="button" class="btn btn-ghost btn-danger-sm" id="settingsClearDataBtn">Clear all data</button>
               <span class="settings-hint">Reset to empty state (cannot be undone)</span>
             </div>
+          </section>
+          <section id="settings-section-debug" class="settings-section" aria-labelledby="settings-debug-heading">
+            <h4 id="settings-debug-heading" class="settings-section-title">Debug &amp; Integrity</h4>
+            <p class="settings-hint settings-debug-intro">Scan for conflicting history (calendar vs timestamps vs tallies). Repairs are manual so loading the app never silently rewrites your completion dates.</p>
+            <div class="settings-row">
+              <span class="settings-label">Schema version</span>
+              <span id="settingsDebugSchemaVersion" class="settings-hint">—</span>
+            </div>
+            <div class="settings-row">
+              <button type="button" class="btn btn-ghost" id="settingsDebugScanBtn">Scan for conflicts</button>
+            </div>
+            <h5 class="settings-subsection-title">Repair Options</h5>
+            <div class="settings-debug-repairs">
+              <div class="settings-row settings-tip-wrap">
+                <button type="button" class="btn btn-ghost" id="settingsDebugRepairSafeBtn" aria-describedby="settingsDebugRepairSafeTip">
+                  Repair (safe)
+                </button>
+                <div id="settingsDebugRepairSafeTip" class="settings-hover-tooltip" role="tooltip">
+                  Dedupes same-day timestamps, rebuilds <strong>endgame</strong> finish days from timestamps (unlock honored), fills missing calendar days, then syncs tallies. Start here for most issues.
+                </div>
+              </div>
+              <div class="settings-row settings-tip-wrap">
+                <button type="button" class="btn btn-ghost" id="settingsDebugRepairTimestampsBtn" aria-describedby="settingsDebugRepairTimestampsTip">
+                  Repair prefer timestamps
+                </button>
+                <div id="settingsDebugRepairTimestampsTip" class="settings-hover-tooltip" role="tooltip">
+                  Same as safe, plus rebuilds <strong>weeklies and endgame</strong> from timestamps, collapses duplicate stamps in a cycle, and strips early calendar fill before the real finish day.
+                </div>
+              </div>
+              <div class="settings-row settings-tip-wrap">
+                <button type="button" class="btn btn-ghost" id="settingsDebugRepairTalliesBtn" aria-describedby="settingsDebugRepairTalliesTip">
+                  Rebuild tallies only
+                </button>
+                <div id="settingsDebugRepairTalliesTip" class="settings-hover-tooltip" role="tooltip">
+                  Only rebuilds completed/attempted counts from the calendar. Use when History looks right but Data numbers are wrong. Does not fix calendar vs timestamp mismatches.
+                </div>
+              </div>
+              <div class="settings-row settings-tip-wrap">
+                <button type="button" class="btn btn-ghost" id="settingsDebugFillMissingTimesBtn" aria-describedby="settingsDebugFillMissingTimesTip">
+                  Fill missing times
+                </button>
+                <div id="settingsDebugFillMissingTimesTip" class="settings-hover-tooltip" role="tooltip">
+                  Lists calendar completions that have no finish time stamp. Enter a time per task so Time Trends can count them. Does not change calendar marks or tallies.
+                </div>
+              </div>
+              <div class="settings-row settings-tip-wrap">
+                <button type="button" class="btn btn-ghost" id="settingsDebugResolveDuplicateTimesBtn" aria-describedby="settingsDebugResolveDuplicateTimesTip">
+                  Resolve duplicate times
+                </button>
+                <div id="settingsDebugResolveDuplicateTimesTip" class="settings-hover-tooltip" role="tooltip">
+                  When a cycle has two (or more) finish timestamps, pick which one to keep and remove the others. Does not change calendar marks or tallies.
+                </div>
+              </div>
+
+            </div>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsCompactMonths">Compact history older than</label>
+              <select id="settingsCompactMonths" class="settings-select" aria-label="Months of calendar history to keep">
+                <option value="3">3 months</option>
+                <option value="6">6 months</option>
+                <option value="12" selected>12 months</option>
+                <option value="24">24 months</option>
+              </select>
+            </div>
+            <div class="settings-row settings-row-actions">
+              <button type="button" class="btn btn-ghost" id="settingsCompactPreviewBtn">Preview compact</button>
+              <button type="button" class="btn btn-ghost" id="settingsCompactApplyBtn">Compact history…</button>
+            </div>
+            <span class="settings-hint">Drops old calendar day marks; keeps completion tallies. Sync stays correct via archived baselines. Does not run on load — only when you apply. Download a full backup first if unsure.</span>
+            <pre id="settingsDebugReport" class="settings-debug-report" aria-live="polite">Click “Scan for conflicts” to check your data.</pre>
           </section>
           <section id="settings-section-display" class="settings-section" aria-labelledby="settings-display-heading">
             <h4 id="settings-display-heading" class="settings-section-title">Display &amp; Format</h4>
@@ -881,20 +1041,23 @@
     </div>
   </div>
 
-  <!-- Clear Time Trends data modal (game selection) -->
+  <!-- Sync / Clear Time Trends modal (game selection) -->
   <div id="clearTimeTrendsModal" class="modal" hidden aria-hidden="true">
     <div class="modal-backdrop" data-close="clearTimeTrendsModal"></div>
     <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="clearTimeTrendsModalTitle">
       <div class="modal-header">
-        <h3 id="clearTimeTrendsModalTitle" class="modal-title">Clear Time Trends data</h3>
+        <h3 id="clearTimeTrendsModalTitle" class="modal-title">Sync Time Trends with Calendar</h3>
         <button type="button" class="icon-btn" id="clearTimeTrendsModalClose" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
-        <p class="modal-desc" style="margin-top: 0;">Select which games to clear completion timestamps for:</p>
+        <p id="clearTimeTrendsModalDesc" class="modal-desc" style="margin-top: 0;">
+          Select games to sync. Existing Time Trends times stay as they are. Calendar completions that have no stamp get a time inferred from your usual hours for that task/game so charts stay familiar. Does not change calendar marks or tallies.
+        </p>
         <div id="clearTimeTrendsModalGames" class="clear-time-trends-games"></div>
-        <div class="modal-actions" style="margin-top: 1rem;">
+        <div class="modal-actions" style="margin-top: 1rem; flex-wrap: wrap; gap: 0.5rem;">
           <button type="button" class="btn btn-ghost" id="clearTimeTrendsCancel">Cancel</button>
-          <button type="button" class="btn btn-danger" id="clearTimeTrendsConfirm">Clear selected</button>
+          <button type="button" class="btn btn-danger" id="clearTimeTrendsConfirm" title="Remove timestamps for selected games">Clear selected</button>
+          <button type="button" class="btn btn-add" id="syncTimeTrendsConfirm">Sync with Calendar</button>
         </div>
       </div>
     </div>
@@ -910,6 +1073,21 @@
       </div>
       <div class="modal-body">
         <div id="timeTrendsDetailModalList" class="time-trends-detail-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attendance pie: skipped tasks by game -->
+  <div id="attendanceSkippedModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="attendanceSkippedModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="attendanceSkippedModalTitle">
+      <div class="modal-header">
+        <h3 id="attendanceSkippedModalTitle" class="modal-title">Skipped tasks</h3>
+        <button type="button" class="icon-btn" id="attendanceSkippedModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="attendanceSkippedModalSummary" class="settings-hint"></p>
+        <div id="attendanceSkippedModalList" class="attendance-skipped-list"></div>
       </div>
     </div>
   </div>

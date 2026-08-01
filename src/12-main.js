@@ -147,9 +147,20 @@
   initEndgameCompleteModal();
   initExtracurricularCompleteModal();
   initTimeTrendsDetailModal();
+  initAttendanceSkippedModal();
   initClearTimeTrendsModal();
   initSettingsModal();
   initExtracurricularTaskModal();
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== "z") return;
+    if (e.altKey || e.shiftKey) return;
+    const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable)) return;
+    if (typeof canUndoCompletion !== "function" || !canUndoCompletion()) return;
+    e.preventDefault();
+    const result = undoLastCompletion();
+    if (result && result.ok && typeof updateCompletionUndoUI === "function") updateCompletionUndoUI();
+  });
   window.addEventListener("beforeunload", () => {
     if (typeof window.flushPendingSave === "function") window.flushPendingSave();
   });
