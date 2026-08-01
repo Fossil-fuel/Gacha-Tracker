@@ -4171,6 +4171,48 @@ input[type="date"] {
   font-weight: 500;
 }
 
+.extracurricular-ocr-drop {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  cursor: pointer;
+}
+
+.extracurricular-ocr-drop.is-dragover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
+}
+
+.extracurricular-ocr-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.extracurricular-ocr-drop-text {
+  flex: 1 1 10rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.extracurricular-ocr-skip-desc {
+  margin-top: 0.55rem;
+}
+
+.extracurricular-ocr-row .settings-hint {
+  display: block;
+  margin-top: 0.4rem;
+}
+
 /* Fill when on, outline when off (no check mark) — shared checkbox toggles */
 .fill-toggle {
   appearance: none;

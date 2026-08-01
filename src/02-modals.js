@@ -2826,6 +2826,8 @@
   }
 
   const shareCardSelected = new Set();
+  /** Once the user Clears or toggles pills, empty selection must stay empty (do not re-select all). */
+  let shareCardSelectionTouched = false;
 
   function syncShareCardCustomRow() {
     const daysEl = qs("settingsShareCardDays");
@@ -2853,7 +2855,8 @@
     const wrap = qs("settingsShareCardGames");
     if (!wrap) return;
     const games = typeof getAllGames === "function" ? getAllGames() : [];
-    if (shareCardSelected.size === 0 && games.length) {
+    // Default to all games only before the user has touched the selector.
+    if (!shareCardSelectionTouched && shareCardSelected.size === 0 && games.length) {
       games.forEach((g) => shareCardSelected.add(g.id));
     }
     // Drop ids for games that no longer exist
@@ -2877,6 +2880,7 @@
       btn.setAttribute("aria-pressed", on ? "true" : "false");
       if (on) btn.classList.add("filled");
       btn.addEventListener("click", () => {
+        shareCardSelectionTouched = true;
         if (shareCardSelected.has(game.id)) shareCardSelected.delete(game.id);
         else shareCardSelected.add(game.id);
         renderShareCardGamePills();
@@ -3072,12 +3076,14 @@
     const shareAllBtn = qs("settingsShareCardSelectAllBtn");
     if (shareAllBtn) shareAllBtn.addEventListener("click", () => {
       const games = typeof getAllGames === "function" ? getAllGames() : [];
+      shareCardSelectionTouched = true;
       shareCardSelected.clear();
       games.forEach((g) => shareCardSelected.add(g.id));
       renderShareCardGamePills();
     });
     const shareNoneBtn = qs("settingsShareCardSelectNoneBtn");
     if (shareNoneBtn) shareNoneBtn.addEventListener("click", () => {
+      shareCardSelectionTouched = true;
       shareCardSelected.clear();
       renderShareCardGamePills();
     });

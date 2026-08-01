@@ -431,6 +431,19 @@
       </div>
       <form id="extracurricularTaskModalForm" class="modal-form">
         <div class="modal-body">
+        <div class="form-row extracurricular-ocr-row">
+          <label>Fill from screenshot (OCR)</label>
+          <div id="extracurricularOcrDrop" class="extracurricular-ocr-drop" tabindex="0" role="button" aria-label="Drop or paste event screenshot">
+            <input type="file" id="extracurricularOcrFile" accept="image/*" class="extracurricular-ocr-file" aria-label="Choose screenshot image" />
+            <span class="extracurricular-ocr-drop-text">Drop image, paste, or choose file</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="extracurricularOcrChooseBtn">Choose image</button>
+          </div>
+          <label class="task-menu-checkbox-label extracurricular-ocr-skip-desc">
+            <input id="extracurricularOcrSkipDescription" type="checkbox" />
+            <span>Skip description</span>
+          </label>
+          <span class="settings-hint" id="extracurricularOcrStatus">Reads event name and time left (e.g. 37d). When Skip description is on, description is left alone.</span>
+        </div>
         <div class="form-row">
           <label for="extracurricularTaskName">Task name</label>
           <input id="extracurricularTaskName" type="text" placeholder="Task name" autocomplete="off" required />

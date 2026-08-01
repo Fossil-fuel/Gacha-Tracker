@@ -8735,6 +8735,8 @@
   }
 
   const shareCardSelected = new Set();
+  /** Once the user Clears or toggles pills, empty selection must stay empty (do not re-select all). */
+  let shareCardSelectionTouched = false;
 
   function syncShareCardCustomRow() {
     const daysEl = qs("settingsShareCardDays");
@@ -8762,7 +8764,8 @@
     const wrap = qs("settingsShareCardGames");
     if (!wrap) return;
     const games = typeof getAllGames === "function" ? getAllGames() : [];
-    if (shareCardSelected.size === 0 && games.length) {
+    // Default to all games only before the user has touched the selector.
+    if (!shareCardSelectionTouched && shareCardSelected.size === 0 && games.length) {
       games.forEach((g) => shareCardSelected.add(g.id));
     }
     // Drop ids for games that no longer exist
@@ -8786,6 +8789,7 @@
       btn.setAttribute("aria-pressed", on ? "true" : "false");
       if (on) btn.classList.add("filled");
       btn.addEventListener("click", () => {
+        shareCardSelectionTouched = true;
         if (shareCardSelected.has(game.id)) shareCardSelected.delete(game.id);
         else shareCardSelected.add(game.id);
         renderShareCardGamePills();
@@ -8981,12 +8985,14 @@
     const shareAllBtn = qs("settingsShareCardSelectAllBtn");
     if (shareAllBtn) shareAllBtn.addEventListener("click", () => {
       const games = typeof getAllGames === "function" ? getAllGames() : [];
+      shareCardSelectionTouched = true;
       shareCardSelected.clear();
       games.forEach((g) => shareCardSelected.add(g.id));
       renderShareCardGamePills();
     });
     const shareNoneBtn = qs("settingsShareCardSelectNoneBtn");
     if (shareNoneBtn) shareNoneBtn.addEventListener("click", () => {
+      shareCardSelectionTouched = true;
       shareCardSelected.clear();
       renderShareCardGamePills();
     });
@@ -12800,6 +12806,9 @@
     }
 
     updateExtracurricularTimeRemainingDisplay();
+    setExtracurricularOcrStatus(
+      "Reads event name and time left (e.g. 37d). When Skip description is on, description is left alone."
+    );
 
     if (modal) {
       modal.hidden = false;
@@ -12833,6 +12842,419 @@
 
   const extracurricularTaskModalState = { task: null };
 
+  const OCR_UI_NOISE = [
+    "event demo",
+    "event details",
+    "outfit reward",
+    "current revenue",
+    "current phase",
+    "time remaining",
+    "ridu chronicles",
+    "summer vibes",
+    "select all",
+    "unselect all",
+    "fill from screenshot",
+  ];
+
+  function loadScriptOnce(src, globalName) {
+    return new Promise((resolve, reject) => {
+      if (globalName && typeof window[globalName] !== "undefined") {
+        resolve(window[globalName]);
+        return;
+      }
+      const existing = document.querySelector('script[data-ocr-src="' + src + '"]');
+      if (existing) {
+        existing.addEventListener("load", () => resolve(globalName ? window[globalName] : true));
+        existing.addEventListener("error", () => reject(new Error("Failed to load " + src)));
+        return;
+      }
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.dataset.ocrSrc = src;
+      s.onload = () => resolve(globalName ? window[globalName] : true);
+      s.onerror = () => reject(new Error("Failed to load " + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  function ensureTesseractLoaded() {
+    if (typeof window.Tesseract !== "undefined") return Promise.resolve(window.Tesseract);
+    return loadScriptOnce("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js", "Tesseract");
+  }
+
+  function setExtracurricularOcrStatus(msg) {
+    const el = document.getElementById("extracurricularOcrStatus");
+    if (el) el.textContent = msg || "";
+  }
+
+  /** Soften common OCR confusions around event timers (37d, clock badges, etc.). */
+  function normalizeOcrForTimers(text) {
+    let s = String(text || "");
+    // Only same-line digit confusions (do not let \s eat newlines into the next word).
+    s = s.replace(/(\d)[ \t]*[OoQ](?=[ \t]*\d|[ \t]*[dD](?:ays?\b)?|[ \t]*$)/gm, "$10");
+    s = s.replace(/(\d)[ \t]*[Il|!](?=[ \t]*[dD](?:ays?\b)?|[ \t]*$)/gm, "$11");
+    // "37cl" / "37dl" / "37al" often = "37d"
+    s = s.replace(/\b(\d{1,3})[ \t]*(?:cl|dl|al|ol|ci|di)\b/gi, "$1d");
+    // "37 d ." / "37d." / "37·d"
+    s = s.replace(/\b(\d{1,3})[ \t]*[·•.\-_]?[ \t]*[dD]\b/g, "$1d");
+    return s;
+  }
+
+  /**
+   * Pull event countdown from noisy OCR. Prefers 1–120 day values (typical event length).
+   * Returns e.g. "37d" or "6d 7hr" or "".
+   */
+  function extractEventTimeRemainingFromOcr(text) {
+    const normalized = normalizeOcrForTimers(text);
+    const lines = normalized
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const haystacks = [normalized.replace(/\s+/g, " "), ...lines];
+
+    const candidates = [];
+    const push = (days, hours, mins, score, source) => {
+      const d = Number(days);
+      if (!Number.isFinite(d) || d < 1 || d > 120) return;
+      const h = hours != null && hours !== "" ? Number(hours) : null;
+      const m = mins != null && mins !== "" ? Number(mins) : null;
+      if (h != null && (!Number.isFinite(h) || h > 23)) return;
+      if (m != null && (!Number.isFinite(m) || m > 59)) return;
+      let out = d + "d";
+      if (h) out += " " + h + "hr";
+      if (m) out += " " + m + "m";
+      candidates.push({ out, days: d, score: score + (d >= 7 && d <= 60 ? 2 : 0), source });
+    };
+
+    haystacks.forEach((chunk, idx) => {
+      const lineBonus = idx > 0 && chunk.length <= 12 ? 3 : 0;
+      let m;
+      const reFull =
+        /\b(\d{1,3})\s*d(?:ays?)?(?:\s*(\d{1,2})\s*(?:h|hr|hrs|hours?))?(?:\s*(\d{1,2})\s*(?:m|min|mins|minutes?))?\b/gi;
+      while ((m = reFull.exec(chunk)) !== null) {
+        push(m[1], m[2], m[3], 10 + lineBonus, m[0]);
+      }
+      const reGlued = /\b(\d{1,3})d\b/gi;
+      while ((m = reGlued.exec(chunk)) !== null) {
+        push(m[1], null, null, 9 + lineBonus, m[0]);
+      }
+      // "37 days left", "Ends in 37 days"
+      const reEnds = /(?:ends?\s+in|remaining|left)\s*:?\s*(\d{1,3})\s*d(?:ays?)?/gi;
+      while ((m = reEnds.exec(chunk)) !== null) {
+        push(m[1], null, null, 12 + lineBonus, m[0]);
+      }
+      // Short line that is only a plausible day count (clock badge OCR dropped the "d")
+      if (idx > 0 && /^(\d{1,3})$/.test(chunk)) {
+        const n = Number(chunk);
+        if (n >= 2 && n <= 90) push(n, null, null, 4, chunk);
+      }
+      // "37" next to leftover junk from a clock icon: "O 37d", "* 37"
+      const reBadge = /(?:^|[\s*•·▪︎○◯◉⏰⏱])(\d{1,3})\s*[dD]?(?:\s|$)/g;
+      while ((m = reBadge.exec(chunk)) !== null) {
+        if (/d/i.test(m[0])) push(m[1], null, null, 8 + lineBonus, m[0]);
+      }
+    });
+
+    if (!candidates.length) return "";
+    candidates.sort((a, b) => b.score - a.score || b.days - a.days);
+    return candidates[0].out;
+  }
+
+  /**
+   * Heuristic parse of event-banner OCR text → { label, timeRemaining, description, gameHint }.
+   */
+  function parseExtracurricularScreenshotText(text) {
+    const raw = String(text || "").replace(/\r/g, "\n");
+    const lines = raw
+      .split("\n")
+      .map((l) => l.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+
+    const joined = lines.join(" ");
+    const timeRemaining = extractEventTimeRemainingFromOcr(raw);
+
+    const isNoise = (line) => {
+      const low = line.toLowerCase();
+      if (OCR_UI_NOISE.some((n) => low === n || low.includes(n))) return true;
+      if (/^\d+([./,]\d+)*$/.test(line)) return true;
+      if (/^\d+\s*\/\s*[\d,]+$/.test(line)) return true;
+      if (!/[A-Za-z\u00C0-\u024F]/.test(line)) return true;
+      if (line.length < 4) return true;
+      return false;
+    };
+
+    const titleCandidates = lines
+      .map((line, idx) => {
+        let cleaned = line.replace(/\s*\(([ivx]+)\)\s*$/i, "").trim();
+        cleaned = cleaned.replace(/^["'“”]+|["'“”]+$/g, "").trim();
+        return { line: cleaned, idx };
+      })
+      .filter((c) => !isNoise(c.line) && c.line.length <= 80 && /[A-Za-z\u00C0-\u024F]{3,}/.test(c.line));
+
+    let label = "";
+    if (titleCandidates.length) {
+      titleCandidates.sort((a, b) => {
+        const score = (c) => {
+          const words = c.line.split(/\s+/).length;
+          const early = Math.max(0, 12 - c.idx);
+          const mixed = /[a-z]/.test(c.line) && /[A-Z]/.test(c.line) ? 3 : 0;
+          return early * 2 + Math.min(words, 6) + mixed;
+        };
+        return score(b) - score(a);
+      });
+      label = titleCandidates[0].line;
+    }
+
+    const descLines = lines.filter((line) => {
+      if (isNoise(line)) return false;
+      if (label && line.toLowerCase().includes(label.toLowerCase().slice(0, Math.min(12, label.length)))) return false;
+      if (timeRemaining && line.toLowerCase().includes(timeRemaining.toLowerCase())) return false;
+      return line.length >= 40 && /[a-z]/i.test(line);
+    });
+    const description = descLines.slice(0, 3).join(" ").trim();
+
+    let gameHint = "";
+    const lowAll = joined.toLowerCase();
+    if (/\bzzz\b|zenless|ridu chronicles|hollow zero|new eridu/.test(lowAll)) gameHint = "zzz";
+    else if (/\bhsr\b|honkai star rail|trailblaze|divergent universe/.test(lowAll)) gameHint = "hsr";
+    else if (/\bhi3\b|honkai impact|superstring|memorial arena/.test(lowAll)) gameHint = "hi3";
+    else if (/\bwuthering|whimpering wastes|tower of adversity/.test(lowAll)) gameHint = "ww";
+    else if (/\bpgr\b|punishing gray|punishing grey|pain cage|warzone/.test(lowAll)) gameHint = "pgr";
+    else if (/\bendfield|arknights/.test(lowAll)) gameHint = "akendfield";
+
+    return { label, timeRemaining, description, gameHint, rawText: raw };
+  }
+
+  function guessExtracurricularGameId(hint) {
+    if (!hint) return "";
+    const games = typeof getAllGames === "function" ? getAllGames() : state.games || [];
+    const byId = games.find((g) => String(g.id).toLowerCase() === hint);
+    if (byId) return byId.id;
+    const presets = {
+      zzz: [/zenless/i, /\bzzz\b/i],
+      hsr: [/star rail/i, /\bhsr\b/i],
+      hi3: [/impact 3/i, /\bhi3\b/i],
+      ww: [/wuthering/i],
+      pgr: [/punishing/i, /\bpgr\b/i],
+      akendfield: [/endfield/i, /arknights/i],
+    };
+    const reList = presets[hint] || [];
+    const hit = games.find((g) => reList.some((re) => re.test(g.name || "") || re.test(g.id || "")));
+    return hit ? hit.id : "";
+  }
+
+  function applyExtracurricularOcrResult(parsed, opts) {
+    const o = opts || {};
+    const skipDescription = !!o.skipDescription;
+    if (!parsed) return;
+
+    const nameInput = document.getElementById("extracurricularTaskName");
+    const descInput = document.getElementById("extracurricularTaskDescription");
+    const gameSelect = document.getElementById("extracurricularTaskGame");
+    const remainingInput = document.getElementById("extracurricularTimeRemainingInput");
+    const endTBDInput = document.getElementById("extracurricularTaskEndDateTBD");
+
+    if (parsed.label && nameInput) nameInput.value = parsed.label;
+
+    if (parsed.timeRemaining && remainingInput) {
+      if (endTBDInput && endTBDInput.checked) {
+        endTBDInput.checked = false;
+        if (typeof endTBDInput.onchange === "function") endTBDInput.onchange();
+        else endTBDInput.dispatchEvent(new Event("change"));
+      }
+      remainingInput.value = parsed.timeRemaining;
+      applyExtracurricularTimeRemainingFromInput();
+    }
+
+    if (!skipDescription && parsed.description && descInput) {
+      descInput.value = parsed.description;
+    }
+
+    if (parsed.gameHint && gameSelect && !gameSelect.value) {
+      const gid = guessExtracurricularGameId(parsed.gameHint);
+      if (gid) gameSelect.value = gid;
+    }
+  }
+
+  function loadImageElement(fileOrBlob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(fileOrBlob);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not load image"));
+      };
+      img.src = url;
+    });
+  }
+
+  /**
+   * Upscale + contrast boost; optional top-band crop for event timers in the header.
+   * Returns a canvas (Tesseract accepts canvas/HTMLImageElement).
+   */
+  function preprocessScreenshotForOcr(img, opts) {
+    const o = opts || {};
+    const topFraction = o.topFraction != null ? o.topFraction : 1;
+    const scale = o.scale != null ? o.scale : 2;
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    const cropH = Math.max(1, Math.round(srcH * Math.min(1, Math.max(0.15, topFraction))));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(srcW * scale));
+    canvas.height = Math.max(1, Math.round(cropH * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return canvas;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, 0, 0, srcW, cropH, 0, 0, canvas.width, canvas.height);
+    try {
+      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = frame.data;
+      for (let i = 0; i < d.length; i += 4) {
+        // luma + contrast stretch toward black/white (helps white outlined UI text)
+        let y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        y = (y - 128) * 1.35 + 128;
+        y = y < 0 ? 0 : y > 255 ? 255 : y;
+        // Soft threshold: keep midtones but punch text
+        const v = y > 170 ? 255 : y < 90 ? 0 : y;
+        d[i] = d[i + 1] = d[i + 2] = v;
+      }
+      ctx.putImageData(frame, 0, 0);
+    } catch (_) {
+      // tainted canvas / security — return unprocessed draw
+    }
+    return canvas;
+  }
+
+  async function recognizeScreenshotText(Tesseract, fileOrBlob) {
+    const img = await loadImageElement(fileOrBlob);
+    const full = preprocessScreenshotForOcr(img, { topFraction: 1, scale: 2 });
+    const top = preprocessScreenshotForOcr(img, { topFraction: 0.42, scale: 2.5 });
+    const worker = await Tesseract.createWorker("eng", 1, {
+      logger: () => {},
+    });
+    try {
+      // Sparse UI text helps timers/titles on busy art
+      if (worker.setParameters) {
+        await worker.setParameters({
+          tessedit_pageseg_mode: "11",
+          preserve_interword_spaces: "1",
+        });
+      }
+      const [fullRes, topRes] = await Promise.all([worker.recognize(full), worker.recognize(top)]);
+      const a = (fullRes && fullRes.data && fullRes.data.text) || "";
+      const b = (topRes && topRes.data && topRes.data.text) || "";
+      return (a + "\n" + b).trim();
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  async function runExtracurricularScreenshotOcr(fileOrBlob) {
+    if (!fileOrBlob) return;
+    const skipEl = document.getElementById("extracurricularOcrSkipDescription");
+    const skipDescription = !!(skipEl && skipEl.checked);
+    setExtracurricularOcrStatus("Loading OCR engine…");
+    try {
+      const Tesseract = await ensureTesseractLoaded();
+      setExtracurricularOcrStatus("Reading screenshot (enhancing image)…");
+      const text = await recognizeScreenshotText(Tesseract, fileOrBlob);
+      const parsed = parseExtracurricularScreenshotText(text);
+      if (!parsed.label && !parsed.timeRemaining && !parsed.description) {
+        const preview = text.replace(/\s+/g, " ").trim().slice(0, 100);
+        setExtracurricularOcrStatus(
+          "Couldn’t read event details — try a tighter crop of the title and timer." +
+            (preview ? " OCR saw: “" + preview + "…”" : "")
+        );
+        return;
+      }
+      applyExtracurricularOcrResult(parsed, { skipDescription });
+      const bits = [];
+      if (parsed.label) bits.push("name");
+      if (parsed.timeRemaining) bits.push("time left (" + parsed.timeRemaining + ")");
+      if (!skipDescription && parsed.description) bits.push("description");
+      if (parsed.gameHint) bits.push("game hint");
+      let status =
+        "Filled: " + (bits.join(", ") || "nothing") + (skipDescription ? " (description skipped)" : "") + ". Review before saving.";
+      if (!parsed.timeRemaining) {
+        const preview = text.replace(/\s+/g, " ").trim().slice(0, 80);
+        status +=
+          " Timer not found — enter time remaining manually." +
+          (preview ? " OCR snippet: “" + preview + "…”" : "");
+      }
+      setExtracurricularOcrStatus(status);
+    } catch (err) {
+      setExtracurricularOcrStatus("OCR failed: " + ((err && err.message) || "unknown error"));
+    }
+  }
+
+  function initExtracurricularOcrFill() {
+    const drop = document.getElementById("extracurricularOcrDrop");
+    const fileInput = document.getElementById("extracurricularOcrFile");
+    const chooseBtn = document.getElementById("extracurricularOcrChooseBtn");
+    if (!drop || !fileInput) return;
+    if (drop.dataset.bound === "1") return;
+    drop.dataset.bound = "1";
+
+    const onFiles = (files) => {
+      const file = files && files[0];
+      if (!file || !String(file.type || "").startsWith("image/")) {
+        setExtracurricularOcrStatus("Please choose an image file.");
+        return;
+      }
+      runExtracurricularScreenshotOcr(file);
+    };
+
+    if (chooseBtn) {
+      chooseBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        fileInput.click();
+      });
+    }
+    fileInput.addEventListener("change", () => {
+      onFiles(fileInput.files);
+      fileInput.value = "";
+    });
+    drop.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      drop.classList.add("is-dragover");
+    });
+    drop.addEventListener("dragleave", () => drop.classList.remove("is-dragover"));
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      drop.classList.remove("is-dragover");
+      onFiles(e.dataTransfer && e.dataTransfer.files);
+    });
+    drop.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    document.addEventListener("paste", (e) => {
+      const modal = document.getElementById("extracurricularTaskModal");
+      if (!modal || modal.hidden) return;
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item && item.type && item.type.startsWith("image/")) {
+          const blob = item.getAsFile();
+          if (blob) {
+            e.preventDefault();
+            runExtracurricularScreenshotOcr(blob);
+          }
+          break;
+        }
+      }
+    });
+  }
+
   function initExtracurricularTaskModal() {
     const modal = document.getElementById("extracurricularTaskModal");
     const closeBtn = document.getElementById("extracurricularTaskModalClose");
@@ -12841,6 +13263,7 @@
 
     if (!modal || !form) return;
     initExtracurricularTimeRemainingInput();
+    initExtracurricularOcrFill();
 
     modal.addEventListener("click", (e) => {
       if (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true") closeExtracurricularTaskModal();

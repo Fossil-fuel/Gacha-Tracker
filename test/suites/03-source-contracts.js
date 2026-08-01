@@ -177,6 +177,8 @@ module.exports = {
       'id="settingsShareCardPreviewBtn"',
       'id="settingsShareCardDays"',
       'id="settingsShareCardGames"',
+      'id="extracurricularOcrDrop"',
+      'id="extracurricularOcrSkipDescription"',
       'id="sidebarLastSaved"',
       'id="attendanceSkippedModal"',
       "app.js",
