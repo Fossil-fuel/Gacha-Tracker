@@ -34,6 +34,7 @@ function isMarked(calendar, key, dateStr) {
 
 module.exports = {
   name: "completion-roundtrip",
+  title: "Complete ↔ incomplete round-trip",
   run() {
     const task = {
       label: "WarZone",

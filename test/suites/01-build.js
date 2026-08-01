@@ -9,6 +9,7 @@ const ROOT = path.join(__dirname, "..", "..");
 
 module.exports = {
   name: "build",
+  title: "Build (app.js bundle)",
   run() {
     const result = spawnSync(process.execPath, ["build.js"], {
       cwd: ROOT,

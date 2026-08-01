@@ -13,6 +13,7 @@ function read(rel) {
 
 module.exports = {
   name: "source-contracts",
+  title: "Source & HTML contracts",
   run() {
     const requiredSrc = [
       "00-firebase.js",

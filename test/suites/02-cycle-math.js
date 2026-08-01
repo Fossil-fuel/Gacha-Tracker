@@ -5,6 +5,7 @@ const math = require("../lib/cycle-math");
 
 module.exports = {
   name: "cycle-math",
+  title: "Cycle math & unlock rules",
   run() {
     const painCage = {
       id: "e_pain",

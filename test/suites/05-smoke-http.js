@@ -12,6 +12,7 @@ async function fetchText(url) {
 
 module.exports = {
   name: "smoke-http",
+  title: "Live site smoke (localhost)",
   async run() {
     let html;
     try {
