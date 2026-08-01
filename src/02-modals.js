@@ -3040,7 +3040,15 @@
 
     const exportBtn = qs("settingsExportBtn");
     if (exportBtn) exportBtn.addEventListener("click", () => {
-      const payload = JSON.stringify({ [STORAGE_KEY]: localStorage.getItem(STORAGE_KEY) }, null, 2);
+      // Ensure debounced edits are on disk before reading localStorage.
+      if (typeof flushPendingSave === "function") flushPendingSave();
+      save({ immediate: true });
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        alert("Nothing to export yet — local save is empty.");
+        return;
+      }
+      const payload = JSON.stringify({ [STORAGE_KEY]: raw }, null, 2);
       const blob = new Blob([payload], { type: "application/json" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -3141,17 +3149,28 @@
       reader.onload = () => {
         try {
           const parsed = JSON.parse(reader.result);
-          const raw = parsed ? parsed[STORAGE_KEY] : null;
-          if (!raw) throw new Error("Invalid backup file");
-          const data = JSON.parse(raw);
-          if (!data || !data.games) throw new Error("Invalid backup file");
+          let data = null;
+          // Preferred backup shape: { "gacha-tracker": "<json string>" }
+          if (parsed && typeof parsed[STORAGE_KEY] === "string") {
+            data = JSON.parse(parsed[STORAGE_KEY]);
+          } else if (parsed && parsed[STORAGE_KEY] && typeof parsed[STORAGE_KEY] === "object") {
+            // Tolerate already-parsed inner payload
+            data = parsed[STORAGE_KEY];
+          } else if (parsed && Array.isArray(parsed.games)) {
+            // Tolerate raw save payload without wrapper
+            data = parsed;
+          }
+          if (!data || !Array.isArray(data.games)) {
+            throw new Error("Invalid backup file (expected Export data JSON)");
+          }
           const keys = Object.keys(data);
           keys.forEach((k) => {
             if (state[k] !== undefined && k !== "lastSimulationSnapshot") state[k] = data[k];
           });
           state.lastSimulationSnapshot = null;
           if (typeof clearCompletionUndoStack === "function") clearCompletionUndoStack();
-          save();
+          // Must flush before load(), or load() reloads the previous localStorage and undoes the import.
+          save({ immediate: true });
           load();
           renderAll();
           const report = qs("settingsDebugReport");
@@ -3160,6 +3179,7 @@
               "Import complete. Suggested next step: open Debug and scan for conflicts.\n\n" +
               formatConflictScanReport(scanDataConflicts());
           }
+          alert("Import complete. Your local backup is now loaded on this site.");
           closeSettingsModal();
         } catch (err) {
           alert("Failed to import: " + (err.message || "Invalid file"));
