@@ -3,6 +3,10 @@
   "private": true,
   "scripts": {
     "dev": "npx --yes serve -l 4000 .",
-    "start": "npx --yes serve -l 4000 ."
+    "start": "npx --yes serve -l 4000 .",
+    "build": "node build.js",
+    "test": "node test/run.js",
+    "test:list": "node test/run.js --list",
+    "benchmark:info": "node -e \"console.log('Tag: benchmark/2026-07-31-pre-refactor'); console.log('Restore: git switch --detach benchmark/2026-07-31-pre-refactor'); console.log('Or reset main (destructive): git reset --hard benchmark/2026-07-31-pre-refactor');\""
   }
 }
