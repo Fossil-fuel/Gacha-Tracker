@@ -1677,7 +1677,26 @@
     updateUnitToggles("timeLimit", lUnit);
 
     setExtraFields(taskType, task);
+    setActiveBannerUi("task");
+    taskModal.bannerTarget = "board";
+    const loaded = loadTaskBannersFromTask(task);
+    taskModal.bannerSource = loaded.source;
+    taskModal.bannerViews = loaded.views;
+    taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    resetTaskBannerCropState();
+    syncTaskBannerTargetButtons();
+    syncTaskBannerPreview();
     setModalOpen(true);
+    requestAnimationFrame(() => {
+      resizeTaskBannerCropStage();
+      drawTaskBannerCrop();
+      if (taskModal.bannerSource) {
+        loadTaskBannerSourceFromUrl(taskModal.bannerSource, { keepViews: true }).catch(() => {});
+      } else {
+        syncTaskBannerEditorFrames();
+        drawTaskBannerCrop();
+      }
+    });
     updateTaskTimeRemainingDisplay();
 
     // focus name input for quick typing
@@ -1689,6 +1708,13 @@
     taskModal.gameId = null;
     taskModal.taskType = null;
     taskModal.taskId = null;
+    taskModal.bannerTarget = "board";
+    taskModal.bannerSource = null;
+    taskModal.bannerViews = emptyTaskBannerViews();
+    taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    resetTaskBannerCropState();
+    syncTaskBannerPreview();
+    syncTaskBannerTargetButtons();
   }
 
   function getPreset(presetId) {
@@ -2464,7 +2490,7 @@
     if (titleEl) titleEl.textContent = layerLabel;
     modal.hidden = false;
     modal.setAttribute("aria-hidden", "false");
-    const rgb = hexToRgb(hex || "#7c3aed");
+    const rgb = hexToRgb(hex || "#a855f7");
     if (rgb) {
       colorPickerHsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
     }
@@ -2635,7 +2661,7 @@
       btn.dataset.presetId = preset.id;
       const swatch = document.createElement("span");
       swatch.className = "settings-saved-preset-swatch";
-      swatch.style.background = preset.colors?.accent || "#7c3aed";
+      swatch.style.background = preset.colors?.accent || "#a855f7";
       const label = document.createElement("span");
       label.className = "settings-saved-preset-name";
       label.textContent = preset.name || preset.id;
@@ -2999,22 +3025,77 @@
     }
 
 
+    function setSettingsSectionDropdownOpen(open) {
+      const trigger = qs("settingsSectionTrigger");
+      const menu = qs("settingsSectionMenu");
+      if (!trigger || !menu) return;
+      const isOpen = !!open;
+      trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      menu.hidden = !isOpen;
+    }
+
+    function syncSettingsSectionDropdown(section) {
+      const labelEl = qs("settingsSectionTriggerLabel");
+      const menu = qs("settingsSectionMenu");
+      if (!menu) return;
+      let label = "Appearance";
+      menu.querySelectorAll('[role="option"]').forEach((opt) => {
+        const on = opt.getAttribute("data-settings-section") === section;
+        opt.setAttribute("aria-selected", on ? "true" : "false");
+        if (on) label = (opt.textContent || "").trim() || label;
+      });
+      if (labelEl) labelEl.textContent = label;
+    }
+
+    function activateSettingsSection(section) {
+      if (!section) return;
+      document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((b) => {
+        const on = b.getAttribute("data-settings-section") === section;
+        b.classList.toggle("active", on);
+        if (on) b.setAttribute("aria-current", "page");
+        else b.removeAttribute("aria-current");
+      });
+      document.querySelectorAll(".settings-section").forEach((sectionEl) => {
+        sectionEl.classList.remove("active");
+      });
+      const target = document.getElementById("settings-section-" + section);
+      if (target) target.classList.add("active");
+      syncSettingsSectionDropdown(section);
+      setSettingsSectionDropdownOpen(false);
+    }
+
     document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const section = btn.getAttribute("data-settings-section");
-        document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((b) => {
-          b.classList.remove("active");
-          b.removeAttribute("aria-current");
-        });
-        btn.classList.add("active");
-        btn.setAttribute("aria-current", "page");
-        document.querySelectorAll(".settings-section").forEach((sectionEl) => {
-          sectionEl.classList.remove("active");
-        });
-        const target = document.getElementById("settings-section-" + section);
-        if (target) target.classList.add("active");
+        activateSettingsSection(btn.getAttribute("data-settings-section"));
       });
     });
+
+    const settingsSectionTrigger = qs("settingsSectionTrigger");
+    const settingsSectionMenu = qs("settingsSectionMenu");
+    const settingsSectionDropdown = qs("settingsSectionDropdown");
+    if (settingsSectionTrigger && settingsSectionMenu) {
+      settingsSectionTrigger.addEventListener("click", (e) => {
+        e.preventDefault();
+        const open = settingsSectionTrigger.getAttribute("aria-expanded") === "true";
+        setSettingsSectionDropdownOpen(!open);
+      });
+      settingsSectionMenu.querySelectorAll('[role="option"]').forEach((opt) => {
+        opt.addEventListener("click", () => {
+          activateSettingsSection(opt.getAttribute("data-settings-section"));
+        });
+      });
+      document.addEventListener("click", (e) => {
+        if (!settingsSectionDropdown || settingsSectionMenu.hidden) return;
+        if (settingsSectionDropdown.contains(e.target)) return;
+        setSettingsSectionDropdownOpen(false);
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && settingsSectionTrigger.getAttribute("aria-expanded") === "true") {
+          setSettingsSectionDropdownOpen(false);
+          settingsSectionTrigger.focus();
+        }
+      });
+    }
 
     const textSizeEl = qs("settingsTextSize");
     if (textSizeEl) textSizeEl.addEventListener("change", () => {
@@ -3094,11 +3175,11 @@
 
     const exportBtn = qs("settingsExportBtn");
     if (exportBtn) exportBtn.addEventListener("click", () => {
-      // Ensure debounced edits are on disk before reading localStorage.
+      // Ensure debounced edits are flushed, then export the in-memory full payload (includes images).
       if (typeof flushPendingSave === "function") flushPendingSave();
       save({ immediate: true });
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      const raw = JSON.stringify(buildSavePayload());
+      if (!raw || raw === "{}") {
         alert("Nothing to export yet — local save is empty.");
         return;
       }
@@ -3493,6 +3574,1039 @@
 
   }
 
+  function emptyBannerView(aspect) {
+    return {
+      aspect: (Number.isFinite(aspect) && aspect > 0) ? aspect : 16 / 9,
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+    };
+  }
+
+  function emptyTaskBannerViews() {
+    return {
+      home: null,
+      games: null,
+      board: null,
+    };
+  }
+
+  function defaultFitBannerView(stageAspect, imageAspect) {
+    const aspect = (Number(stageAspect) > 0) ? Number(stageAspect) : 16 / 9;
+    const imgAspect = (Number(imageAspect) > 0) ? Number(imageAspect) : aspect;
+    if (imgAspect >= aspect) {
+      const h = aspect / imgAspect;
+      return { aspect: aspect, x: 0, y: (1 - h) / 2, w: 1, h: h };
+    }
+    const w = imgAspect / aspect;
+    return { aspect: aspect, x: (1 - w) / 2, y: 0, w: w, h: 1 };
+  }
+
+  function cloneBannerView(view, fallbackAspect) {
+    if (!view || typeof view !== "object") return emptyBannerView(fallbackAspect);
+    return {
+      aspect: (Number(view.aspect) > 0) ? Number(view.aspect) : (fallbackAspect || 16 / 9),
+      x: Number.isFinite(Number(view.x)) ? Number(view.x) : 0,
+      y: Number.isFinite(Number(view.y)) ? Number(view.y) : 0,
+      w: Number(view.w) > 0 ? Number(view.w) : 1,
+      h: Number(view.h) > 0 ? Number(view.h) : 1,
+    };
+  }
+
+  function resolveTaskBannerSource(task) {
+    if (!task) return null;
+    if (task.bannerSourceImage) return task.bannerSourceImage;
+    return task.bannerImage || task.bannerHomeImage || task.bannerGamesImage || null;
+  }
+
+  function resolveTaskBannerView(task, surface) {
+    const s = surface || "board";
+    const fallback = (TASK_BANNER_TARGETS[s] || TASK_BANNER_TARGETS.board).aspect;
+    if (task && task.bannerViews && task.bannerViews[s]) {
+      return cloneBannerView(task.bannerViews[s], fallback);
+    }
+    return null;
+  }
+
+  function loadTaskBannersFromTask(task) {
+    const source = resolveTaskBannerSource(task);
+    const views = emptyTaskBannerViews();
+    if (task && task.bannerViews) {
+      views.home = task.bannerViews.home ? cloneBannerView(task.bannerViews.home, TASK_BANNER_TARGETS.home.aspect) : null;
+      views.games = task.bannerViews.games ? cloneBannerView(task.bannerViews.games, TASK_BANNER_TARGETS.games.aspect) : null;
+      views.board = task.bannerViews.board ? cloneBannerView(task.bannerViews.board, TASK_BANNER_TARGETS.board.aspect) : null;
+    }
+    return { source: source, views: views };
+  }
+
+  function getActiveTaskBannerView() {
+    const key = taskModal.bannerTarget || "board";
+    if (!taskModal.bannerViews) taskModal.bannerViews = emptyTaskBannerViews();
+    const fallback = (TASK_BANNER_TARGETS[key] || TASK_BANNER_TARGETS.board).aspect;
+    if (!taskModal.bannerViews[key]) return null;
+    return cloneBannerView(taskModal.bannerViews[key], fallback);
+  }
+
+  function applyTaskBannersToSavePayload(next) {
+    if (taskModal.bannerSource) {
+      next.bannerSourceImage = taskModal.bannerSource;
+      const img = taskBannerCrop.sourceImg;
+      const imageAspect = (img && img.naturalWidth > 0)
+        ? (img.naturalWidth / img.naturalHeight)
+        : 16 / 9;
+      const ensureView = (key, fallbackAspect) => {
+        if (taskModal.bannerViews && taskModal.bannerViews[key]) {
+          return cloneBannerView(taskModal.bannerViews[key], fallbackAspect);
+        }
+        return defaultFitBannerView(fallbackAspect, imageAspect);
+      };
+      next.bannerViews = {
+        home: ensureView("home", TASK_BANNER_TARGETS.home.aspect),
+        games: ensureView("games", TASK_BANNER_TARGETS.games.aspect),
+        board: ensureView("board", TASK_BANNER_TARGETS.board.aspect),
+      };
+    } else {
+      next.bannerSourceImage = undefined;
+      next.bannerViews = undefined;
+    }
+    next.bannerImage = undefined;
+    next.bannerAspect = undefined;
+    next.bannerShape = undefined;
+    next.bannerHomeImage = undefined;
+    next.bannerHomeAspect = undefined;
+    next.bannerGamesImage = undefined;
+    next.bannerGamesAspect = undefined;
+  }
+
+  function clearTaskBannerFieldsFromMerged(merged) {
+    if (!taskModal.bannerSource) {
+      delete merged.bannerSourceImage;
+      delete merged.bannerViews;
+    }
+    delete merged.bannerImage;
+    delete merged.bannerAspect;
+    delete merged.bannerShape;
+    delete merged.bannerHomeImage;
+    delete merged.bannerHomeAspect;
+    delete merged.bannerGamesImage;
+    delete merged.bannerGamesAspect;
+  }
+
+  function resetTaskBannerCropState() {
+    taskBannerCrop.sourceImg = null;
+    taskBannerCrop.imgX = 0;
+    taskBannerCrop.imgY = 0;
+    taskBannerCrop.imgW = 0;
+    taskBannerCrop.imgH = 0;
+    taskBannerCrop.cropX = 0;
+    taskBannerCrop.cropY = 0;
+    taskBannerCrop.cropW = 0;
+    taskBannerCrop.cropH = 0;
+    taskBannerCrop.mode = null;
+    taskBannerCrop.clear = false;
+  }
+
+  function getTaskBannerCropAspect() {
+    const target = taskModal.bannerTarget || "board";
+    if (target === "home" || target === "games") {
+      return (TASK_BANNER_TARGETS[target] || TASK_BANNER_TARGETS.home).aspect;
+    }
+    if (taskBannerCrop.cropW > 0 && taskBannerCrop.cropH > 0) {
+      return taskBannerCrop.cropW / taskBannerCrop.cropH;
+    }
+    if (taskModal.bannerViews && taskModal.bannerViews.board && Number(taskModal.bannerViews.board.aspect) > 0) {
+      return Number(taskModal.bannerViews.board.aspect);
+    }
+    const img = taskBannerCrop.sourceImg;
+    if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+      return img.naturalWidth / img.naturalHeight;
+    }
+    return 16 / 9;
+  }
+
+  function getTaskBannerImageAspect() {
+    const img = taskBannerCrop.sourceImg;
+    if (!img || !(img.naturalWidth > 0) || !(img.naturalHeight > 0)) return 16 / 9;
+    return img.naturalWidth / img.naturalHeight;
+  }
+
+  function softClampTaskBannerRect(kind) {
+    const stage = TASK_BANNER_STAGE;
+    const margin = 24;
+    const isImg = kind === "img";
+    let x = isImg ? taskBannerCrop.imgX : taskBannerCrop.cropX;
+    let y = isImg ? taskBannerCrop.imgY : taskBannerCrop.cropY;
+    const w = isImg ? taskBannerCrop.imgW : taskBannerCrop.cropW;
+    const h = isImg ? taskBannerCrop.imgH : taskBannerCrop.cropH;
+    if (x + w < margin) x = margin - w;
+    if (y + h < margin) y = margin - h;
+    if (x > stage.w - margin) x = stage.w - margin;
+    if (y > stage.h - margin) y = stage.h - margin;
+    if (isImg) {
+      taskBannerCrop.imgX = x;
+      taskBannerCrop.imgY = y;
+    } else {
+      taskBannerCrop.cropX = x;
+      taskBannerCrop.cropY = y;
+    }
+  }
+
+  function placeTaskBannerCropBox(aspect) {
+    const stage = TASK_BANNER_STAGE;
+    const a = (Number(aspect) > 0) ? Number(aspect) : 16 / 9;
+    const pad = 28;
+    const maxW = Math.max(40, stage.w - pad * 2);
+    const maxH = Math.max(40, stage.h - pad * 2);
+    let cropW;
+    let cropH;
+    if (maxW / maxH > a) {
+      cropH = maxH * 0.82;
+      cropW = cropH * a;
+    } else {
+      cropW = maxW * 0.82;
+      cropH = cropW / a;
+    }
+    if (cropW < TASK_BANNER_CROP_MIN) {
+      cropW = TASK_BANNER_CROP_MIN;
+      cropH = cropW / a;
+    }
+    if (cropH < TASK_BANNER_CROP_MIN) {
+      cropH = TASK_BANNER_CROP_MIN;
+      cropW = cropH * a;
+    }
+    taskBannerCrop.cropW = cropW;
+    taskBannerCrop.cropH = cropH;
+    taskBannerCrop.cropX = (stage.w - cropW) / 2;
+    taskBannerCrop.cropY = (stage.h - cropH) / 2;
+  }
+
+  function fitTaskBannerImageToStage() {
+    const img = taskBannerCrop.sourceImg;
+    if (!img) return;
+    const stage = TASK_BANNER_STAGE;
+    const nw = img.naturalWidth || 1;
+    const nh = img.naturalHeight || 1;
+    const scale = Math.min(stage.w / nw, stage.h / nh) * 0.92;
+    taskBannerCrop.imgW = nw * scale;
+    taskBannerCrop.imgH = nh * scale;
+    taskBannerCrop.imgX = (stage.w - taskBannerCrop.imgW) / 2;
+    taskBannerCrop.imgY = (stage.h - taskBannerCrop.imgH) / 2;
+    placeTaskBannerCropBox(getTaskBannerCropAspect());
+  }
+
+  function applyBannerViewToStage(view) {
+    if (!view || !(Number(view.w) > 0) || !(Number(view.h) > 0)) {
+      fitTaskBannerImageToStage();
+      return;
+    }
+    const aspect = (Number(view.aspect) > 0)
+      ? Number(view.aspect)
+      : getTaskBannerCropAspect();
+    placeTaskBannerCropBox(aspect);
+    const v = cloneBannerView(view, aspect);
+    taskBannerCrop.imgX = taskBannerCrop.cropX + v.x * taskBannerCrop.cropW;
+    taskBannerCrop.imgY = taskBannerCrop.cropY + v.y * taskBannerCrop.cropH;
+    taskBannerCrop.imgW = Math.max(0.001, v.w) * taskBannerCrop.cropW;
+    taskBannerCrop.imgH = Math.max(0.001, v.h) * taskBannerCrop.cropH;
+    // Keep natural image aspect (no stretch)
+    const nat = getTaskBannerImageAspect();
+    const midX = taskBannerCrop.imgX + taskBannerCrop.imgW / 2;
+    const midY = taskBannerCrop.imgY + taskBannerCrop.imgH / 2;
+    if (taskBannerCrop.imgW / Math.max(0.001, taskBannerCrop.imgH) > nat) {
+      taskBannerCrop.imgH = taskBannerCrop.imgW / nat;
+    } else {
+      taskBannerCrop.imgW = taskBannerCrop.imgH * nat;
+    }
+    taskBannerCrop.imgX = midX - taskBannerCrop.imgW / 2;
+    taskBannerCrop.imgY = midY - taskBannerCrop.imgH / 2;
+  }
+
+  function captureBannerViewFromStage() {
+    const cw = Math.max(0.001, taskBannerCrop.cropW);
+    const ch = Math.max(0.001, taskBannerCrop.cropH);
+    return {
+      aspect: cw / ch,
+      x: (taskBannerCrop.imgX - taskBannerCrop.cropX) / cw,
+      y: (taskBannerCrop.imgY - taskBannerCrop.cropY) / ch,
+      w: taskBannerCrop.imgW / cw,
+      h: taskBannerCrop.imgH / ch,
+    };
+  }
+
+  function renderBannerViewDataUrl(img, view, maxLong) {
+    if (!img || !view) return null;
+    const aspect = (Number(view.aspect) > 0) ? Number(view.aspect) : 16 / 9;
+    const long = maxLong || 720;
+    let finalW;
+    let finalH;
+    if (aspect >= 1) {
+      finalW = long;
+      finalH = Math.max(1, Math.round(long / aspect));
+    } else {
+      finalH = long;
+      finalW = Math.max(1, Math.round(long * aspect));
+    }
+    const out = document.createElement("canvas");
+    out.width = finalW;
+    out.height = finalH;
+    const ctx = out.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, finalW, finalH);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(
+      img,
+      Number(view.x || 0) * finalW,
+      Number(view.y || 0) * finalH,
+      Math.max(0.001, Number(view.w || 1)) * finalW,
+      Math.max(0.001, Number(view.h || 1)) * finalH
+    );
+    return out.toDataURL("image/jpeg", 0.82);
+  }
+
+  function syncTaskBannerEditorFrames() {
+    const imgFrame = bannerEl("imgFrame");
+    const cropFrame = bannerEl("cropFrame");
+    const has = !!taskBannerCrop.sourceImg && !taskBannerCrop.clear;
+    [imgFrame, cropFrame].forEach((frame) => {
+      if (!frame) return;
+      frame.hidden = !has;
+      frame.setAttribute("aria-hidden", has ? "false" : "true");
+    });
+    if (!has) return;
+    if (imgFrame) {
+      imgFrame.style.left = taskBannerCrop.imgX + "px";
+      imgFrame.style.top = taskBannerCrop.imgY + "px";
+      imgFrame.style.width = taskBannerCrop.imgW + "px";
+      imgFrame.style.height = taskBannerCrop.imgH + "px";
+    }
+    if (cropFrame) {
+      cropFrame.style.left = taskBannerCrop.cropX + "px";
+      cropFrame.style.top = taskBannerCrop.cropY + "px";
+      cropFrame.style.width = taskBannerCrop.cropW + "px";
+      cropFrame.style.height = taskBannerCrop.cropH + "px";
+    }
+  }
+
+  function syncTaskBannerTargetButtons() {
+    const active = taskModal.bannerTarget || "board";
+    const hasSource = !!taskModal.bannerSource;
+    bannerRootEl().querySelectorAll(".task-banner-target-btn").forEach((btn) => {
+      const on = btn.dataset.bannerTarget === active;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      const key = btn.dataset.bannerTarget;
+      const preview = taskModal.bannerPreviewUrls && taskModal.bannerPreviewUrls[key];
+      btn.classList.toggle("has-image", !!(hasSource && preview));
+      const media = btn.querySelector(".task-banner-target-media");
+      if (media) {
+        if (hasSource && preview) {
+          media.style.backgroundImage = "url(\"" + String(preview).replace(/"/g, "%22") + "\")";
+        } else if (hasSource) {
+          media.style.backgroundImage = "url(\"" + String(taskModal.bannerSource).replace(/"/g, "%22") + "\")";
+        } else {
+          media.style.backgroundImage = "";
+        }
+      }
+    });
+  }
+
+  function resizeTaskBannerCropStage() {
+    const canvas = bannerEl("canvas");
+    const wrap = bannerEl("wrap");
+    if (!canvas || !wrap) return;
+    const prevW = TASK_BANNER_STAGE.w || 1;
+    const prevH = TASK_BANNER_STAGE.h || 1;
+    const cssW = Math.max(160, Math.round(wrap.clientWidth || (wrap.parentElement && wrap.parentElement.clientWidth) || 480));
+    // Fixed workspace (not tied to crop aspect) so image + crop can both move/scale
+    const cssH = Math.max(220, Math.min(420, Math.round(cssW * 9 / 16)));
+    if (cssW === TASK_BANNER_STAGE.w && cssH === TASK_BANNER_STAGE.h && canvas.width === cssW && canvas.height === cssH) {
+      return;
+    }
+    TASK_BANNER_STAGE.w = cssW;
+    TASK_BANNER_STAGE.h = cssH;
+    canvas.width = cssW;
+    canvas.height = cssH;
+    wrap.style.height = cssH + "px";
+    if (taskBannerCrop.sourceImg && prevW > 0 && prevH > 0) {
+      const sx = cssW / prevW;
+      const sy = cssH / prevH;
+      taskBannerCrop.imgX *= sx;
+      taskBannerCrop.imgY *= sy;
+      taskBannerCrop.imgW *= sx;
+      taskBannerCrop.imgH *= sy;
+      taskBannerCrop.cropX *= sx;
+      taskBannerCrop.cropY *= sy;
+      taskBannerCrop.cropW *= sx;
+      taskBannerCrop.cropH *= sy;
+    }
+  }
+
+  function drawTaskBannerCrop() {
+    const canvas = bannerEl("canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, w, h);
+    const img = taskBannerCrop.sourceImg;
+    if (!img || taskBannerCrop.clear) {
+      syncTaskBannerEditorFrames();
+      return;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(
+      img,
+      taskBannerCrop.imgX,
+      taskBannerCrop.imgY,
+      taskBannerCrop.imgW,
+      taskBannerCrop.imgH
+    );
+    syncTaskBannerEditorFrames();
+  }
+
+  function commitTaskBannerCrop() {
+    const key = taskModal.bannerTarget || "board";
+    if (!taskModal.bannerViews) taskModal.bannerViews = emptyTaskBannerViews();
+    if (!taskModal.bannerPreviewUrls) {
+      taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    }
+    if (taskBannerCrop.clear || !taskBannerCrop.sourceImg) {
+      taskModal.bannerSource = null;
+      taskModal.bannerViews = emptyTaskBannerViews();
+      taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    } else {
+      taskModal.bannerSource = taskBannerCrop.sourceImg.src || taskModal.bannerSource;
+      const view = captureBannerViewFromStage();
+      if (key === "home" || key === "games") {
+        view.aspect = TASK_BANNER_TARGETS[key].aspect;
+      }
+      taskModal.bannerViews[key] = view;
+      const preview = renderBannerViewDataUrl(taskBannerCrop.sourceImg, view, 360);
+      if (preview) taskModal.bannerPreviewUrls[key] = preview;
+    }
+    syncTaskBannerPreview();
+    syncTaskBannerTargetButtons();
+  }
+
+  function loadTaskBannerSourceFromUrl(url, opts) {
+    const resetViews = !(opts && opts.keepViews === true);
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        taskBannerCrop.sourceImg = img;
+        taskBannerCrop.clear = false;
+        taskModal.bannerSource = url;
+        if (resetViews) {
+          taskModal.bannerViews = emptyTaskBannerViews();
+          taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+        }
+        resizeTaskBannerCropStage();
+        if (resetViews) fitTaskBannerImageToStage();
+        else applyBannerViewToStage(getActiveTaskBannerView());
+        drawTaskBannerCrop();
+        commitTaskBannerCrop();
+        resolve();
+      };
+      img.onerror = () => reject(new Error("Could not load image."));
+      img.src = url;
+    });
+  }
+
+  function getTaskBannerPreviewTaskStub() {
+    const nameInput = bannerEl("nameInput");
+    const label = (nameInput && nameInput.value.trim()) || "Task name";
+    return {
+      label: label,
+      bannerSourceImage: taskModal.bannerSource || null,
+      bannerViews: {
+        home: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.home, TASK_BANNER_TARGETS.home.aspect),
+        games: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.games, TASK_BANNER_TARGETS.games.aspect),
+        board: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.board, TASK_BANNER_TARGETS.board.aspect),
+      },
+    };
+  }
+
+  function getTaskBannerPreviewGame() {
+    if (activeBannerUiKey === "extra") {
+      const gameSelect = qs("extracurricularTaskGame");
+      const gameId = (gameSelect && gameSelect.value) || taskModal.gameId;
+      return getGame(gameId) || { name: (gameSelect && gameSelect.selectedOptions && gameSelect.selectedOptions[0] && gameSelect.selectedOptions[0].textContent) || "Game", iconImage: null };
+    }
+    return getGame(taskModal.gameId) || { name: "Game", iconImage: null };
+  }
+
+  function getTaskBannerPreviewPotential() {
+    if (activeBannerUiKey === "extra") {
+      const potInput = qs("extracurricularTaskCurrency");
+      const n = potInput ? Number(potInput.value) : 0;
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+    const type = taskModal.taskType;
+    const game = getTaskBannerPreviewGame();
+    const taskId = taskModal.taskId;
+    if (type === "weeklies" && game && taskId) {
+      const task = (game.weeklies || []).find((t) => (t.id || t.label) === taskId);
+      if (task && typeof getWeeklyPotential === "function") return getWeeklyPotential(task);
+    }
+    if (type === "endgame" && game && taskId) {
+      const task = (game.endgame || []).find((t) => (t.id || t.label) === taskId);
+      if (task && typeof getEndgamePotential === "function") return getEndgamePotential(task);
+    }
+    const potInput = qs("taskPotential") || qs("taskCurrency") || qs("endgameCurrencyMax");
+    const n = potInput ? Number(potInput.value) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function buildGamesBannerPreviewCard(task, pot, opts) {
+    const mobile = !!(opts && opts.mobile);
+    const row = document.createElement("div");
+    row.className = "task-item task-item-with-changer games-task-card task-banner-preview-games "
+      + (mobile ? "task-banner-preview-games-mobile" : "task-banner-preview-games-desktop");
+    appendGamesTaskSideMedia(row, task, { surface: mobile ? "home" : "games" });
+    const main = document.createElement("div");
+    main.className = "games-task-main";
+    const top = document.createElement("div");
+    top.className = "task-item-top games-task-top";
+    const titleLine = document.createElement("div");
+    titleLine.className = "games-task-title-line";
+    const label = document.createElement("span");
+    label.className = "task-label";
+    label.textContent = task.label;
+    titleLine.appendChild(label);
+    top.appendChild(titleLine);
+    main.appendChild(top);
+    if (pot > 0) {
+      const bottom = document.createElement("div");
+      bottom.className = "games-task-bottom";
+      const right = document.createElement("div");
+      right.className = "games-task-bottom-right";
+      const potSpan = document.createElement("span");
+      potSpan.className = "games-task-potential";
+      potSpan.textContent = "Potential: " + pot;
+      right.appendChild(potSpan);
+      bottom.appendChild(right);
+      main.appendChild(bottom);
+    }
+    row.appendChild(main);
+    return row;
+  }
+
+  function syncTaskBannerPreview() {
+    const wrap = bannerEl("previewWrap");
+    const cardHost = bannerEl("cardPreview");
+    const clearBtn = bannerEl("clearBtn");
+    const has = !!taskModal.bannerSource;
+    if (clearBtn) clearBtn.hidden = !(has || taskBannerCrop.sourceImg);
+    if (wrap) wrap.hidden = !has;
+    if (!cardHost) return;
+    cardHost.innerHTML = "";
+    if (!has) return;
+
+    const target = taskModal.bannerTarget || "board";
+    const task = getTaskBannerPreviewTaskStub();
+    const game = getTaskBannerPreviewGame();
+    const pot = getTaskBannerPreviewPotential();
+    const outerLabel = wrap && wrap.querySelector(":scope > .task-banner-preview-label");
+
+    if (target === "games") {
+      if (outerLabel) outerLabel.hidden = true;
+      cardHost.classList.add("task-banner-card-preview-dual");
+      const stack = document.createElement("div");
+      stack.className = "task-banner-preview-stack";
+
+      const deskBlock = document.createElement("div");
+      deskBlock.className = "task-banner-preview-block";
+      const deskLabel = document.createElement("span");
+      deskLabel.className = "task-banner-preview-label";
+      deskLabel.textContent = "Desktop";
+      deskBlock.appendChild(deskLabel);
+      deskBlock.appendChild(buildGamesBannerPreviewCard(task, pot, { mobile: false }));
+
+      const mobBlock = document.createElement("div");
+      mobBlock.className = "task-banner-preview-block";
+      const mobHead = document.createElement("div");
+      mobHead.className = "task-banner-preview-heading";
+      const mobLabel = document.createElement("span");
+      mobLabel.className = "task-banner-preview-label";
+      mobLabel.textContent = "Mobile / hamburger";
+      const mobNote = document.createElement("span");
+      mobNote.className = "task-banner-preview-note";
+      mobNote.textContent = "Uses the Home image setting (not Games) in hamburger / compressed mode.";
+      mobHead.appendChild(mobLabel);
+      mobHead.appendChild(mobNote);
+      mobBlock.appendChild(mobHead);
+      mobBlock.appendChild(buildGamesBannerPreviewCard(task, pot, { mobile: true }));
+
+      stack.appendChild(deskBlock);
+      stack.appendChild(mobBlock);
+      cardHost.appendChild(stack);
+      return;
+    }
+
+    if (outerLabel) {
+      outerLabel.hidden = false;
+      outerLabel.textContent = "Preview";
+    }
+    cardHost.classList.remove("task-banner-card-preview-dual");
+
+    const card = document.createElement("div");
+    card.className = "task-item task-card-knot task-banner-preview-card";
+    appendTaskCardMedia(card, task, game, { surface: target === "home" ? "home" : "board" });
+    const body = appendTaskCardBody(card);
+
+    const top = document.createElement("div");
+    top.className = "task-top task-card-title-row";
+    const titleCol = document.createElement("div");
+    titleCol.className = "task-game-heading-text";
+    const span = document.createElement("span");
+    span.className = "task-label";
+    span.textContent = task.label;
+    titleCol.appendChild(span);
+    if (pot > 0) {
+      const potSpan = document.createElement("span");
+      potSpan.className = "task-potential";
+      potSpan.textContent = "Potential: " + pot;
+      titleCol.appendChild(potSpan);
+    }
+    top.appendChild(titleCol);
+    body.appendChild(top);
+
+    const snippet = document.createElement("p");
+    snippet.className = "task-card-snippet";
+    snippet.textContent = "Incomplete · Preview";
+    body.appendChild(snippet);
+
+    const sub = document.createElement("div");
+    sub.className = "task-subrows";
+    const statusRow = document.createElement("div");
+    statusRow.className = "task-subrow";
+    const statusLeft = document.createElement("div");
+    statusLeft.className = "left";
+    const check = document.createElement("button");
+    check.type = "button";
+    check.className = "task-checkbox";
+    check.disabled = true;
+    check.setAttribute("aria-hidden", "true");
+    const statusLabel = document.createElement("span");
+    statusLabel.innerHTML = "<strong>Status:</strong> Incomplete";
+    statusLeft.appendChild(check);
+    statusLeft.appendChild(statusLabel);
+    statusRow.appendChild(statusLeft);
+    sub.appendChild(statusRow);
+
+    const remainingRow = document.createElement("div");
+    remainingRow.className = "task-subrow";
+    const remLeft = document.createElement("div");
+    remLeft.className = "left";
+    remLeft.innerHTML = "<strong>Time remaining:</strong>";
+    remainingRow.appendChild(remLeft);
+    const remVal = document.createElement("span");
+    remVal.className = "task-remaining";
+    remVal.textContent = "—";
+    remainingRow.appendChild(remVal);
+    sub.appendChild(remainingRow);
+    body.appendChild(sub);
+
+    cardHost.appendChild(card);
+  }
+
+  async function setTaskBannerFromFile(file) {
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: 1400, quality: 0.92 });
+      await loadTaskBannerSourceFromUrl(dataUrl);
+    } catch (err) {
+      alert((err && err.message) || "Could not use that image.");
+    }
+  }
+
+  async function switchTaskBannerTarget(target) {
+    if (!TASK_BANNER_TARGETS[target]) return;
+    if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
+    taskModal.bannerTarget = target;
+    syncTaskBannerTargetButtons();
+    resizeTaskBannerCropStage();
+    if (taskModal.bannerSource && taskBannerCrop.sourceImg) {
+      applyBannerViewToStage(getActiveTaskBannerView());
+      drawTaskBannerCrop();
+      syncTaskBannerPreview();
+    } else if (taskModal.bannerSource) {
+      try {
+        await loadTaskBannerSourceFromUrl(taskModal.bannerSource, { keepViews: true });
+      } catch (_) {
+        drawTaskBannerCrop();
+        syncTaskBannerPreview();
+      }
+    } else {
+      resetTaskBannerCropState();
+      drawTaskBannerCrop();
+      syncTaskBannerPreview();
+    }
+  }
+
+  function applyTaskBannerCornerScaleLocked(kind, mode, dx, dy, aspect) {
+    const min = TASK_BANNER_CROP_MIN;
+    const isImg = kind === "img";
+    const startX = isImg ? taskBannerCrop.startImgX : taskBannerCrop.startCropX;
+    const startY = isImg ? taskBannerCrop.startImgY : taskBannerCrop.startCropY;
+    const startW = isImg ? taskBannerCrop.startImgW : taskBannerCrop.startCropW;
+    const startH = isImg ? taskBannerCrop.startImgH : taskBannerCrop.startCropH;
+    let w = startW;
+    let h = startH;
+    const growW = (mode === "ne" || mode === "se") ? dx : -dx;
+    const growH = (mode === "sw" || mode === "se") ? dy : -dy;
+    if (Math.abs(growW) >= Math.abs(growH) * aspect) {
+      w = startW + growW;
+      h = w / aspect;
+    } else {
+      h = startH + growH;
+      w = h * aspect;
+    }
+    if (w < min) {
+      w = min;
+      h = w / aspect;
+    }
+    if (h < min) {
+      h = min;
+      w = h * aspect;
+    }
+    let x = startX;
+    let y = startY;
+    if (mode === "nw" || mode === "sw") x = startX + startW - w;
+    if (mode === "nw" || mode === "ne") y = startY + startH - h;
+    if (isImg) {
+      taskBannerCrop.imgX = x;
+      taskBannerCrop.imgY = y;
+      taskBannerCrop.imgW = w;
+      taskBannerCrop.imgH = h;
+      softClampTaskBannerRect("img");
+    } else {
+      taskBannerCrop.cropX = x;
+      taskBannerCrop.cropY = y;
+      taskBannerCrop.cropW = w;
+      taskBannerCrop.cropH = h;
+      softClampTaskBannerRect("crop");
+    }
+  }
+
+  function applyTaskBannerCropFreeScale(mode, dx, dy) {
+    const min = TASK_BANNER_CROP_MIN;
+    let x = taskBannerCrop.startCropX;
+    let y = taskBannerCrop.startCropY;
+    let w = taskBannerCrop.startCropW;
+    let h = taskBannerCrop.startCropH;
+    if (mode === "nw") {
+      x = taskBannerCrop.startCropX + dx;
+      y = taskBannerCrop.startCropY + dy;
+      w = taskBannerCrop.startCropW - dx;
+      h = taskBannerCrop.startCropH - dy;
+    } else if (mode === "ne") {
+      y = taskBannerCrop.startCropY + dy;
+      w = taskBannerCrop.startCropW + dx;
+      h = taskBannerCrop.startCropH - dy;
+    } else if (mode === "sw") {
+      x = taskBannerCrop.startCropX + dx;
+      w = taskBannerCrop.startCropW - dx;
+      h = taskBannerCrop.startCropH + dy;
+    } else {
+      w = taskBannerCrop.startCropW + dx;
+      h = taskBannerCrop.startCropH + dy;
+    }
+    if (w < min) {
+      if (mode === "nw" || mode === "sw") x = taskBannerCrop.startCropX + taskBannerCrop.startCropW - min;
+      w = min;
+    }
+    if (h < min) {
+      if (mode === "nw" || mode === "ne") y = taskBannerCrop.startCropY + taskBannerCrop.startCropH - min;
+      h = min;
+    }
+    taskBannerCrop.cropX = x;
+    taskBannerCrop.cropY = y;
+    taskBannerCrop.cropW = w;
+    taskBannerCrop.cropH = h;
+    softClampTaskBannerRect("crop");
+  }
+
+  function pointInRect(px, py, x, y, w, h) {
+    return px >= x && px <= x + w && py >= y && py <= y + h;
+  }
+
+  function nearTaskBannerCropBorder(px, py, band) {
+    const b = band || 12;
+    const x = taskBannerCrop.cropX;
+    const y = taskBannerCrop.cropY;
+    const w = taskBannerCrop.cropW;
+    const h = taskBannerCrop.cropH;
+    if (!pointInRect(px, py, x - b, y - b, w + b * 2, h + b * 2)) return false;
+    return !pointInRect(px, py, x + b, y + b, Math.max(0, w - b * 2), Math.max(0, h - b * 2));
+  }
+
+  function hitBannerFrameHandle(px, py, x, y, w, h, pad) {
+    const size = pad || 14;
+    const corners = {
+      nw: [x, y],
+      ne: [x + w, y],
+      sw: [x, y + h],
+      se: [x + w, y + h],
+    };
+    for (const key of Object.keys(corners)) {
+      const hx = corners[key][0];
+      const hy = corners[key][1];
+      if (Math.abs(px - hx) <= size && Math.abs(py - hy) <= size) return key;
+    }
+    return null;
+  }
+
+  function initTaskBannerControls() {
+    const pointerPos = (clientX, clientY) => {
+      const wrap = bannerEl("wrap");
+      if (!wrap) return { x: 0, y: 0 };
+      const rect = wrap.getBoundingClientRect();
+      const sx = TASK_BANNER_STAGE.w / Math.max(1, rect.width);
+      const sy = TASK_BANNER_STAGE.h / Math.max(1, rect.height);
+      return {
+        x: (clientX - rect.left) * sx,
+        y: (clientY - rect.top) * sy,
+      };
+    };
+
+    const snapshotDragStart = (p) => {
+      taskBannerCrop.dragStartX = p.x;
+      taskBannerCrop.dragStartY = p.y;
+      taskBannerCrop.startImgX = taskBannerCrop.imgX;
+      taskBannerCrop.startImgY = taskBannerCrop.imgY;
+      taskBannerCrop.startImgW = taskBannerCrop.imgW;
+      taskBannerCrop.startImgH = taskBannerCrop.imgH;
+      taskBannerCrop.startCropX = taskBannerCrop.cropX;
+      taskBannerCrop.startCropY = taskBannerCrop.cropY;
+      taskBannerCrop.startCropW = taskBannerCrop.cropW;
+      taskBannerCrop.startCropH = taskBannerCrop.cropH;
+    };
+
+    const onDown = (clientX, clientY, forcedMode) => {
+      if (!taskBannerCrop.sourceImg) return;
+      const p = pointerPos(clientX, clientY);
+      snapshotDragStart(p);
+      if (forcedMode) {
+        taskBannerCrop.mode = forcedMode;
+        return;
+      }
+      const cropHandle = hitBannerFrameHandle(
+        p.x, p.y,
+        taskBannerCrop.cropX, taskBannerCrop.cropY,
+        taskBannerCrop.cropW, taskBannerCrop.cropH
+      );
+      if (cropHandle) {
+        taskBannerCrop.mode = "scale-crop-" + cropHandle;
+        return;
+      }
+      const imgHandle = hitBannerFrameHandle(
+        p.x, p.y,
+        taskBannerCrop.imgX, taskBannerCrop.imgY,
+        taskBannerCrop.imgW, taskBannerCrop.imgH
+      );
+      if (imgHandle) {
+        taskBannerCrop.mode = "scale-img-" + imgHandle;
+        return;
+      }
+      if (nearTaskBannerCropBorder(p.x, p.y)) {
+        taskBannerCrop.mode = "move-crop";
+        return;
+      }
+      if (pointInRect(p.x, p.y, taskBannerCrop.imgX, taskBannerCrop.imgY, taskBannerCrop.imgW, taskBannerCrop.imgH)) {
+        taskBannerCrop.mode = "move-img";
+        return;
+      }
+      if (pointInRect(p.x, p.y, taskBannerCrop.cropX, taskBannerCrop.cropY, taskBannerCrop.cropW, taskBannerCrop.cropH)) {
+        taskBannerCrop.mode = "move-crop";
+        return;
+      }
+      taskBannerCrop.mode = null;
+    };
+
+    const onMove = (clientX, clientY) => {
+      if (!taskBannerCrop.mode) return;
+      const p = pointerPos(clientX, clientY);
+      const dx = p.x - taskBannerCrop.dragStartX;
+      const dy = p.y - taskBannerCrop.dragStartY;
+      const mode = taskBannerCrop.mode;
+
+      if (mode === "move-img") {
+        taskBannerCrop.imgX = taskBannerCrop.startImgX + dx;
+        taskBannerCrop.imgY = taskBannerCrop.startImgY + dy;
+        softClampTaskBannerRect("img");
+      } else if (mode === "move-crop") {
+        taskBannerCrop.cropX = taskBannerCrop.startCropX + dx;
+        taskBannerCrop.cropY = taskBannerCrop.startCropY + dy;
+        softClampTaskBannerRect("crop");
+      } else if (mode.indexOf("scale-img-") === 0) {
+        applyTaskBannerCornerScaleLocked("img", mode.slice("scale-img-".length), dx, dy, getTaskBannerImageAspect());
+      } else if (mode.indexOf("scale-crop-") === 0) {
+        const corner = mode.slice("scale-crop-".length);
+        const target = taskModal.bannerTarget || "board";
+        if (target === "board") {
+          applyTaskBannerCropFreeScale(corner, dx, dy);
+        } else {
+          applyTaskBannerCornerScaleLocked("crop", corner, dx, dy, getTaskBannerCropAspect());
+        }
+      }
+      drawTaskBannerCrop();
+    };
+
+    const onUp = () => {
+      if (!taskBannerCrop.mode) return;
+      taskBannerCrop.mode = null;
+      if (taskBannerCrop.sourceImg) commitTaskBannerCrop();
+    };
+
+    function bindOneBannerUi(uiKey) {
+      const prev = activeBannerUiKey;
+      setActiveBannerUi(uiKey);
+      const fileInput = bannerEl("file");
+      const chooseBtn = bannerEl("chooseBtn");
+      const clearBtn = bannerEl("clearBtn");
+      const wrap = bannerEl("wrap");
+      const imgFrame = bannerEl("imgFrame");
+      const cropFrame = bannerEl("cropFrame");
+      const nameInput = bannerEl("nameInput");
+      const root = bannerRootEl();
+      setActiveBannerUi(prev);
+      if (!fileInput || !root) return;
+
+      const activate = () => setActiveBannerUi(uiKey);
+
+      if (typeof ResizeObserver !== "undefined" && wrap) {
+        const ro = new ResizeObserver(() => {
+          if (!wrap.isConnected) return;
+          if (activeBannerUiKey !== uiKey) return;
+          resizeTaskBannerCropStage();
+          drawTaskBannerCrop();
+        });
+        ro.observe(wrap);
+      }
+
+      root.querySelectorAll(".task-banner-target-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          activate();
+          switchTaskBannerTarget(btn.dataset.bannerTarget || "board");
+        });
+      });
+
+      if (chooseBtn) {
+        chooseBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          activate();
+          fileInput.click();
+        });
+      }
+      fileInput.addEventListener("change", () => {
+        activate();
+        const file = fileInput.files && fileInput.files[0];
+        fileInput.value = "";
+        if (file) setTaskBannerFromFile(file);
+      });
+
+      if (wrap) {
+        ["dragenter", "dragover"].forEach((type) => {
+          wrap.addEventListener(type, (e) => {
+            e.preventDefault();
+            wrap.classList.add("is-dragover");
+          });
+        });
+        ["dragleave", "drop"].forEach((type) => {
+          wrap.addEventListener(type, (e) => {
+            e.preventDefault();
+            wrap.classList.remove("is-dragover");
+          });
+        });
+        wrap.addEventListener("drop", (e) => {
+          activate();
+          const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+          if (file) setTaskBannerFromFile(file);
+        });
+        wrap.addEventListener("mousedown", (e) => {
+          if (e.target && e.target.classList && e.target.classList.contains("task-banner-crop-handle")) return;
+          e.preventDefault();
+          activate();
+          onDown(e.clientX, e.clientY, null);
+        });
+        wrap.addEventListener("touchstart", (e) => {
+          if (!e.touches || !e.touches[0]) return;
+          if (e.target && e.target.classList && e.target.classList.contains("task-banner-crop-handle")) return;
+          activate();
+          onDown(e.touches[0].clientX, e.touches[0].clientY, null);
+        }, { passive: true });
+      }
+
+      if (clearBtn) {
+        clearBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          activate();
+          resetTaskBannerCropState();
+          taskBannerCrop.clear = true;
+          taskModal.bannerSource = null;
+          taskModal.bannerViews = emptyTaskBannerViews();
+          taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+          resizeTaskBannerCropStage();
+          drawTaskBannerCrop();
+          syncTaskBannerPreview();
+          syncTaskBannerTargetButtons();
+        });
+      }
+
+      if (nameInput) {
+        nameInput.addEventListener("input", () => {
+          if (activeBannerUiKey !== uiKey) return;
+          if (taskModal.bannerSource) syncTaskBannerPreview();
+        });
+      }
+
+      const bindFrameDown = (frame, frameKind) => {
+        if (!frame) return;
+        frame.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          activate();
+          const handle = e.target && e.target.getAttribute && e.target.getAttribute("data-handle");
+          if (handle) {
+            onDown(e.clientX, e.clientY, "scale-" + frameKind + "-" + handle);
+          } else {
+            onDown(e.clientX, e.clientY, "move-" + frameKind);
+          }
+        });
+        frame.addEventListener("touchstart", (e) => {
+          if (!e.touches || !e.touches[0]) return;
+          activate();
+          const handle = e.target && e.target.getAttribute && e.target.getAttribute("data-handle");
+          if (handle) {
+            onDown(e.touches[0].clientX, e.touches[0].clientY, "scale-" + frameKind + "-" + handle);
+          } else {
+            onDown(e.touches[0].clientX, e.touches[0].clientY, "move-" + frameKind);
+          }
+        }, { passive: true });
+      };
+      bindFrameDown(imgFrame, "img");
+      bindFrameDown(cropFrame, "crop");
+    }
+
+    Object.keys(TASK_BANNER_UI).forEach(bindOneBannerUi);
+
+    window.addEventListener("mousemove", (e) => onMove(e.clientX, e.clientY));
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", (e) => {
+      if (!taskBannerCrop.mode || !e.touches || !e.touches[0]) return;
+      e.preventDefault();
+      onMove(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+    window.addEventListener("touchend", onUp);
+  }
+
   function initTaskModal() {
     const modalEl = qs("taskModal");
     const closeBtn = qs("taskModalClose");
@@ -3507,6 +4621,7 @@
     });
     if (closeBtn) closeBtn.addEventListener("click", closeTaskModal);
     if (cancelBtn) cancelBtn.addEventListener("click", closeTaskModal);
+    initTaskBannerControls();
 
     const resetTime = qs("taskResetTime");
     const sameEndToggle = qs("taskCycleEndTimeSameAsBegin");

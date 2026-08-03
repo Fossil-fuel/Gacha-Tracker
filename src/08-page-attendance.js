@@ -50,7 +50,80 @@
     return labels;
   }
 
+  let historyDweTooltipActive = null;
+  let historyDweTooltipWrap = null;
+
+  function hideHistoryDweTooltip() {
+    const tip = historyDweTooltipActive;
+    const wrap = historyDweTooltipWrap;
+    historyDweTooltipActive = null;
+    historyDweTooltipWrap = null;
+    if (!tip) return;
+    tip.classList.remove("is-open");
+    tip.style.position = "";
+    tip.style.left = "";
+    tip.style.top = "";
+    tip.style.bottom = "";
+    tip.style.transform = "";
+    tip.style.zIndex = "";
+    tip.style.maxWidth = "";
+    if (wrap && tip.parentNode !== wrap) wrap.appendChild(tip);
+    else if (!wrap && tip.parentNode === document.body) tip.remove();
+  }
+
+  function positionHistoryDweTooltip(wrap, tip) {
+    const rect = wrap.getBoundingClientRect();
+    tip.style.position = "fixed";
+    tip.style.bottom = "auto";
+    tip.style.zIndex = "10000";
+    tip.style.maxWidth = "min(22rem, calc(100vw - 1rem))";
+    tip.style.left = Math.max(8, rect.left) + "px";
+    tip.style.top = rect.top + "px";
+    tip.style.transform = "translateY(-100%) translateY(-0.35rem)";
+    const tipRect = tip.getBoundingClientRect();
+    if (tipRect.top < 8) {
+      tip.style.top = rect.bottom + "px";
+      tip.style.transform = "translateY(0.35rem)";
+    }
+    const tipRect2 = tip.getBoundingClientRect();
+    if (tipRect2.right > window.innerWidth - 8) {
+      tip.style.left = Math.max(8, window.innerWidth - tipRect2.width - 8) + "px";
+    }
+  }
+
+  function showHistoryDweTooltip(wrap) {
+    const tip = wrap.querySelector(".history-dwe-tooltip");
+    if (!tip) return;
+    if (historyDweTooltipActive && historyDweTooltipActive !== tip) hideHistoryDweTooltip();
+    historyDweTooltipActive = tip;
+    historyDweTooltipWrap = wrap;
+    document.body.appendChild(tip);
+    tip.classList.add("is-open");
+    positionHistoryDweTooltip(wrap, tip);
+  }
+
+  function bindHistoryDweTooltips(root) {
+    if (!root) return;
+    root.querySelectorAll(".history-dwe-bar-wrap").forEach((wrap) => {
+      if (!wrap.querySelector(".history-dwe-tooltip")) return;
+      wrap.addEventListener("mouseenter", () => showHistoryDweTooltip(wrap));
+      wrap.addEventListener("mouseleave", hideHistoryDweTooltip);
+      wrap.addEventListener("focusin", () => showHistoryDweTooltip(wrap));
+      wrap.addEventListener("focusout", (e) => {
+        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+        hideHistoryDweTooltip();
+      });
+    });
+    root.addEventListener("scroll", hideHistoryDweTooltip, { passive: true });
+    if (!bindHistoryDweTooltips._windowBound) {
+      bindHistoryDweTooltips._windowBound = true;
+      window.addEventListener("scroll", hideHistoryDweTooltip, true);
+      window.addEventListener("resize", hideHistoryDweTooltip);
+    }
+  }
+
   function renderAttendanceHistory(container) {
+    hideHistoryDweTooltip();
     const now = getSimulatedNow();
     let month = state.historyMonth != null ? Number(state.historyMonth) : now.getMonth();
     let year = state.historyYear != null ? Number(state.historyYear) : now.getFullYear();
@@ -433,6 +506,7 @@
         gridWrap.scrollLeft = Math.max(0, scrollLeft);
       });
     }
+    bindHistoryDweTooltips(gridWrap);
   }
 
   let lastAttendanceViewKey = "";
@@ -448,6 +522,7 @@
       JSON.stringify(state.attendancePieInclude || {}),
       JSON.stringify(state.timestampsSelectedGameIds || {}),
       JSON.stringify(state.timestampsSelectedEndgameTasks || {}),
+      state.timestampsEndgamePickerGameId || "",
       getAllGames().map((g) => g.id).join(","),
     ].join("|");
   }
@@ -458,6 +533,7 @@
     const viewKey = getAttendanceViewKey();
     if (viewKey === lastAttendanceViewKey && container.childElementCount > 0) return;
     lastAttendanceViewKey = viewKey;
+    hideHistoryDweTooltip();
     container.innerHTML = "";
     const games = getAllGames();
     if (games.length === 0) {
@@ -1004,20 +1080,85 @@
     const showNoneEndgame = !!endgameTaskSelected[TIMESTAMPS_NONE];
     const endgameTaskIds = Object.keys(endgameTaskSelected).filter((k) => k !== TIMESTAMPS_NONE);
     const showAllEndgameTasks = !showNoneEndgame && endgameTaskIds.length === 0;
+    const allEndgameKeys = allEndgameTasks.map((et) => et.key);
+
+    function isEndgameTaskSelected(key) {
+      return showAllEndgameTasks || !!endgameTaskSelected[key];
+    }
+
+    function setEndgameTaskSelected(key, wantOn) {
+      delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
+      const currentlyOn = isEndgameTaskSelected(key);
+      if (wantOn === currentlyOn) return;
+      if (currentlyOn) {
+        if (showAllEndgameTasks) {
+          const others = allEndgameKeys.filter((k) => k !== key);
+          state.timestampsSelectedEndgameTasks = {};
+          others.forEach((k) => { state.timestampsSelectedEndgameTasks[k] = true; });
+        } else {
+          delete state.timestampsSelectedEndgameTasks[key];
+        }
+        if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === 0) {
+          state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
+        }
+      } else {
+        state.timestampsSelectedEndgameTasks[key] = true;
+        if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === allEndgameKeys.length) {
+          state.timestampsSelectedEndgameTasks = {};
+        }
+      }
+    }
+
+    function setEndgameTasksForGame(gameId, wantOn) {
+      const gameKeys = allEndgameTasks.filter((et) => et.gameId === gameId).map((et) => et.key);
+      if (gameKeys.length === 0) return;
+      if (wantOn) {
+        if (showNoneEndgame) state.timestampsSelectedEndgameTasks = {};
+        delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
+        if (showAllEndgameTasks) return;
+        gameKeys.forEach((k) => { state.timestampsSelectedEndgameTasks[k] = true; });
+        if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === allEndgameKeys.length) {
+          state.timestampsSelectedEndgameTasks = {};
+        }
+      } else {
+        delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
+        if (showAllEndgameTasks) {
+          state.timestampsSelectedEndgameTasks = {};
+          allEndgameKeys.filter((k) => !gameKeys.includes(k)).forEach((k) => {
+            state.timestampsSelectedEndgameTasks[k] = true;
+          });
+        } else {
+          gameKeys.forEach((k) => { delete state.timestampsSelectedEndgameTasks[k]; });
+        }
+        if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === 0) {
+          state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
+        }
+      }
+    }
+
+    const gamesWithEndgame = [];
+    const seenGameIds = {};
+    allEndgameTasks.forEach((et) => {
+      if (seenGameIds[et.gameId]) return;
+      seenGameIds[et.gameId] = true;
+      gamesWithEndgame.push({ id: et.gameId, name: et.gameName });
+    });
+
+    let pickerGameId = state.timestampsEndgamePickerGameId;
+    if (!pickerGameId || !seenGameIds[pickerGameId]) {
+      pickerGameId = gamesWithEndgame[0] ? gamesWithEndgame[0].id : null;
+      state.timestampsEndgamePickerGameId = pickerGameId;
+    }
+    const tasksForPickerGame = allEndgameTasks.filter((et) => et.gameId === pickerGameId);
+    const selectedVisibleCount = allEndgameTasks.filter((et) => isEndgameTaskSelected(et.key)).length;
 
     const endgameTaskLabelRow = document.createElement("div");
-    endgameTaskLabelRow.style.display = "flex";
-    endgameTaskLabelRow.style.alignItems = "center";
-    endgameTaskLabelRow.style.gap = "0.5rem";
-    endgameTaskLabelRow.style.marginTop = "1.5rem";
+    endgameTaskLabelRow.className = "timestamps-endgame-picker-header";
     const endgameTaskLabel = document.createElement("h4");
     endgameTaskLabel.className = "data-section-label";
     endgameTaskLabel.textContent = "Endgame tasks";
     endgameTaskLabel.style.margin = "0";
     endgameTaskLabelRow.appendChild(endgameTaskLabel);
-    const unselectAllEndgameBtn = document.createElement("button");
-    unselectAllEndgameBtn.type = "button";
-    unselectAllEndgameBtn.className = "btn btn-ghost";
     const selectAllEndgameBtn = document.createElement("button");
     selectAllEndgameBtn.type = "button";
     selectAllEndgameBtn.className = "btn btn-ghost";
@@ -1029,6 +1170,9 @@
       renderActiveTab();
     });
     endgameTaskLabelRow.appendChild(selectAllEndgameBtn);
+    const unselectAllEndgameBtn = document.createElement("button");
+    unselectAllEndgameBtn.type = "button";
+    unselectAllEndgameBtn.className = "btn btn-ghost";
     unselectAllEndgameBtn.textContent = "Unselect all";
     unselectAllEndgameBtn.title = "Deselect all endgame tasks (show none)";
     unselectAllEndgameBtn.addEventListener("click", () => {
@@ -1038,40 +1182,112 @@
     });
     endgameTaskLabelRow.appendChild(unselectAllEndgameBtn);
     container.appendChild(endgameTaskLabelRow);
-    const endgameTaskWrap = document.createElement("div");
-    endgameTaskWrap.className = "timestamps-game-selector";
-    endgameTaskWrap.style.display = "flex";
-    endgameTaskWrap.style.flexWrap = "wrap";
-    endgameTaskWrap.style.gap = "0.5rem";
-    endgameTaskWrap.style.marginBottom = "0.75rem";
-    allEndgameTasks.forEach(({ key, gameName, taskLabel }) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "timestamps-game-pill timestamps-endgame-pill";
-      btn.textContent = taskLabel + (games.length > 1 ? " (" + gameName + ")" : "");
-      btn.setAttribute("aria-pressed", (showAllEndgameTasks || endgameTaskSelected[key]) ? "true" : "false");
-      if (showAllEndgameTasks || endgameTaskSelected[key]) btn.classList.add("filled");
-      btn.addEventListener("click", () => {
-        delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
-        if (showAllEndgameTasks || endgameTaskSelected[key]) {
-          if (showAllEndgameTasks) {
-            const others = allEndgameTasks.filter((et) => et.key !== key).map((et) => et.key);
-            state.timestampsSelectedEndgameTasks = {};
-            others.forEach((k) => { state.timestampsSelectedEndgameTasks[k] = true; });
-          } else {
-            delete state.timestampsSelectedEndgameTasks[key];
-          }
-          if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === 0) state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
-        } else {
-          state.timestampsSelectedEndgameTasks[key] = true;
-          if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === allEndgameTasks.length) state.timestampsSelectedEndgameTasks = {};
-        }
+
+    const endgamePicker = document.createElement("div");
+    endgamePicker.className = "timestamps-endgame-picker";
+
+    if (gamesWithEndgame.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "timestamps-endgame-picker-empty";
+      empty.textContent = "No endgame tasks in the current game selection.";
+      endgamePicker.appendChild(empty);
+    } else {
+      const pickerControls = document.createElement("div");
+      pickerControls.className = "timestamps-endgame-picker-controls";
+
+      const gameField = document.createElement("label");
+      gameField.className = "timestamps-endgame-picker-field";
+      const gameFieldLabel = document.createElement("span");
+      gameFieldLabel.textContent = "Game";
+      gameField.appendChild(gameFieldLabel);
+      const gameSelect = document.createElement("select");
+      gameSelect.className = "timestamps-endgame-game-select";
+      gameSelect.setAttribute("aria-label", "Endgame tasks game");
+      gamesWithEndgame.forEach((g) => {
+        const opt = document.createElement("option");
+        opt.value = g.id;
+        opt.textContent = g.name;
+        if (g.id === pickerGameId) opt.selected = true;
+        gameSelect.appendChild(opt);
+      });
+      gameSelect.addEventListener("change", () => {
+        state.timestampsEndgamePickerGameId = gameSelect.value || null;
         save();
         renderActiveTab();
       });
-      endgameTaskWrap.appendChild(btn);
-    });
-    container.appendChild(endgameTaskWrap);
+      gameField.appendChild(gameSelect);
+      pickerControls.appendChild(gameField);
+
+      const gameActionRow = document.createElement("div");
+      gameActionRow.className = "timestamps-endgame-picker-actions";
+      const selectGameBtn = document.createElement("button");
+      selectGameBtn.type = "button";
+      selectGameBtn.className = "btn btn-ghost btn-sm";
+      selectGameBtn.textContent = "Select all in game";
+      selectGameBtn.addEventListener("click", () => {
+        setEndgameTasksForGame(pickerGameId, true);
+        save();
+        renderActiveTab();
+      });
+      gameActionRow.appendChild(selectGameBtn);
+      const clearGameBtn = document.createElement("button");
+      clearGameBtn.type = "button";
+      clearGameBtn.className = "btn btn-ghost btn-sm";
+      clearGameBtn.textContent = "Clear game";
+      clearGameBtn.addEventListener("click", () => {
+        setEndgameTasksForGame(pickerGameId, false);
+        save();
+        renderActiveTab();
+      });
+      gameActionRow.appendChild(clearGameBtn);
+      pickerControls.appendChild(gameActionRow);
+      endgamePicker.appendChild(pickerControls);
+
+      const summary = document.createElement("p");
+      summary.className = "timestamps-endgame-picker-summary";
+      summary.textContent =
+        selectedVisibleCount +
+        " of " +
+        allEndgameTasks.length +
+        " endgame task" +
+        (allEndgameTasks.length === 1 ? "" : "s") +
+        " shown";
+      endgamePicker.appendChild(summary);
+
+      const taskList = document.createElement("div");
+      taskList.className = "timestamps-endgame-task-list";
+      taskList.setAttribute("role", "group");
+      taskList.setAttribute("aria-label", "Endgame tasks for selected game");
+
+      if (tasksForPickerGame.length === 0) {
+        const emptyTasks = document.createElement("p");
+        emptyTasks.className = "timestamps-endgame-picker-empty";
+        emptyTasks.textContent = "No endgame tasks for this game.";
+        taskList.appendChild(emptyTasks);
+      } else {
+        tasksForPickerGame.forEach(({ key, taskLabel }) => {
+          const row = document.createElement("label");
+          row.className = "timestamps-endgame-task-row";
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.checked = isEndgameTaskSelected(key);
+          check.addEventListener("change", () => {
+            setEndgameTaskSelected(key, check.checked);
+            save();
+            renderActiveTab();
+          });
+          const name = document.createElement("span");
+          name.className = "timestamps-endgame-task-name";
+          name.textContent = taskLabel;
+          row.appendChild(check);
+          row.appendChild(name);
+          taskList.appendChild(row);
+        });
+      }
+      endgamePicker.appendChild(taskList);
+    }
+
+    container.appendChild(endgamePicker);
 
     const taskPoints = {};
     allEndgameTasks.forEach(({ key, gameId, taskId, gameName, taskLabel }) => {
@@ -1086,29 +1302,41 @@
       const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
       const byCycle = {};
       events.forEach((t) => {
-        let cycleStartMs, cycleEndMs;
+        let cycleStartMs, cycleEndMs, cycleStartStr;
         if (t.cycleStartStr && t.cycleEndStr) {
           const startMom = getResetMomentForDateStr(task, game, t.cycleStartStr);
           const endMom = getResetMomentForDateStr(task, game, t.cycleEndStr);
           if (!startMom || !endMom || endMom.getTime() <= startMom.getTime()) return;
           cycleStartMs = startMom.getTime();
           cycleEndMs = endMom.getTime();
+          cycleStartStr = t.cycleStartStr;
         } else {
           const cycleStart = getCycleStartForDate(task, t.dateStr, game);
           cycleStartMs = cycleStart.getTime();
           cycleEndMs = cycleStartMs + timeLimitMs;
+          cycleStartStr = getDateStr(cycleStart);
         }
         let pct;
+        let daysAfter = 0;
+        let hoursAfter = 0;
         if (t.skipped) {
           pct = 0;
+          daysAfter = null;
+          hoursAfter = null;
         } else {
           const completionMs = new Date(t.dateStr + "T" + String(t.hour).padStart(2, "0") + ":00:00").getTime();
           const cycleLen = cycleEndMs - cycleStartMs;
           if (cycleLen <= 0) return;
           pct = ((cycleEndMs - completionMs) / cycleLen) * 100;
           pct = Math.max(0, Math.min(100, pct));
+          const elapsedMs = Math.max(0, completionMs - cycleStartMs);
+          const totalHours = Math.floor(elapsedMs / (60 * 60 * 1000));
+          daysAfter = Math.floor(totalHours / 24);
+          hoursAfter = totalHours % 24;
         }
-        if (byCycle[cycleStartMs] == null || pct > byCycle[cycleStartMs]) byCycle[cycleStartMs] = pct;
+        if (byCycle[cycleStartMs] == null || pct > byCycle[cycleStartMs].pct) {
+          byCycle[cycleStartMs] = { pct, daysAfter, hoursAfter, skipped: !!t.skipped };
+        }
       });
       const sortedCycles = Object.keys(byCycle).map(Number).sort((a, b) => a - b);
       if (sortedCycles.length > 0) {
@@ -1124,8 +1352,8 @@
     const lineGraphWrap = document.createElement("div");
     lineGraphWrap.className = "timestamps-line-graph";
     const graphWidth = 400;
-    const graphHeight = 200;
-    const padding = { top: 20, right: 20, bottom: 40, left: 45 };
+    const graphHeight = 220;
+    const padding = { top: 28, right: 20, bottom: 40, left: 45 };
     const plotWidth = graphWidth - padding.left - padding.right;
     const plotHeight = graphHeight - padding.top - padding.bottom;
     const maxX = Math.max(1, ...Object.values(taskPoints).map((tp) => tp.points.length));
@@ -1136,36 +1364,146 @@
     svg.setAttribute("height", "auto");
     svg.style.maxWidth = graphWidth + "px";
     svg.style.display = "block";
-    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-    const colors = ["var(--pie-endgame)", "var(--pie-dailies)", "var(--pie-weeklies)", "#f472b6", "#fbbf24"];
+    const colors = ["var(--pie-endgame)", "var(--pie-dailies)", "var(--pie-weeklies)", "#f472b6", "#fbbf24", "#a3e635", "#38bdf8", "#c084fc", "#fb923c", "#2dd4bf"];
+    const pointTip = document.createElement("div");
+    pointTip.className = "timestamps-trend-point-tooltip";
+    pointTip.hidden = true;
+    pointTip.setAttribute("role", "tooltip");
+
+    function hideTrendPointTip() {
+      pointTip.hidden = true;
+      pointTip.textContent = "";
+      pointTip.classList.remove("timestamps-trend-point-tooltip-below");
+    }
+
+    function formatTrendElapsedLabel(daysAfter, hoursAfter) {
+      const parts = [];
+      if (daysAfter > 0) parts.push(daysAfter + " day" + (daysAfter === 1 ? "" : "s"));
+      if (hoursAfter > 0 || daysAfter === 0) {
+        parts.push(hoursAfter + " hour" + (hoursAfter === 1 ? "" : "s"));
+      }
+      return "completed " + parts.join(" ") + " after cycle started";
+    }
+
+    function showTrendPointTip(circleEl, point, seriesLabel) {
+      const pctStr = Math.round(point.pct) + "%";
+      let detail;
+      if (point.skipped || point.daysAfter == null) {
+        detail = "Skipped (0% time remaining)";
+      } else {
+        detail = formatTrendElapsedLabel(point.daysAfter, point.hoursAfter || 0);
+      }
+      pointTip.replaceChildren();
+      const title = document.createElement("strong");
+      title.textContent = seriesLabel;
+      pointTip.appendChild(title);
+      pointTip.appendChild(document.createElement("br"));
+      pointTip.appendChild(document.createTextNode(pctStr + " time remaining"));
+      pointTip.appendChild(document.createElement("br"));
+      pointTip.appendChild(document.createTextNode(detail));
+      pointTip.hidden = false;
+      const wrapRect = lineGraphWrap.getBoundingClientRect();
+      const cRect = circleEl.getBoundingClientRect();
+      const left = cRect.left - wrapRect.left + cRect.width / 2;
+      const top = cRect.top - wrapRect.top;
+      pointTip.style.left = left + "px";
+      pointTip.style.top = top + "px";
+      requestAnimationFrame(() => {
+        const tipRect = pointTip.getBoundingClientRect();
+        let nextLeft = left;
+        if (tipRect.right > wrapRect.right - 4) nextLeft -= tipRect.right - wrapRect.right + 4;
+        if (nextLeft < 4) nextLeft = 4;
+        pointTip.style.left = nextLeft + "px";
+        if (tipRect.top < wrapRect.top + 4) {
+          pointTip.style.top = top + cRect.height + 10 + "px";
+          pointTip.classList.add("timestamps-trend-point-tooltip-below");
+        } else {
+          pointTip.classList.remove("timestamps-trend-point-tooltip-below");
+        }
+      });
+    }
+
     Object.keys(taskPoints).forEach((key, idx) => {
       const tp = taskPoints[key];
       if (tp.points.length === 0) return;
-      const pathD = tp.points.map((pct, i) => {
+      const color = colors[idx % colors.length];
+      const seriesG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      seriesG.classList.add("timestamps-trend-series");
+      seriesG.setAttribute("data-series", key);
+
+      const pathD = tp.points.map((point, i) => {
         const x = padding.left + (i / xDivisor) * plotWidth;
-        const y = padding.top + plotHeight - (pct / 100) * plotHeight;
+        const y = padding.top + plotHeight - (point.pct / 100) * plotHeight;
         return (i === 0 ? "M" : "L") + x + "," + y;
       }).join(" ");
+
+      const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      hitPath.setAttribute("d", pathD);
+      hitPath.setAttribute("fill", "none");
+      hitPath.setAttribute("stroke", "transparent");
+      hitPath.setAttribute("stroke-width", "14");
+      hitPath.setAttribute("stroke-linecap", "round");
+      hitPath.setAttribute("stroke-linejoin", "round");
+      hitPath.classList.add("timestamps-trend-hit");
+      seriesG.appendChild(hitPath);
+
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute("d", pathD);
       path.setAttribute("fill", "none");
-      path.setAttribute("stroke", colors[idx % colors.length]);
+      path.setAttribute("stroke", color);
       path.setAttribute("stroke-width", "2");
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
-      svg.appendChild(path);
-      tp.points.forEach((pct, i) => {
+      path.classList.add("timestamps-trend-line");
+      seriesG.appendChild(path);
+
+      tp.points.forEach((point, i) => {
         const x = padding.left + (i / xDivisor) * plotWidth;
-        const y = padding.top + plotHeight - (pct / 100) * plotHeight;
+        const y = padding.top + plotHeight - (point.pct / 100) * plotHeight;
+        const pctLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        pctLabel.classList.add("timestamps-trend-pct-label");
+        pctLabel.setAttribute("x", x);
+        pctLabel.setAttribute("y", y - 8);
+        pctLabel.setAttribute("text-anchor", "middle");
+        pctLabel.setAttribute("fill", color);
+        pctLabel.setAttribute("font-size", "9");
+        pctLabel.setAttribute("font-weight", "700");
+        pctLabel.textContent = Math.round(point.pct) + "%";
+        seriesG.appendChild(pctLabel);
+
         const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         circle.setAttribute("cx", x);
         circle.setAttribute("cy", y);
-        circle.setAttribute("r", "4");
-        circle.setAttribute("fill", colors[idx % colors.length]);
+        circle.setAttribute("r", "5");
+        circle.setAttribute("fill", color);
         circle.setAttribute("stroke", "var(--bg)");
         circle.setAttribute("stroke-width", "1");
-        svg.appendChild(circle);
+        circle.classList.add("timestamps-trend-point");
+        circle.style.cursor = "pointer";
+        circle.addEventListener("mouseenter", (e) => {
+          e.stopPropagation();
+          seriesG.classList.add("is-hovered");
+          svg.classList.add("has-series-hover");
+          showTrendPointTip(circle, point, tp.label);
+        });
+        circle.addEventListener("mouseleave", () => {
+          hideTrendPointTip();
+        });
+        seriesG.appendChild(circle);
       });
+
+      seriesG.addEventListener("mouseenter", () => {
+        seriesG.classList.add("is-hovered");
+        svg.classList.add("has-series-hover");
+      });
+      seriesG.addEventListener("mouseleave", () => {
+        seriesG.classList.remove("is-hovered");
+        if (!svg.querySelector(".timestamps-trend-series.is-hovered")) {
+          svg.classList.remove("has-series-hover");
+        }
+        hideTrendPointTip();
+      });
+      svg.appendChild(seriesG);
     });
     const yAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
     yAxis.setAttribute("x1", padding.left);
@@ -1239,10 +1577,11 @@
       dot.style.borderRadius = "50%";
       dot.style.background = colors[idx % colors.length];
       item.appendChild(dot);
-      item.appendChild(document.createTextNode(escapeHtml(tp.label)));
+      item.appendChild(document.createTextNode(tp.label));
       legendWrap.appendChild(item);
     });
     lineGraphWrap.appendChild(svg);
+    lineGraphWrap.appendChild(pointTip);
     if (Object.keys(taskPoints).length > 0) lineGraphWrap.appendChild(legendWrap);
     if (Object.keys(taskPoints).length === 0) {
       const empty = document.createElement("p");
@@ -1484,22 +1823,40 @@
     return box;
   }
 
-  function createExtracurricularCurrencyPieBox(task, earned, potential) {
+  function formatExtracurricularDateRangeLabel(task) {
+    if (!task) return "";
+    const start =
+      task.startDate && isValidDateStr(task.startDate) ? formatDate(task.startDate) : "—";
+    let end = "TBD";
+    if (!task.endDateTBD && task.endDate && isValidDateStr(task.endDate)) {
+      end = formatDate(task.endDate);
+    }
+    return start + " – " + end;
+  }
+
+  function createExtracurricularCurrencyPieBox(task, earned, potential, opts) {
     const pot = Math.max(0, Number(potential) || 0);
     const e = Math.max(0, Number(earned) || 0);
     const total = Math.max(pot, e, 1);
     const earnedPct = total ? (e / total) * 360 : 0;
     const box = document.createElement("div");
     box.className = "pie-box";
+    const subtitle = (opts && opts.hideDates) ? "" : formatExtracurricularDateRangeLabel(task);
+    const subHtml =
+      "<p class=\"pie-box-subtitle" + (subtitle ? " task-counting-since-tag" : "") + "\">" +
+      (subtitle ? escapeHtml(subtitle) : "&nbsp;") +
+      "</p>";
     if (total === 0 || (e === 0 && pot === 0)) {
       box.innerHTML =
         "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+        subHtml +
         "<div class=\"pie-chart pie-chart-empty\"></div>" +
         "<div class=\"pie-legend\">No currency earned yet</div>";
       return box;
     }
     box.innerHTML =
       "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+      subHtml +
       "<div class=\"pie-chart\" style=\"--pct: " + earnedPct + "deg\"></div>" +
       "<div class=\"pie-legend pie-legend-split\">" +
       "<span class=\"pie-legend-item completed\">Earned: " + e + (total ? " (" + Math.round((e / total) * 100) + "%)" : "") + "</span>" +

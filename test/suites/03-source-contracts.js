@@ -82,6 +82,9 @@ module.exports = {
       "function getHistoryCompactBaseline",
       "function processResets",
       "STORAGE_KEY",
+      "STORAGE_SLIM_KEY",
+      "initPersistentStorage",
+      "maybeWriteDailySlimBackup",
       "earliestCompleteDays",
     ].forEach((needle) => {
       assert.ok(core.includes(needle), "01-core.js must contain " + needle);

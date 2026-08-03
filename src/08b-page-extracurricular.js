@@ -27,6 +27,7 @@
   }
 
   function getArchivedExtracurricularTasks() {
+    // Keep array order — History should not be re-sorted on each render.
     return (state.extracurricularTasks || []).filter((t) => isExtracurricularArchived(t));
   }
 
@@ -35,36 +36,36 @@
     else clearExtracurricularCompletion(taskId);
   }
 
-  /** Builds a card for the home page checklist, matching the format of weekly/endgame cards (title, potential, completion status, time remaining). */
+  /** Builds a card for the home page checklist, matching dailies/weeklies/endgame (same task-item hover). */
   function buildExtracurricularTaskItemForHome(task, tagName) {
     const completed = !!state.extracurricularCompleted[task.id];
     const el = document.createElement(tagName || "div");
-    el.className = "task-item home-dwe-checklist-item home-dwe-checklist-item-extracurricular" + (completed ? " done" : "");
+    el.className = "task-item" + (completed ? " done" : "");
 
-    if (task.gameId) {
-      const game = getGame(task.gameId);
-      if (game) {
-        const gameLabel = document.createElement("div");
-        gameLabel.className = "task-grid-game-label";
-        gameLabel.textContent = game.name || task.gameId;
-        el.appendChild(gameLabel);
-      }
-    }
+    const game = task.gameId ? getGame(task.gameId) : null;
+    appendTaskCardMedia(el, task, game || { name: task.label || "Task" }, { surface: "home" });
+    const body = appendTaskCardBody(el);
 
-    const top = document.createElement("div");
-    top.className = "task-top";
-    const span = document.createElement("span");
-    span.className = "task-label home-dwe-checklist-label";
-    span.textContent = task.label || "Task";
-    top.appendChild(span);
     const pot = Math.max(0, Number(task.currency) || 0);
+    const top = document.createElement("div");
+    top.className = "task-top task-card-title-row";
+    const titleCol = document.createElement("div");
+    titleCol.className = "task-game-heading-text";
+    const span = document.createElement("span");
+    span.className = "task-label";
+    span.textContent = task.label || "Task";
+    span.addEventListener("click", () => {
+      setExtracurricularCompleted(task.id, !completed);
+    });
+    titleCol.appendChild(span);
     if (pot > 0) {
       const potSpan = document.createElement("span");
       potSpan.className = "task-potential";
       potSpan.textContent = "Potential: " + pot;
-      top.appendChild(potSpan);
+      titleCol.appendChild(potSpan);
     }
-    el.appendChild(top);
+    top.appendChild(titleCol);
+    body.appendChild(top);
 
     const sub = document.createElement("div");
     sub.className = "task-subrows";
@@ -81,9 +82,6 @@
     });
     const label1 = document.createElement("span");
     label1.innerHTML = "<strong>Completion Status:</strong> " + (completed ? "Complete" : "Incomplete");
-    span.addEventListener("click", () => {
-      setExtracurricularCompleted(task.id, !completed);
-    });
     left1.appendChild(check);
     left1.appendChild(label1);
     row1.appendChild(left1);
@@ -106,28 +104,48 @@
       sub.appendChild(remainingRow);
     }
 
-    el.appendChild(sub);
+    body.appendChild(sub);
     return el;
   }
 
-  function buildExtracurricularTaskItem(task, listOrGrid) {
+  function buildExtracurricularTaskItem(task, tagName, opts) {
     const completed = state.extracurricularCompleted[task.id];
-    const li = document.createElement("li");
-    li.className = "task-item task-item-with-changer";
+    const li = document.createElement(tagName || "li");
+    li.className = "task-item task-item-with-changer task-card-knot";
     if (completed) li.classList.add("done");
 
-    if (task.gameId) {
-      const game = getGame(task.gameId);
-      if (game) {
-        const gameLabel = document.createElement("div");
-        gameLabel.className = "extracurricular-task-game-label";
-        gameLabel.textContent = game.name || task.gameId;
-        li.appendChild(gameLabel);
-      }
-    }
+    const game = task.gameId ? getGame(task.gameId) : null;
+    const surface = (opts && opts.surface) || "board";
+    const media = appendTaskCardMedia(li, task, game || { name: task.gameId || "Task" }, { surface: surface });
+
+    const actions = document.createElement("div");
+    actions.className = "task-card-media-actions";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn";
+    editBtn.textContent = "✎";
+    editBtn.setAttribute("aria-label", "Edit task");
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openExtracurricularTaskModal(task);
+    });
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "icon-btn";
+    deleteBtn.textContent = "×";
+    deleteBtn.setAttribute("aria-label", "Delete task");
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteExtracurricularTask(task.id);
+    });
+    actions.appendChild(editBtn);
+    actions.appendChild(deleteBtn);
+    if (media) media.appendChild(actions);
+
+    const body = appendTaskCardBody(li);
 
     const top = document.createElement("div");
-    top.className = "task-item-top";
+    top.className = "task-item-top task-card-title-row";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "task-checkbox";
@@ -148,14 +166,14 @@
     const label = document.createElement("span");
     label.className = "task-label";
     label.textContent = task.label || "Task";
-    const info = document.createElement("span");
-    info.className = "extracurricular-task-info";
+    labelWrap.appendChild(label);
+    top.appendChild(labelWrap);
+    body.appendChild(top);
+
     const startStr = task.startDate || "";
     const endStr = task.endDateTBD ? "TBD" : (task.endDate || "");
     const endDisplay = endStr + (task.endTime && !task.endDateTBD ? " " + task.endTime : "");
-    info.textContent = startStr + (endDisplay ? " — " + endDisplay : "");
-    labelWrap.appendChild(label);
-    labelWrap.appendChild(info);
+    const dateLine = startStr + (endDisplay ? " — " + endDisplay : "");
     const pot = Math.max(0, Number(task.currency) || 0);
     let earnedStr = "—";
     if (completed) {
@@ -163,42 +181,41 @@
       const e = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
       earnedStr = String(e);
     }
-    const currencyLine = document.createElement("span");
-    currencyLine.className = "extracurricular-task-currency-line";
-    currencyLine.textContent = "Potential: " + pot + " · Earned: " + earnedStr;
-    labelWrap.appendChild(currencyLine);
     const remainingText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
-    if (remainingText && remainingText !== "TBD") {
-      const remainingSpan = document.createElement("span");
-      remainingSpan.className = "extracurricular-task-remaining";
-      remainingSpan.textContent = remainingText + " left";
-      labelWrap.appendChild(remainingSpan);
+    const snippetParts = [];
+    if (task.description) snippetParts.push(task.description);
+    else if (dateLine) snippetParts.push(dateLine);
+    snippetParts.push("Potential: " + pot + " · Earned: " + earnedStr);
+    if (remainingText && remainingText !== "TBD") snippetParts.push(remainingText + " left");
+    const snippet = document.createElement("p");
+    snippet.className = "task-card-snippet";
+    snippet.textContent = snippetParts.join(" · ");
+    body.appendChild(snippet);
+
+    const meta = document.createElement("div");
+    meta.className = "task-subrows";
+    if (dateLine) {
+      const info = document.createElement("div");
+      info.className = "task-subrow";
+      const infoSpan = document.createElement("span");
+      const strong = document.createElement("strong");
+      strong.textContent = "Dates: ";
+      infoSpan.appendChild(strong);
+      infoSpan.appendChild(document.createTextNode(dateLine));
+      info.appendChild(infoSpan);
+      meta.appendChild(info);
     }
-    top.appendChild(labelWrap);
-    const actions = document.createElement("div");
-    actions.className = "task-item-actions";
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "icon-btn";
-    editBtn.textContent = "✎";
-    editBtn.setAttribute("aria-label", "Edit task");
-    editBtn.addEventListener("click", () => openExtracurricularTaskModal(task));
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "icon-btn";
-    deleteBtn.textContent = "×";
-    deleteBtn.setAttribute("aria-label", "Delete task");
-    deleteBtn.addEventListener("click", () => deleteExtracurricularTask(task.id));
-    actions.appendChild(editBtn);
-    actions.appendChild(deleteBtn);
-    top.appendChild(actions);
-    li.appendChild(top);
-    if (task.description) {
-      const desc = document.createElement("p");
-      desc.className = "extracurricular-task-desc";
-      desc.textContent = task.description;
-      li.appendChild(desc);
-    }
+    const currencyRow = document.createElement("div");
+    currencyRow.className = "task-subrow";
+    const currencySpan = document.createElement("span");
+    const currencyStrong = document.createElement("strong");
+    currencyStrong.textContent = "Currency: ";
+    currencySpan.appendChild(currencyStrong);
+    currencySpan.appendChild(document.createTextNode("Potential " + pot + " · Earned " + earnedStr));
+    currencyRow.appendChild(currencySpan);
+    meta.appendChild(currencyRow);
+    body.appendChild(meta);
+
     return li;
   }
 
@@ -207,7 +224,6 @@
     if (!container) return;
     container.innerHTML = "";
     const viewMode = state.extracurricularViewMode || "tasks";
-    const view = state.extracurricularView || "list";
 
     const headerRow = document.createElement("div");
     headerRow.className = "extracurricular-header-row";
@@ -242,7 +258,21 @@
     }
     container.appendChild(headerRow);
 
-    const tasks = viewMode === "history" ? getArchivedExtracurricularTasks() : getActiveExtracurricularTasks();
+    const tasksRaw = viewMode === "history" ? getArchivedExtracurricularTasks() : getActiveExtracurricularTasks();
+    const now = getSimulatedNow();
+    // Active board: due-date / completion sort. History: leave in saved order (no re-sort).
+    const tasks = viewMode === "history"
+      ? tasksRaw
+      : sortBoardTaskEntries(tasksRaw.map((task, taskOrder) => {
+          const rem = getExtracurricularTimeRemainingMs(task, now);
+          return {
+            task,
+            completed: !!state.extracurricularCompleted[task.id],
+            dueMs: rem == null ? Number.POSITIVE_INFINITY : (now.getTime() + rem),
+            gameOrder: 0,
+            taskOrder,
+          };
+        })).map((entry) => entry.task);
 
     if (tasks.length === 0) {
       const empty = document.createElement("p");
@@ -254,10 +284,11 @@
       return;
     }
 
-    const list = document.createElement("ul");
-    list.className = "task-list" + (view === "grid" ? " task-list-grid" : "");
-    tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task)));
+    const list = document.createElement("div");
+    list.className = "task-grid task-grid-knot";
+    tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task, "div")));
     container.appendChild(list);
+    scheduleTaskMasonry(list);
   }
 
   function updateExtracurricularTimeRemainingDisplay() {
@@ -340,6 +371,7 @@
 
     if (title) title.textContent = task ? "Edit task" : "Add task";
     const currencyInput = document.getElementById("extracurricularTaskCurrency");
+    const excludeFromDataInput = document.getElementById("extracurricularTaskExcludeFromData");
     if (nameInput) nameInput.value = task ? (task.label || "") : "";
     if (startInput) startInput.value = task && task.startDate ? task.startDate : getDateStr();
     if (endTBDInput) endTBDInput.checked = !!(task && task.endDateTBD);
@@ -350,6 +382,7 @@
     if (endTimeInput) endTimeInput.value = (task && task.endTime) ? task.endTime : "23:59";
     if (descInput) descInput.value = task ? (task.description || "") : "";
     if (currencyInput) currencyInput.value = task && task.currency != null ? String(task.currency) : "";
+    if (excludeFromDataInput) excludeFromDataInput.checked = !!(task && task.excludeFromData);
     if (gameSelect) {
       gameSelect.innerHTML = "<option value=\"\">— None —</option>";
       getAllGames().forEach((g) => {
@@ -387,6 +420,19 @@
       "Reads event name and time left (e.g. 37d). When Skip description is on, description is left alone."
     );
 
+    if (typeof setActiveBannerUi === "function") setActiveBannerUi("extra");
+    taskModal.bannerTarget = "home";
+    taskModal.gameId = (task && task.gameId) || null;
+    const loaded = typeof loadTaskBannersFromTask === "function"
+      ? loadTaskBannersFromTask(task)
+      : { source: null, views: emptyTaskBannerViews() };
+    taskModal.bannerSource = loaded.source;
+    taskModal.bannerViews = loaded.views;
+    taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    if (typeof resetTaskBannerCropState === "function") resetTaskBannerCropState();
+    if (typeof syncTaskBannerTargetButtons === "function") syncTaskBannerTargetButtons();
+    if (typeof syncTaskBannerPreview === "function") syncTaskBannerPreview();
+
     if (modal) {
       modal.hidden = false;
       modal.setAttribute("aria-hidden", "false");
@@ -394,6 +440,17 @@
       if (typeof activateModalFocus === "function") activateModalFocus(modal);
     }
     extracurricularTaskModalState.task = task;
+    requestAnimationFrame(() => {
+      if (typeof setActiveBannerUi === "function") setActiveBannerUi("extra");
+      if (typeof resizeTaskBannerCropStage === "function") resizeTaskBannerCropStage();
+      if (typeof drawTaskBannerCrop === "function") drawTaskBannerCrop();
+      if (taskModal.bannerSource && typeof loadTaskBannerSourceFromUrl === "function") {
+        loadTaskBannerSourceFromUrl(taskModal.bannerSource, { keepViews: true }).catch(() => {});
+      } else if (typeof syncTaskBannerEditorFrames === "function") {
+        syncTaskBannerEditorFrames();
+        if (typeof drawTaskBannerCrop === "function") drawTaskBannerCrop();
+      }
+    });
     if (nameInput) setTimeout(() => nameInput.focus(), 0);
   }
 
@@ -406,6 +463,11 @@
       if (typeof deactivateModalFocus === "function") deactivateModalFocus();
     }
     extracurricularTaskModalState.task = null;
+    if (typeof setActiveBannerUi === "function") setActiveBannerUi("task");
+    if (typeof resetTaskBannerCropState === "function") resetTaskBannerCropState();
+    taskModal.bannerSource = null;
+    taskModal.bannerViews = typeof emptyTaskBannerViews === "function" ? emptyTaskBannerViews() : { home: null, games: null, board: null };
+    taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
   }
 
   function deleteExtracurricularTask(taskId) {
@@ -861,6 +923,7 @@
       const descInput = document.getElementById("extracurricularTaskDescription");
       const gameSelect = document.getElementById("extracurricularTaskGame");
       const currencyInput = document.getElementById("extracurricularTaskCurrency");
+      const excludeFromDataInput = document.getElementById("extracurricularTaskExcludeFromData");
 
       const label = (nameInput && nameInput.value || "").trim();
       if (!label) {
@@ -872,6 +935,7 @@
       const currency = Math.max(0, Number(currencyInput && currencyInput.value) || 0);
       const endTimeInput = document.getElementById("extracurricularTaskEndTime");
       const endTimeVal = endTBDInput && endTBDInput.checked ? null : (endTimeInput && endTimeInput.value ? endTimeInput.value.trim() : null);
+      const excludeFromData = !!(excludeFromDataInput && excludeFromDataInput.checked);
       const payload = {
         id: task ? task.id : "ex_" + Date.now(),
         label,
@@ -882,11 +946,23 @@
         description: (descInput && descInput.value || "").trim() || null,
         gameId: (gameSelect && gameSelect.value) || null,
         currency: currency || undefined,
+        excludeFromData: excludeFromData || undefined,
       };
+
+      if (typeof setActiveBannerUi === "function") setActiveBannerUi("extra");
+      if (typeof commitTaskBannerCrop === "function" && taskBannerCrop.sourceImg && !taskBannerCrop.clear) {
+        commitTaskBannerCrop();
+      }
+      if (typeof applyTaskBannersToSavePayload === "function") applyTaskBannersToSavePayload(payload);
 
       if (task) {
         const idx = (state.extracurricularTasks || []).findIndex((t) => t.id === task.id);
-        if (idx >= 0) state.extracurricularTasks[idx] = { ...state.extracurricularTasks[idx], ...payload };
+        if (idx >= 0) {
+          const merged = { ...state.extracurricularTasks[idx], ...payload };
+          if (!excludeFromData) delete merged.excludeFromData;
+          if (typeof clearTaskBannerFieldsFromMerged === "function") clearTaskBannerFieldsFromMerged(merged);
+          state.extracurricularTasks[idx] = merged;
+        }
       } else {
         state.extracurricularTasks = state.extracurricularTasks || [];
         state.extracurricularTasks.push(payload);
@@ -895,4 +971,18 @@
       closeExtracurricularTaskModal();
       renderActiveTab();
     });
+
+    const gameSelectLive = document.getElementById("extracurricularTaskGame");
+    const currencyLive = document.getElementById("extracurricularTaskCurrency");
+    const refreshPreview = () => {
+      if (activeBannerUiKey !== "extra") return;
+      if (taskModal.bannerSource && typeof syncTaskBannerPreview === "function") syncTaskBannerPreview();
+    };
+    if (gameSelectLive) {
+      gameSelectLive.addEventListener("change", () => {
+        taskModal.gameId = gameSelectLive.value || null;
+        refreshPreview();
+      });
+    }
+    if (currencyLive) currencyLive.addEventListener("input", refreshPreview);
   }

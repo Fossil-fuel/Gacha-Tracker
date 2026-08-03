@@ -183,15 +183,75 @@
     min-height: 44px;
   }
 
-  /* Attendance pies: stack for readable legends + skip lists */
+  /* Attendance / Data pies: up to 3 per row in hamburger mode */
   .pie-row,
   .data-pies-row {
-    flex-direction: column;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: flex-start;
   }
 
-  .pie-box {
-    width: 100%;
-    max-width: 100%;
+  .pie-box,
+  .data-pies-row .pie-box {
+    flex: 1 1 calc((100% - 0.9rem) / 3);
+    min-width: 0;
+    max-width: calc((100% - 0.9rem) / 3);
+    width: auto;
+    box-sizing: border-box;
+    padding: 0.5rem 0.25rem;
+  }
+
+  /* Keep chart above legend so three columns stay readable */
+  .data-pies-row .pie-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.25rem;
+  }
+
+  .data-pies-row .pie-box h3,
+  .data-pies-row .pie-box .pie-chart,
+  .data-pies-row .pie-box .pie-legend {
+    grid-column: auto;
+    grid-row: auto;
+    justify-self: center;
+    align-self: center;
+  }
+
+  .pie-box .pie-chart,
+  .data-pies-row .pie-box .pie-chart,
+  .attendance-pie-chart {
+    width: 72px;
+    height: 72px;
+    margin-bottom: 0.3rem;
+  }
+
+  .pie-box h3 {
+    font-size: 0.78rem;
+    min-height: 1.6em;
+    margin-bottom: 0.15rem;
+  }
+
+  .pie-legend,
+  .data-pies-row .pie-box .pie-legend {
+    font-size: 0.62rem;
+    text-align: center;
+    line-height: 1.25;
+  }
+
+  .pie-legend-item {
+    white-space: normal;
+  }
+
+  .data-pies-row .pie-box .pie-legend-split {
+    align-items: center;
+  }
+
+  .pie-legend-split {
+    gap: 0.15rem;
   }
 
   /* Touch: history day cells are large hit targets; edit stays secondary */
@@ -318,24 +378,20 @@
   .settings-sidebar {
     width: 100%;
     min-width: 0;
-    flex-direction: row;
-    flex-wrap: wrap;
-    padding: 0.5rem;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    padding: 0.5rem 0.75rem;
     border-right: none;
     border-bottom: 1px solid var(--border);
-    gap: 0.25rem;
+    gap: 0.35rem;
   }
 
   .settings-nav-item {
-    padding: 0.5rem 0.75rem;
-    border-left: none;
-    border-bottom: 3px solid transparent;
+    display: none;
   }
 
-  .settings-nav-item.active,
-  .settings-nav-item[aria-current="page"] {
-    border-left-color: transparent;
-    border-bottom-color: var(--accent);
+  .settings-section-dropdown {
+    display: block;
   }
 
   /* Task menu grid: stack day cells on mobile */
@@ -439,6 +495,15 @@
   .games-title-row {
     flex-wrap: wrap;
     gap: 0.5rem;
+  }
+
+  .games-title-row .games-selected-identity {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .games-title-actions {
+    width: 100%;
   }
 
   .games-title-row .games-selected-title {

@@ -117,6 +117,8 @@
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
+        if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
+        applyTaskBannersToSavePayload(next);
         if (existingIdx >= 0) {
           const merged = { ...game.weeklies[existingIdx], ...next };
           if (!cycleEndEnabled) {
@@ -134,6 +136,7 @@
             delete merged.cycleEndHour;
             delete merged.cycleEndMinute;
           }
+          clearTaskBannerFieldsFromMerged(merged);
           game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
       } else if (taskModal.taskType === "endgame") {
@@ -164,6 +167,8 @@
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
+        if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
+        applyTaskBannersToSavePayload(next);
         if (existingIdx >= 0) {
           const prev = game.endgame[existingIdx];
           const oldCurrency = getEndgamePotential(prev);
@@ -191,6 +196,7 @@
             delete merged.cycleEndHour;
             delete merged.cycleEndMinute;
           }
+          clearTaskBannerFieldsFromMerged(merged);
           game.endgame[existingIdx] = merged;
         } else {
           game.endgame.push(next);
@@ -521,11 +527,32 @@
     return true;
   }
 
+  function isTaskHiddenInData(task) {
+    return !!(task && (task.hideInData || task.excludeFromData));
+  }
+
+  function setTaskHideInData(gameId, taskType, taskId, hidden) {
+    const game = getGame(gameId);
+    if (!game) return false;
+    const list = taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []);
+    const task = list.find((t) => (t.id || t.label) === taskId);
+    if (!task) return false;
+    if (hidden) task.hideInData = true;
+    else delete task.hideInData;
+    bumpDataVersion();
+    save();
+    renderActiveTab();
+    return true;
+  }
+
   function appendTaskCycleEndFooter(parent, game, task, taskType) {
     if (!parent || !game || !task) return;
     const taskId = task.id || task.label;
     const footer = document.createElement("div");
     footer.className = "task-panel-cycle-end-footer";
+
+    const left = document.createElement("div");
+    left.className = "task-panel-cycle-end-left";
 
     const toggleLabel = document.createElement("label");
     toggleLabel.className = "task-panel-cycle-end-toggle";
@@ -549,8 +576,26 @@
 
     toggleLabel.appendChild(toggle);
     toggleLabel.appendChild(toggleText);
-    footer.appendChild(toggleLabel);
-    footer.appendChild(dateInput);
+    left.appendChild(toggleLabel);
+    left.appendChild(dateInput);
+    footer.appendChild(left);
+
+    const hideLabel = document.createElement("label");
+    hideLabel.className = "task-panel-cycle-end-toggle task-panel-hide-in-data-toggle";
+    hideLabel.title = "Hide this task from the Data tab";
+    const hideToggle = document.createElement("input");
+    hideToggle.type = "checkbox";
+    hideToggle.className = "fill-toggle";
+    hideToggle.checked = !!task.hideInData;
+    hideToggle.setAttribute("aria-label", "Hide in Data");
+    const hideText = document.createElement("span");
+    hideText.textContent = "Hide in Data";
+    hideLabel.appendChild(hideToggle);
+    hideLabel.appendChild(hideText);
+    hideToggle.addEventListener("change", () => {
+      setTaskHideInData(game.id, taskType, taskId, hideToggle.checked);
+    });
+    footer.appendChild(hideLabel);
 
     toggle.addEventListener("change", () => {
       dateInput.hidden = !toggle.checked;
@@ -770,6 +815,7 @@
 
     let wEarned = 0, wPotential = 0;
     (game.weeklies || []).forEach((t) => {
+      if (isTaskHiddenInData(t)) return;
       const key = game.id + "." + (t.id || t.label);
       const pot = getWeeklyPotential(t);
       const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
@@ -779,6 +825,7 @@
 
     let eEarned = 0, ePotential = 0;
     (game.endgame || []).forEach((t) => {
+      if (isTaskHiddenInData(t)) return;
       const key = game.id + "." + (t.id || t.label);
       const taskId = t.id || t.label;
       const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
@@ -789,6 +836,7 @@
     let xEarned = 0, xPotential = 0;
     (state.extracurricularTasks || []).forEach((t) => {
       if (t.gameId !== game.id) return;
+      if (isTaskHiddenInData(t)) return;
       const cur = Math.max(0, Number(t.currency) || 0);
       if (cur > 0) xPotential += cur;
       if (!state.extracurricularCompleted[t.id]) return;

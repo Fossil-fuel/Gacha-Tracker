@@ -129,143 +129,176 @@
     });
   }
 
-  load();
-  if (typeof window.initFirebaseAuth === "function") window.initFirebaseAuth();
-  processResets();
-  if (state.defaultTab && state.defaultTab !== state.tab) {
-    state.tab = state.defaultTab;
-  }
-  setDateLabels();
-  initTabs();
-  initFormatToggles();
-  initTaskModal();
-  initGameModal();
-  initDeleteGameModal();
-  initClearGameDataModal();
-  initCalendarDayModal();
-  initEarningsModal();
-  initEndgameCompleteModal();
-  initExtracurricularCompleteModal();
-  initTimeTrendsDetailModal();
-  initAttendanceSkippedModal();
-  initClearTimeTrendsModal();
-  initSettingsModal();
-  initExtracurricularTaskModal();
-  document.addEventListener("keydown", (e) => {
-    if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== "z") return;
-    if (e.altKey || e.shiftKey) return;
-    const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
-    if (tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable)) return;
-    if (typeof canUndoCompletion !== "function" || !canUndoCompletion()) return;
-    e.preventDefault();
-    const result = undoLastCompletion();
-    if (result && result.ok && typeof updateCompletionUndoUI === "function") updateCompletionUndoUI();
-  });
-  window.addEventListener("beforeunload", () => {
-    if (typeof window.flushPendingSave === "function") window.flushPendingSave();
-  });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && typeof window.flushPendingSave === "function") {
-      window.flushPendingSave();
+  function startApp() {
+    if (typeof window.initFirebaseAuth === "function") window.initFirebaseAuth();
+    processResets();
+    if (state.defaultTab && state.defaultTab !== state.tab) {
+      state.tab = state.defaultTab;
     }
-  });
-  setInterval(() => {
-    const changed = processResets();
-    updateTaskRemainingTexts();
-    if (changed) renderActiveTab();
-  }, 60000);
-  setInterval(updateSidebarTime, 1000);
-  renderAll();
+    setDateLabels();
+    initTabs();
+    initTaskModal();
+    initGameModal();
+    initGameIdentityModal();
+    initDeleteGameModal();
+    initClearGameDataModal();
+    initCalendarDayModal();
+    initEarningsModal();
+    initEndgameCompleteModal();
+    initExtracurricularCompleteModal();
+    initTimeTrendsDetailModal();
+    initAttendanceSkippedModal();
+    initClearTimeTrendsModal();
+    initSettingsModal();
+    initExtracurricularTaskModal();
+    document.addEventListener("keydown", (e) => {
+      if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== "z") return;
+      if (e.altKey || e.shiftKey) return;
+      const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
+      if (tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable)) return;
+      if (typeof canUndoCompletion !== "function" || !canUndoCompletion()) return;
+      e.preventDefault();
+      const result = undoLastCompletion();
+      if (result && result.ok && typeof updateCompletionUndoUI === "function") updateCompletionUndoUI();
+    });
+    window.addEventListener("beforeunload", () => {
+      if (typeof window.flushPendingSave === "function") window.flushPendingSave();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden" && typeof window.flushPendingSave === "function") {
+        window.flushPendingSave();
+      }
+    });
+    setInterval(() => {
+      const changed = processResets();
+      updateTaskRemainingTexts();
+      if (changed) renderActiveTab();
+    }, 60000);
+    setInterval(updateSidebarTime, 1000);
 
-  // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
-  if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {
-    window.__gachaLiveProbe = {
-      ready: true,
-      getStateSnapshot() {
-        return JSON.parse(
-          JSON.stringify({
-            games: state.games,
-            completionByDate: state.completionByDate,
-            completionTimestamps: state.completionTimestamps,
-            dailiesCompleted: state.dailiesCompleted,
-            weekliesCompleted: state.weekliesCompleted,
-            endgameCompleted: state.endgameCompleted,
-            dailiesAttempted: state.dailiesAttempted,
-            weekliesAttempted: state.weekliesAttempted,
-            endgameAttempted: state.endgameAttempted,
-            lastProcessedResets: state.lastProcessedResets,
-            endgameCurrencyEarned: state.endgameCurrencyEarned,
-            endgameCurrencyPotential: state.endgameCurrencyPotential,
-            endgameCompletionDates: state.endgameCompletionDates,
-            simulatedDateOffset: state.simulatedDateOffset || 0,
-            simulatedHourOffset: state.simulatedHourOffset || 0,
-            tab: state.tab,
-          })
-        );
-      },
-      loadStateSnapshot(snap) {
-        if (!snap || typeof snap !== "object") return false;
-        [
-          "games",
-          "completionByDate",
-          "completionTimestamps",
-          "dailiesCompleted",
-          "weekliesCompleted",
-          "endgameCompleted",
-          "dailiesAttempted",
-          "weekliesAttempted",
-          "endgameAttempted",
-          "lastProcessedResets",
-          "endgameCurrencyEarned",
-          "endgameCurrencyPotential",
-          "endgameCompletionDates",
-        ].forEach((k) => {
-          if (snap[k] !== undefined) state[k] = snap[k];
-        });
-        state.simulatedDateOffset = snap.simulatedDateOffset || 0;
-        state.simulatedHourOffset = snap.simulatedHourOffset || 0;
-        if (!state.lastProcessedResets || typeof state.lastProcessedResets !== "object") {
-          state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
-        } else {
-          if (!state.lastProcessedResets.dailies) state.lastProcessedResets.dailies = {};
-          if (!state.lastProcessedResets.weeklies) state.lastProcessedResets.weeklies = {};
-          if (!state.lastProcessedResets.endgame) state.lastProcessedResets.endgame = {};
-        }
-        if (!state.completionByDate) state.completionByDate = {};
-        if (!Array.isArray(state.completionTimestamps)) state.completionTimestamps = [];
-        if (snap.tab) state.tab = snap.tab;
-        if (typeof save === "function") save({ immediate: true });
-        if (typeof renderAll === "function") renderAll();
-        return true;
-      },
-      applyTaskCompletion,
-      removeTaskCompletion,
-      getRemainingDatesInCycleFrom,
-      getCalendarDatesInCycleRange,
-      getWeeklyCycleBoundsForMoment,
-      getEndgameCycleBoundsForMoment,
-      getTaskPeriodDateStr,
-      getTasksAvailableOnDate,
-      isWeeklyAvailableOnDate,
-      isWeeklyAvailableOnCalendarDate,
-      isEndgameAvailableOnCalendarDate,
-      isCompletedInCycleForDate,
-      isWeeklyCompletedInCurrentCycle,
-      isEndgameCompletedInCurrentCycle,
-      getGame,
-      getAllGames,
-      cleanupCycleBoundaryBleedMarks,
-      processResets,
-      scanDataConflicts,
-      getDateStr,
-      getSimulatedNow,
-      getPeriodDateStrForReset,
-      getCycleMembershipMoment,
-      toggleWeekly,
-      toggleEndgame,
-      completeEndgameWithCurrency,
-      recordCompletion,
-      unrecordCompletion,
-    };
+    // Games banners switch home↔games crop at the hamburger breakpoint.
+    try {
+      const gamesBannerMq = window.matchMedia("(max-width: 768px)");
+      const onGamesBannerModeChange = () => {
+        if (state.tab === "games") renderActiveTab();
+      };
+      if (gamesBannerMq.addEventListener) gamesBannerMq.addEventListener("change", onGamesBannerModeChange);
+      else if (gamesBannerMq.addListener) gamesBannerMq.addListener(onGamesBannerModeChange);
+    } catch (_) {}
+
+    renderAll();
+
+    // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
+    if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {
+      window.__gachaLiveProbe = {
+        ready: true,
+        getStateSnapshot() {
+          return JSON.parse(
+            JSON.stringify({
+              games: state.games,
+              completionByDate: state.completionByDate,
+              completionTimestamps: state.completionTimestamps,
+              dailiesCompleted: state.dailiesCompleted,
+              weekliesCompleted: state.weekliesCompleted,
+              endgameCompleted: state.endgameCompleted,
+              dailiesAttempted: state.dailiesAttempted,
+              weekliesAttempted: state.weekliesAttempted,
+              endgameAttempted: state.endgameAttempted,
+              lastProcessedResets: state.lastProcessedResets,
+              endgameCurrencyEarned: state.endgameCurrencyEarned,
+              endgameCurrencyPotential: state.endgameCurrencyPotential,
+              endgameCompletionDates: state.endgameCompletionDates,
+              simulatedDateOffset: state.simulatedDateOffset || 0,
+              simulatedHourOffset: state.simulatedHourOffset || 0,
+              tab: state.tab,
+            })
+          );
+        },
+        loadStateSnapshot(snap) {
+          if (!snap || typeof snap !== "object") return false;
+          [
+            "games",
+            "completionByDate",
+            "completionTimestamps",
+            "dailiesCompleted",
+            "weekliesCompleted",
+            "endgameCompleted",
+            "dailiesAttempted",
+            "weekliesAttempted",
+            "endgameAttempted",
+            "lastProcessedResets",
+            "endgameCurrencyEarned",
+            "endgameCurrencyPotential",
+            "endgameCompletionDates",
+          ].forEach((k) => {
+            if (snap[k] !== undefined) state[k] = snap[k];
+          });
+          state.simulatedDateOffset = snap.simulatedDateOffset || 0;
+          state.simulatedHourOffset = snap.simulatedHourOffset || 0;
+          if (!state.lastProcessedResets || typeof state.lastProcessedResets !== "object") {
+            state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
+          } else {
+            if (!state.lastProcessedResets.dailies) state.lastProcessedResets.dailies = {};
+            if (!state.lastProcessedResets.weeklies) state.lastProcessedResets.weeklies = {};
+            if (!state.lastProcessedResets.endgame) state.lastProcessedResets.endgame = {};
+          }
+          if (!state.completionByDate) state.completionByDate = {};
+          if (!Array.isArray(state.completionTimestamps)) state.completionTimestamps = [];
+          if (snap.tab) state.tab = snap.tab;
+          if (typeof save === "function") save({ immediate: true });
+          if (typeof renderAll === "function") renderAll();
+          return true;
+        },
+        applyTaskCompletion,
+        removeTaskCompletion,
+        getRemainingDatesInCycleFrom,
+        getCalendarDatesInCycleRange,
+        getWeeklyCycleBoundsForMoment,
+        getEndgameCycleBoundsForMoment,
+        getTaskPeriodDateStr,
+        getTasksAvailableOnDate,
+        isWeeklyAvailableOnDate,
+        isWeeklyAvailableOnCalendarDate,
+        isEndgameAvailableOnCalendarDate,
+        isCompletedInCycleForDate,
+        isWeeklyCompletedInCurrentCycle,
+        isEndgameCompletedInCurrentCycle,
+        getGame,
+        getAllGames,
+        cleanupCycleBoundaryBleedMarks,
+        processResets,
+        scanDataConflicts,
+        getDateStr,
+        getSimulatedNow,
+        getPeriodDateStrForReset,
+        getCycleMembershipMoment,
+        toggleWeekly,
+        toggleEndgame,
+        completeEndgameWithCurrency,
+        recordCompletion,
+        unrecordCompletion,
+      };
+    }
   }
+
+  function bootApp() {
+    const finish = () => {
+      try {
+        startApp();
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    if (typeof initPersistentStorage === "function") {
+      initPersistentStorage().then(finish).catch(() => {
+        try { load(); } catch (_) {}
+        finish();
+      });
+    } else {
+      load();
+      finish();
+    }
+  }
+
+  bootApp();
 })();

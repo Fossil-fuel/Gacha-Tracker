@@ -150,17 +150,31 @@
           const game = getGame(item.gameId);
           if (game) grid.appendChild(buildDailyTaskItem(game, "div"));
         });
+        requestAnimationFrame(() => {
+          syncHomeDailyCardSizes(grid);
+          grid.querySelectorAll("img").forEach((img) => {
+            if (img.complete) return;
+            img.addEventListener("load", () => syncHomeDailyCardSizes(grid), { once: true });
+          });
+        });
+        if (!window.__homeDailyResizeBound) {
+          window.__homeDailyResizeBound = true;
+          let resizeTimer = 0;
+          window.addEventListener("resize", () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+              document.querySelectorAll(".home-dwe-checklist-scroll .task-grid[data-type=\"dailies\"]").forEach((g) => {
+                syncHomeDailyCardSizes(g);
+              });
+            }, 100);
+          });
+        }
       } else if (type === "weeklies") {
         items.forEach((item) => {
           const game = getGame(item.gameId);
           const task = game && (game.weeklies || []).find((t) => (t.id || t.label) === item.taskId);
           if (game && task) {
-            const card = buildWeeklyTaskItem(game, task, "div");
-            const gameLabel = document.createElement("div");
-            gameLabel.className = "task-grid-game-label";
-            gameLabel.textContent = game.name;
-            card.insertBefore(gameLabel, card.firstChild);
-            grid.appendChild(card);
+            grid.appendChild(buildWeeklyTaskItem(game, task, "div", { surface: "home" }));
           }
         });
       } else if (type === "endgame") {
@@ -168,12 +182,7 @@
           const game = getGame(item.gameId);
           const task = game && (game.endgame || []).find((t) => (t.id || t.label) === item.taskId);
           if (game && task) {
-            const card = buildEndgameTaskItem(game, task, "div");
-            const gameLabel = document.createElement("div");
-            gameLabel.className = "task-grid-game-label";
-            gameLabel.textContent = game.name;
-            card.insertBefore(gameLabel, card.firstChild);
-            grid.appendChild(card);
+            grid.appendChild(buildEndgameTaskItem(game, task, "div", { surface: "home" }));
           }
         });
       }

@@ -1,6 +1,12 @@
 (function () {
   "use strict";
   const STORAGE_KEY = "gacha-tracker";
+  const STORAGE_SLIM_KEY = "gacha-tracker-slim";
+  const STORAGE_META_KEY = "gacha-tracker-meta";
+  const IDB_NAME = "gacha-tracker-db";
+  const IDB_VERSION = 1;
+  const IDB_STORE = "saves";
+  const IDB_FULL_RECORD = "full";
   const DEFAULT_RESET_HOUR = 4;
   const SERVER_RESET_HOUR_DST = 4;
   const SERVER_RESET_HOUR_STANDARD = 3;
@@ -25,6 +31,96 @@
     selectedDay: 0,
     frequencyUnit: "week",
     timeLimitUnit: "week",
+    bannerTarget: "board", // "home" | "games" | "board"
+    bannerSource: null, // single shared source data URL
+    bannerViews: {
+      home: null, // { aspect, x, y, w, h } normalized stage placement of source
+      games: null,
+      board: null,
+    },
+    bannerPreviewUrls: {
+      home: null,
+      games: null,
+      board: null,
+    },
+  };
+
+  const TASK_BANNER_STAGE = { w: 640, h: 360 };
+  const TASK_BANNER_CROP_MIN = 48;
+
+  const TASK_BANNER_TARGETS = {
+    home: { id: "home", label: "Home", aspect: 16 / 9 },
+    games: { id: "games", label: "Games", aspect: 3 / 4 },
+    board: { id: "board", label: "Board", aspect: 16 / 9 },
+  };
+
+  /** Banner crop UI ids for task modal vs extracurricular modal (shared crop state). */
+  const TASK_BANNER_UI = {
+    task: {
+      root: "taskModal",
+      chooseBtn: "taskBannerChooseBtn",
+      clearBtn: "taskBannerClearBtn",
+      file: "taskBannerFile",
+      wrap: "taskBannerCropWrap",
+      canvas: "taskBannerCropCanvas",
+      imgFrame: "taskBannerImageFrame",
+      cropFrame: "taskBannerCropFrame",
+      previewWrap: "taskBannerPreviewWrap",
+      cardPreview: "taskBannerCardPreview",
+      nameInput: "taskNameInput",
+    },
+    extra: {
+      root: "extracurricularTaskModal",
+      chooseBtn: "extraBannerChooseBtn",
+      clearBtn: "extraBannerClearBtn",
+      file: "extraBannerFile",
+      wrap: "extraBannerCropWrap",
+      canvas: "extraBannerCropCanvas",
+      imgFrame: "extraBannerImageFrame",
+      cropFrame: "extraBannerCropFrame",
+      previewWrap: "extraBannerPreviewWrap",
+      cardPreview: "extraBannerCardPreview",
+      nameInput: "extracurricularTaskName",
+    },
+  };
+  let activeBannerUiKey = "task";
+
+  function setActiveBannerUi(key) {
+    if (TASK_BANNER_UI[key]) activeBannerUiKey = key;
+  }
+
+  function bannerEl(part) {
+    const cfg = TASK_BANNER_UI[activeBannerUiKey];
+    if (!cfg || !cfg[part]) return null;
+    return qs(cfg[part]);
+  }
+
+  function bannerRootEl() {
+    return bannerEl("root") || document;
+  }
+
+  const taskBannerCrop = {
+    sourceImg: null,
+    imgX: 0,
+    imgY: 0,
+    imgW: 0,
+    imgH: 0,
+    cropX: 0,
+    cropY: 0,
+    cropW: 0,
+    cropH: 0,
+    mode: null, // "move-img" | "move-crop" | "scale-img-*" | "scale-crop-*"
+    dragStartX: 0,
+    dragStartY: 0,
+    startImgX: 0,
+    startImgY: 0,
+    startImgW: 0,
+    startImgH: 0,
+    startCropX: 0,
+    startCropY: 0,
+    startCropW: 0,
+    startCropH: 0,
+    clear: false,
   };
 
   const gameModal = {
@@ -42,9 +138,6 @@
     dataSelectedGameId: null,
     gamesSelectedId: null,
     gamesSubTab: "dailies",
-    dailiesView: "list",
-    weekliesView: "list",
-    endgameView: "list",
     games: [],
     dailiesCompleted: {},
     weekliesCompleted: {},
@@ -66,16 +159,17 @@
     attendancePieInclude: {},
     dataPieInclude: {}, // { gameId: { dailies, weeklies, endgame, extracurricular } } - true = include in total/pie
     dataExcludeInProgress: {}, // { gameId: true } - true = exclude unfinished current cycles (default); false = include them as theoretical potential
+    dataHideDates: {}, // { gameId: true } - hide counting-since / date labels on Data page
     attendanceView: "weekly", // "weekly" | "history" | "timestamps"
     timestampsSelectedGameIds: {}, // { gameId: true } - which games to show in timestamps page; empty = all
     timestampsSelectedEndgameTasks: {}, // { "gameId.taskId": true } - which endgame tasks to show; empty = all
+    timestampsEndgamePickerGameId: null, // which game's endgame tasks are shown in the picker UI
     historyMonth: null,
     historyYear: null,
     extracurricularTasks: [],
     extracurricularCompleted: {},
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
     extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
-    extracurricularView: "list",
     extracurricularViewMode: "tasks", // "tasks" | "history" - history shows archived (completed >24h ago)
     themeMode: "preset",
     themePreset: "purple",
@@ -407,16 +501,16 @@
   ];
 
   const DEFAULT_CUSTOM_THEME = {
-    bg: "#170f24",
-    bgElevated: "#241638",
-    bgPanel: "#1b1230",
-    text: "#e8e8f0",
-    textMuted: "#a0a0b8",
-    accent: "#7c3aed",
-    accentHover: "#8b5cf6",
-    accentActive: "#6d28d9",
-    border: "#34264d",
-    success: "#34d399",
+    bg: "#0c0a12",
+    bgElevated: "#1a1526",
+    bgPanel: "#13101c",
+    text: "#f5f2fa",
+    textMuted: "#a8a0b8",
+    accent: "#a855f7",
+    accentHover: "#c084fc",
+    accentActive: "#9333ea",
+    border: "#2e2740",
+    success: "#6bbf8a",
     pieDailies: "#87ceeb",
     pieWeeklies: "#20b2aa",
     pieEndgame: "#50c878",
@@ -441,10 +535,17 @@
 
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const isFirstLoad = !raw;
-      if (raw) {
-        const parsed = JSON.parse(raw);
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(STORAGE_SLIM_KEY);
+      applySavePayload(raw ? JSON.parse(raw) : null, { isFirstLoad: !raw });
+    } catch (_) {
+      applySavePayload(null, { isFirstLoad: true });
+    }
+  }
+
+  function applySavePayload(parsed, opts) {
+    const isFirstLoad = !!(opts && opts.isFirstLoad) || !parsed;
+    try {
+      if (parsed) {
         if (parsed.games) {
           state.games = parsed.games;
           state.games.forEach((g) => {
@@ -526,15 +627,14 @@
         if (Array.isArray(parsed.completionTimestamps)) state.completionTimestamps = parsed.completionTimestamps;
         if (parsed.timestampsSelectedGameIds && typeof parsed.timestampsSelectedGameIds === "object") state.timestampsSelectedGameIds = parsed.timestampsSelectedGameIds;
         if (parsed.timestampsSelectedEndgameTasks && typeof parsed.timestampsSelectedEndgameTasks === "object") state.timestampsSelectedEndgameTasks = parsed.timestampsSelectedEndgameTasks;
+        if (typeof parsed.timestampsEndgamePickerGameId === "string") state.timestampsEndgamePickerGameId = parsed.timestampsEndgamePickerGameId;
         if (parsed.lastProcessedResets) state.lastProcessedResets = parsed.lastProcessedResets;
         if (parsed.dataSelectedGameId != null) state.dataSelectedGameId = parsed.dataSelectedGameId;
         if (parsed.gamesSelectedId != null) state.gamesSelectedId = parsed.gamesSelectedId;
-        if (parsed.dailiesView === "grid" || parsed.dailiesView === "list") state.dailiesView = parsed.dailiesView;
-        if (parsed.weekliesView === "grid" || parsed.weekliesView === "list") state.weekliesView = parsed.weekliesView;
-        if (parsed.endgameView === "grid" || parsed.endgameView === "list") state.endgameView = parsed.endgameView;
         if (parsed.attendancePieInclude && typeof parsed.attendancePieInclude === "object") state.attendancePieInclude = parsed.attendancePieInclude;
         if (parsed.dataPieInclude && typeof parsed.dataPieInclude === "object") state.dataPieInclude = parsed.dataPieInclude;
         if (parsed.dataExcludeInProgress && typeof parsed.dataExcludeInProgress === "object") state.dataExcludeInProgress = parsed.dataExcludeInProgress;
+        if (parsed.dataHideDates && typeof parsed.dataHideDates === "object") state.dataHideDates = parsed.dataHideDates;
         if (parsed.attendanceView === "weekly" || parsed.attendanceView === "history" || parsed.attendanceView === "timestamps") state.attendanceView = parsed.attendanceView;
         if (parsed.historyMonth != null && parsed.historyMonth >= 0 && parsed.historyMonth <= 11) state.historyMonth = parsed.historyMonth;
         if (parsed.historyYear != null && Number.isFinite(parsed.historyYear)) state.historyYear = parsed.historyYear;
@@ -542,7 +642,6 @@
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
         if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
-        if (parsed.extracurricularView === "grid" || parsed.extracurricularView === "list") state.extracurricularView = parsed.extracurricularView;
         if (parsed.extracurricularViewMode === "tasks" || parsed.extracurricularViewMode === "history") state.extracurricularViewMode = parsed.extracurricularViewMode;
         if (parsed.themeMode === "custom" || parsed.themeMode === "preset") state.themeMode = parsed.themeMode;
         if (parsed.themePreset && typeof parsed.themePreset === "string") state.themePreset = parsed.themePreset;
@@ -583,6 +682,7 @@
     if (!state.completionTimestamps) state.completionTimestamps = [];
     if (!state.timestampsSelectedGameIds) state.timestampsSelectedGameIds = {};
     if (!state.timestampsSelectedEndgameTasks) state.timestampsSelectedEndgameTasks = {};
+    if (state.timestampsEndgamePickerGameId == null) state.timestampsEndgamePickerGameId = null;
     if (!state.lastProcessedResets) state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
     if (!state.endgamePendingCycleStartMs) state.endgamePendingCycleStartMs = {};
@@ -659,9 +759,31 @@
     return Number.isFinite(obj && obj[hourKey]) ? obj[hourKey] : fallback;
   }
 
-  function buildSavePayload() {
+  function cloneTaskWithoutImages(task) {
+    if (!task || typeof task !== "object") return task;
+    const c = Object.assign({}, task);
+    delete c.bannerSourceImage;
+    delete c.bannerImage;
+    delete c.bannerHomeImage;
+    delete c.bannerGamesImage;
+    delete c.bannerHomeAspect;
+    delete c.bannerGamesAspect;
+    return c;
+  }
+
+  function cloneGameWithoutImages(game) {
+    if (!game || typeof game !== "object") return game;
+    const c = Object.assign({}, game);
+    delete c.iconImage;
+    c.weeklies = Array.isArray(game.weeklies) ? game.weeklies.map(cloneTaskWithoutImages) : game.weeklies;
+    c.endgame = Array.isArray(game.endgame) ? game.endgame.map(cloneTaskWithoutImages) : game.endgame;
+    return c;
+  }
+
+  function buildSavePayload(opts) {
+    const omitImages = !!(opts && opts.omitImages);
     return {
-      games: state.games,
+      games: omitImages ? (state.games || []).map(cloneGameWithoutImages) : state.games,
       dailiesCompleted: state.dailiesCompleted,
       weekliesCompleted: state.weekliesCompleted,
       endgameCompleted: state.endgameCompleted,
@@ -677,23 +799,23 @@
       lastProcessedResets: state.lastProcessedResets,
       dataSelectedGameId: state.dataSelectedGameId,
       gamesSelectedId: state.gamesSelectedId,
-      dailiesView: state.dailiesView,
-      weekliesView: state.weekliesView,
-      endgameView: state.endgameView,
       attendancePieInclude: state.attendancePieInclude,
       dataPieInclude: state.dataPieInclude,
       dataExcludeInProgress: state.dataExcludeInProgress,
+      dataHideDates: state.dataHideDates,
       attendanceView: state.attendanceView,
       timestampsSelectedGameIds: state.timestampsSelectedGameIds,
       timestampsSelectedEndgameTasks: state.timestampsSelectedEndgameTasks,
+      timestampsEndgamePickerGameId: state.timestampsEndgamePickerGameId,
       completionTimestamps: state.completionTimestamps,
       historyMonth: state.historyMonth,
       historyYear: state.historyYear,
-      extracurricularTasks: state.extracurricularTasks,
+      extracurricularTasks: omitImages
+        ? (state.extracurricularTasks || []).map(cloneTaskWithoutImages)
+        : state.extracurricularTasks,
       extracurricularCompleted: state.extracurricularCompleted,
       extracurricularCompletedAt: state.extracurricularCompletedAt,
       extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
-      extracurricularView: state.extracurricularView,
       extracurricularViewMode: state.extracurricularViewMode,
       themeMode: state.themeMode,
       themePreset: state.themePreset,
@@ -721,6 +843,170 @@
   const SAVE_DEBOUNCE_MS = 200;
   let saveTimer = null;
   let pendingSaveJson = null;
+  let storageBackend = "local"; // "local" until IDB is ready, then "idb"
+  let idbOpenPromise = null;
+
+  function readStorageMeta() {
+    try {
+      const raw = localStorage.getItem(STORAGE_META_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function writeStorageMeta(meta) {
+    try {
+      localStorage.setItem(STORAGE_META_KEY, JSON.stringify(meta || {}));
+    } catch (_) {}
+  }
+
+  function openTrackerIdb() {
+    if (idbOpenPromise) return idbOpenPromise;
+    idbOpenPromise = new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") {
+        reject(new Error("IndexedDB unavailable"));
+        return;
+      }
+      const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+    });
+    return idbOpenPromise;
+  }
+
+  function idbGetFullJson() {
+    return openTrackerIdb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.get(IDB_FULL_RECORD);
+      req.onsuccess = () => {
+        const val = req.result;
+        if (typeof val === "string" && val) resolve(val);
+        else if (val && typeof val === "object" && typeof val.json === "string") resolve(val.json);
+        else resolve(null);
+      };
+      req.onerror = () => reject(req.error || new Error("IndexedDB get failed"));
+    }));
+  }
+
+  function idbPutFullJson(jsonStr) {
+    return openTrackerIdb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.put(String(jsonStr || ""), IDB_FULL_RECORD);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error || new Error("IndexedDB put failed"));
+    }));
+  }
+
+  /** Game-day key for primary server reset (e.g. America ~4:00). */
+  function getPrimaryServerPeriodDateStr(now) {
+    const server = state.primaryServer || "america";
+    const probe = { server: server, adjustForDST: true };
+    return getDailyPeriodDateStr(probe, now || getSimulatedNow());
+  }
+
+  function maybeWriteDailySlimBackup(force) {
+    try {
+      const dateKey = getPrimaryServerPeriodDateStr();
+      const meta = readStorageMeta();
+      if (!force && meta.lastSlimBackupDate === dateKey) return false;
+      const slimJson = JSON.stringify(buildSavePayload({ omitImages: true }));
+      localStorage.setItem(STORAGE_SLIM_KEY, slimJson);
+      meta.backend = "idb";
+      meta.lastSlimBackupDate = dateKey;
+      meta.lastSlimBackupAt = Date.now();
+      writeStorageMeta(meta);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function writeSavePayload(jsonStr) {
+    if (storageBackend === "idb") {
+      idbPutFullJson(jsonStr)
+        .then(() => {
+          lastSavedAtMs = Date.now();
+          updateLastSavedIndicator(false);
+          maybeWriteDailySlimBackup(false);
+        })
+        .catch(() => {
+          updateLastSavedIndicator(true);
+        });
+      if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
+      return;
+    }
+    localStorage.setItem(STORAGE_KEY, jsonStr);
+    if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
+  }
+
+  async function initPersistentStorage() {
+    let parsed = null;
+    let source = "none";
+    try {
+      const idbJson = await idbGetFullJson();
+      if (idbJson) {
+        parsed = JSON.parse(idbJson);
+        source = "idb";
+      }
+    } catch (_) {}
+
+    if (!parsed) {
+      try {
+        const legacy = localStorage.getItem(STORAGE_KEY);
+        if (legacy) {
+          parsed = JSON.parse(legacy);
+          source = "legacy";
+        }
+      } catch (_) {}
+    }
+
+    if (!parsed) {
+      try {
+        const slim = localStorage.getItem(STORAGE_SLIM_KEY);
+        if (slim) {
+          parsed = JSON.parse(slim);
+          source = "slim";
+        }
+      } catch (_) {}
+    }
+
+    applySavePayload(parsed, { isFirstLoad: !parsed });
+    storageBackend = "idb";
+
+    try {
+      const fullJson = JSON.stringify(buildSavePayload());
+      await idbPutFullJson(fullJson);
+      const meta = readStorageMeta();
+      meta.backend = "idb";
+      meta.migratedFrom = source;
+      meta.migratedAt = Date.now();
+      writeStorageMeta(meta);
+      if (source === "legacy") {
+        try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+      }
+      // Ensure a slim no-image backup exists after migrate / first boot.
+      maybeWriteDailySlimBackup(source !== "idb" || !localStorage.getItem(STORAGE_SLIM_KEY));
+    } catch (_) {
+      // Fall back to localStorage full saves if IDB write fails.
+      storageBackend = "local";
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSavePayload()));
+      } catch (_) {}
+    }
+  }
+
+  window.initPersistentStorage = initPersistentStorage;
 
   const PERF_DEBUG_KEY = "gacha-tracker-debug-perf";
 
@@ -786,11 +1072,6 @@
 
   window.bumpDataVersion = bumpDataVersion;
 
-  function writeSavePayload(jsonStr) {
-    localStorage.setItem(STORAGE_KEY, jsonStr);
-    if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
-  }
-
   let lastSavedAtMs = null;
 
   function updateLastSavedIndicator(failed) {
@@ -815,17 +1096,25 @@
     if (!pendingSaveJson) return;
     try {
       const json = pendingSaveJson;
+      pendingSaveJson = null;
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
       if (isPerfDebugEnabled()) perfMeasure("save.flush", () => writeSavePayload(json));
       else writeSavePayload(json);
-      lastSavedAtMs = Date.now();
-      updateLastSavedIndicator(false);
+      // IndexedDB path updates the indicator when the write resolves.
+      if (storageBackend !== "idb") {
+        lastSavedAtMs = Date.now();
+        updateLastSavedIndicator(false);
+      }
     } catch (_) {
+      pendingSaveJson = null;
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
       updateLastSavedIndicator(true);
-    }
-    pendingSaveJson = null;
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
     }
   }
 
@@ -859,10 +1148,18 @@
 
   window.__applyCloudData = function (jsonStr) {
     try {
-      localStorage.setItem(STORAGE_KEY, jsonStr);
-      load();
+      const parsed = JSON.parse(jsonStr);
+      applySavePayload(parsed, { isFirstLoad: false });
+      storageBackend = "idb";
+      save({ immediate: true });
       renderAll();
-    } catch (_) {}
+    } catch (_) {
+      try {
+        localStorage.setItem(STORAGE_KEY, jsonStr);
+        load();
+        renderAll();
+      } catch (__) {}
+    }
   };
 
   window.__uploadLocalToCloud = function () { save({ immediate: true }); };
@@ -2319,13 +2616,13 @@
       return v || fallback;
     };
     return {
-      bg: pick("--bg", "#170f24"),
-      elevated: pick("--bg-elevated", "#241638"),
-      panel: pick("--bg-panel", "#1b1230"),
-      text: pick("--text", "#e8e8f0"),
-      muted: pick("--text-muted", "#a0a0b8"),
-      border: pick("--border", "#34264d"),
-      accent: pick("--accent", "#7c3aed"),
+      bg: pick("--bg", "#0c0a12"),
+      elevated: pick("--bg-elevated", "#1a1526"),
+      panel: pick("--bg-panel", "#13101c"),
+      text: pick("--text", "#f5f2fa"),
+      muted: pick("--text-muted", "#a8a0b8"),
+      border: pick("--border", "#2e2740"),
+      accent: pick("--accent", "#a855f7"),
       dailies: pick("--pie-dailies", "#87ceeb"),
       weeklies: pick("--pie-weeklies", "#20b2aa"),
       endgame: pick("--pie-endgame", "#50c878"),
@@ -2387,7 +2684,7 @@
     const contentW = W - pad * 2;
     const gap = multi ? 10 : 14;
     const track = "rgba(255,255,255,0.08)";
-    const font = '"Outfit", "Segoe UI", system-ui, sans-serif';
+    const font = 'system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
     const cats = [
       { key: "dailies", label: "Dailies", color: colors.dailies, unit: "days" },
       { key: "weeklies", label: "Weeklies", color: colors.weeklies, unit: "" },
@@ -4643,6 +4940,8 @@
       bumpDataVersion();
       save();
     }
+    // Once per primary-server game day, refresh slim localStorage backup (no images).
+    if (storageBackend === "idb") maybeWriteDailySlimBackup(false);
     return didChange;
   }
 

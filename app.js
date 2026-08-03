@@ -121,6 +121,12 @@
 (function () {
   "use strict";
   const STORAGE_KEY = "gacha-tracker";
+  const STORAGE_SLIM_KEY = "gacha-tracker-slim";
+  const STORAGE_META_KEY = "gacha-tracker-meta";
+  const IDB_NAME = "gacha-tracker-db";
+  const IDB_VERSION = 1;
+  const IDB_STORE = "saves";
+  const IDB_FULL_RECORD = "full";
   const DEFAULT_RESET_HOUR = 4;
   const SERVER_RESET_HOUR_DST = 4;
   const SERVER_RESET_HOUR_STANDARD = 3;
@@ -145,6 +151,96 @@
     selectedDay: 0,
     frequencyUnit: "week",
     timeLimitUnit: "week",
+    bannerTarget: "board", // "home" | "games" | "board"
+    bannerSource: null, // single shared source data URL
+    bannerViews: {
+      home: null, // { aspect, x, y, w, h } normalized stage placement of source
+      games: null,
+      board: null,
+    },
+    bannerPreviewUrls: {
+      home: null,
+      games: null,
+      board: null,
+    },
+  };
+
+  const TASK_BANNER_STAGE = { w: 640, h: 360 };
+  const TASK_BANNER_CROP_MIN = 48;
+
+  const TASK_BANNER_TARGETS = {
+    home: { id: "home", label: "Home", aspect: 16 / 9 },
+    games: { id: "games", label: "Games", aspect: 3 / 4 },
+    board: { id: "board", label: "Board", aspect: 16 / 9 },
+  };
+
+  /** Banner crop UI ids for task modal vs extracurricular modal (shared crop state). */
+  const TASK_BANNER_UI = {
+    task: {
+      root: "taskModal",
+      chooseBtn: "taskBannerChooseBtn",
+      clearBtn: "taskBannerClearBtn",
+      file: "taskBannerFile",
+      wrap: "taskBannerCropWrap",
+      canvas: "taskBannerCropCanvas",
+      imgFrame: "taskBannerImageFrame",
+      cropFrame: "taskBannerCropFrame",
+      previewWrap: "taskBannerPreviewWrap",
+      cardPreview: "taskBannerCardPreview",
+      nameInput: "taskNameInput",
+    },
+    extra: {
+      root: "extracurricularTaskModal",
+      chooseBtn: "extraBannerChooseBtn",
+      clearBtn: "extraBannerClearBtn",
+      file: "extraBannerFile",
+      wrap: "extraBannerCropWrap",
+      canvas: "extraBannerCropCanvas",
+      imgFrame: "extraBannerImageFrame",
+      cropFrame: "extraBannerCropFrame",
+      previewWrap: "extraBannerPreviewWrap",
+      cardPreview: "extraBannerCardPreview",
+      nameInput: "extracurricularTaskName",
+    },
+  };
+  let activeBannerUiKey = "task";
+
+  function setActiveBannerUi(key) {
+    if (TASK_BANNER_UI[key]) activeBannerUiKey = key;
+  }
+
+  function bannerEl(part) {
+    const cfg = TASK_BANNER_UI[activeBannerUiKey];
+    if (!cfg || !cfg[part]) return null;
+    return qs(cfg[part]);
+  }
+
+  function bannerRootEl() {
+    return bannerEl("root") || document;
+  }
+
+  const taskBannerCrop = {
+    sourceImg: null,
+    imgX: 0,
+    imgY: 0,
+    imgW: 0,
+    imgH: 0,
+    cropX: 0,
+    cropY: 0,
+    cropW: 0,
+    cropH: 0,
+    mode: null, // "move-img" | "move-crop" | "scale-img-*" | "scale-crop-*"
+    dragStartX: 0,
+    dragStartY: 0,
+    startImgX: 0,
+    startImgY: 0,
+    startImgW: 0,
+    startImgH: 0,
+    startCropX: 0,
+    startCropY: 0,
+    startCropW: 0,
+    startCropH: 0,
+    clear: false,
   };
 
   const gameModal = {
@@ -162,9 +258,6 @@
     dataSelectedGameId: null,
     gamesSelectedId: null,
     gamesSubTab: "dailies",
-    dailiesView: "list",
-    weekliesView: "list",
-    endgameView: "list",
     games: [],
     dailiesCompleted: {},
     weekliesCompleted: {},
@@ -186,16 +279,17 @@
     attendancePieInclude: {},
     dataPieInclude: {}, // { gameId: { dailies, weeklies, endgame, extracurricular } } - true = include in total/pie
     dataExcludeInProgress: {}, // { gameId: true } - true = exclude unfinished current cycles (default); false = include them as theoretical potential
+    dataHideDates: {}, // { gameId: true } - hide counting-since / date labels on Data page
     attendanceView: "weekly", // "weekly" | "history" | "timestamps"
     timestampsSelectedGameIds: {}, // { gameId: true } - which games to show in timestamps page; empty = all
     timestampsSelectedEndgameTasks: {}, // { "gameId.taskId": true } - which endgame tasks to show; empty = all
+    timestampsEndgamePickerGameId: null, // which game's endgame tasks are shown in the picker UI
     historyMonth: null,
     historyYear: null,
     extracurricularTasks: [],
     extracurricularCompleted: {},
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
     extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
-    extracurricularView: "list",
     extracurricularViewMode: "tasks", // "tasks" | "history" - history shows archived (completed >24h ago)
     themeMode: "preset",
     themePreset: "purple",
@@ -527,16 +621,16 @@
   ];
 
   const DEFAULT_CUSTOM_THEME = {
-    bg: "#170f24",
-    bgElevated: "#241638",
-    bgPanel: "#1b1230",
-    text: "#e8e8f0",
-    textMuted: "#a0a0b8",
-    accent: "#7c3aed",
-    accentHover: "#8b5cf6",
-    accentActive: "#6d28d9",
-    border: "#34264d",
-    success: "#34d399",
+    bg: "#0c0a12",
+    bgElevated: "#1a1526",
+    bgPanel: "#13101c",
+    text: "#f5f2fa",
+    textMuted: "#a8a0b8",
+    accent: "#a855f7",
+    accentHover: "#c084fc",
+    accentActive: "#9333ea",
+    border: "#2e2740",
+    success: "#6bbf8a",
     pieDailies: "#87ceeb",
     pieWeeklies: "#20b2aa",
     pieEndgame: "#50c878",
@@ -561,10 +655,17 @@
 
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const isFirstLoad = !raw;
-      if (raw) {
-        const parsed = JSON.parse(raw);
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(STORAGE_SLIM_KEY);
+      applySavePayload(raw ? JSON.parse(raw) : null, { isFirstLoad: !raw });
+    } catch (_) {
+      applySavePayload(null, { isFirstLoad: true });
+    }
+  }
+
+  function applySavePayload(parsed, opts) {
+    const isFirstLoad = !!(opts && opts.isFirstLoad) || !parsed;
+    try {
+      if (parsed) {
         if (parsed.games) {
           state.games = parsed.games;
           state.games.forEach((g) => {
@@ -646,15 +747,14 @@
         if (Array.isArray(parsed.completionTimestamps)) state.completionTimestamps = parsed.completionTimestamps;
         if (parsed.timestampsSelectedGameIds && typeof parsed.timestampsSelectedGameIds === "object") state.timestampsSelectedGameIds = parsed.timestampsSelectedGameIds;
         if (parsed.timestampsSelectedEndgameTasks && typeof parsed.timestampsSelectedEndgameTasks === "object") state.timestampsSelectedEndgameTasks = parsed.timestampsSelectedEndgameTasks;
+        if (typeof parsed.timestampsEndgamePickerGameId === "string") state.timestampsEndgamePickerGameId = parsed.timestampsEndgamePickerGameId;
         if (parsed.lastProcessedResets) state.lastProcessedResets = parsed.lastProcessedResets;
         if (parsed.dataSelectedGameId != null) state.dataSelectedGameId = parsed.dataSelectedGameId;
         if (parsed.gamesSelectedId != null) state.gamesSelectedId = parsed.gamesSelectedId;
-        if (parsed.dailiesView === "grid" || parsed.dailiesView === "list") state.dailiesView = parsed.dailiesView;
-        if (parsed.weekliesView === "grid" || parsed.weekliesView === "list") state.weekliesView = parsed.weekliesView;
-        if (parsed.endgameView === "grid" || parsed.endgameView === "list") state.endgameView = parsed.endgameView;
         if (parsed.attendancePieInclude && typeof parsed.attendancePieInclude === "object") state.attendancePieInclude = parsed.attendancePieInclude;
         if (parsed.dataPieInclude && typeof parsed.dataPieInclude === "object") state.dataPieInclude = parsed.dataPieInclude;
         if (parsed.dataExcludeInProgress && typeof parsed.dataExcludeInProgress === "object") state.dataExcludeInProgress = parsed.dataExcludeInProgress;
+        if (parsed.dataHideDates && typeof parsed.dataHideDates === "object") state.dataHideDates = parsed.dataHideDates;
         if (parsed.attendanceView === "weekly" || parsed.attendanceView === "history" || parsed.attendanceView === "timestamps") state.attendanceView = parsed.attendanceView;
         if (parsed.historyMonth != null && parsed.historyMonth >= 0 && parsed.historyMonth <= 11) state.historyMonth = parsed.historyMonth;
         if (parsed.historyYear != null && Number.isFinite(parsed.historyYear)) state.historyYear = parsed.historyYear;
@@ -662,7 +762,6 @@
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
         if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
-        if (parsed.extracurricularView === "grid" || parsed.extracurricularView === "list") state.extracurricularView = parsed.extracurricularView;
         if (parsed.extracurricularViewMode === "tasks" || parsed.extracurricularViewMode === "history") state.extracurricularViewMode = parsed.extracurricularViewMode;
         if (parsed.themeMode === "custom" || parsed.themeMode === "preset") state.themeMode = parsed.themeMode;
         if (parsed.themePreset && typeof parsed.themePreset === "string") state.themePreset = parsed.themePreset;
@@ -703,6 +802,7 @@
     if (!state.completionTimestamps) state.completionTimestamps = [];
     if (!state.timestampsSelectedGameIds) state.timestampsSelectedGameIds = {};
     if (!state.timestampsSelectedEndgameTasks) state.timestampsSelectedEndgameTasks = {};
+    if (state.timestampsEndgamePickerGameId == null) state.timestampsEndgamePickerGameId = null;
     if (!state.lastProcessedResets) state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
     if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
     if (!state.endgamePendingCycleStartMs) state.endgamePendingCycleStartMs = {};
@@ -779,9 +879,31 @@
     return Number.isFinite(obj && obj[hourKey]) ? obj[hourKey] : fallback;
   }
 
-  function buildSavePayload() {
+  function cloneTaskWithoutImages(task) {
+    if (!task || typeof task !== "object") return task;
+    const c = Object.assign({}, task);
+    delete c.bannerSourceImage;
+    delete c.bannerImage;
+    delete c.bannerHomeImage;
+    delete c.bannerGamesImage;
+    delete c.bannerHomeAspect;
+    delete c.bannerGamesAspect;
+    return c;
+  }
+
+  function cloneGameWithoutImages(game) {
+    if (!game || typeof game !== "object") return game;
+    const c = Object.assign({}, game);
+    delete c.iconImage;
+    c.weeklies = Array.isArray(game.weeklies) ? game.weeklies.map(cloneTaskWithoutImages) : game.weeklies;
+    c.endgame = Array.isArray(game.endgame) ? game.endgame.map(cloneTaskWithoutImages) : game.endgame;
+    return c;
+  }
+
+  function buildSavePayload(opts) {
+    const omitImages = !!(opts && opts.omitImages);
     return {
-      games: state.games,
+      games: omitImages ? (state.games || []).map(cloneGameWithoutImages) : state.games,
       dailiesCompleted: state.dailiesCompleted,
       weekliesCompleted: state.weekliesCompleted,
       endgameCompleted: state.endgameCompleted,
@@ -797,23 +919,23 @@
       lastProcessedResets: state.lastProcessedResets,
       dataSelectedGameId: state.dataSelectedGameId,
       gamesSelectedId: state.gamesSelectedId,
-      dailiesView: state.dailiesView,
-      weekliesView: state.weekliesView,
-      endgameView: state.endgameView,
       attendancePieInclude: state.attendancePieInclude,
       dataPieInclude: state.dataPieInclude,
       dataExcludeInProgress: state.dataExcludeInProgress,
+      dataHideDates: state.dataHideDates,
       attendanceView: state.attendanceView,
       timestampsSelectedGameIds: state.timestampsSelectedGameIds,
       timestampsSelectedEndgameTasks: state.timestampsSelectedEndgameTasks,
+      timestampsEndgamePickerGameId: state.timestampsEndgamePickerGameId,
       completionTimestamps: state.completionTimestamps,
       historyMonth: state.historyMonth,
       historyYear: state.historyYear,
-      extracurricularTasks: state.extracurricularTasks,
+      extracurricularTasks: omitImages
+        ? (state.extracurricularTasks || []).map(cloneTaskWithoutImages)
+        : state.extracurricularTasks,
       extracurricularCompleted: state.extracurricularCompleted,
       extracurricularCompletedAt: state.extracurricularCompletedAt,
       extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
-      extracurricularView: state.extracurricularView,
       extracurricularViewMode: state.extracurricularViewMode,
       themeMode: state.themeMode,
       themePreset: state.themePreset,
@@ -841,6 +963,170 @@
   const SAVE_DEBOUNCE_MS = 200;
   let saveTimer = null;
   let pendingSaveJson = null;
+  let storageBackend = "local"; // "local" until IDB is ready, then "idb"
+  let idbOpenPromise = null;
+
+  function readStorageMeta() {
+    try {
+      const raw = localStorage.getItem(STORAGE_META_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function writeStorageMeta(meta) {
+    try {
+      localStorage.setItem(STORAGE_META_KEY, JSON.stringify(meta || {}));
+    } catch (_) {}
+  }
+
+  function openTrackerIdb() {
+    if (idbOpenPromise) return idbOpenPromise;
+    idbOpenPromise = new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") {
+        reject(new Error("IndexedDB unavailable"));
+        return;
+      }
+      const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+    });
+    return idbOpenPromise;
+  }
+
+  function idbGetFullJson() {
+    return openTrackerIdb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.get(IDB_FULL_RECORD);
+      req.onsuccess = () => {
+        const val = req.result;
+        if (typeof val === "string" && val) resolve(val);
+        else if (val && typeof val === "object" && typeof val.json === "string") resolve(val.json);
+        else resolve(null);
+      };
+      req.onerror = () => reject(req.error || new Error("IndexedDB get failed"));
+    }));
+  }
+
+  function idbPutFullJson(jsonStr) {
+    return openTrackerIdb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.put(String(jsonStr || ""), IDB_FULL_RECORD);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error || new Error("IndexedDB put failed"));
+    }));
+  }
+
+  /** Game-day key for primary server reset (e.g. America ~4:00). */
+  function getPrimaryServerPeriodDateStr(now) {
+    const server = state.primaryServer || "america";
+    const probe = { server: server, adjustForDST: true };
+    return getDailyPeriodDateStr(probe, now || getSimulatedNow());
+  }
+
+  function maybeWriteDailySlimBackup(force) {
+    try {
+      const dateKey = getPrimaryServerPeriodDateStr();
+      const meta = readStorageMeta();
+      if (!force && meta.lastSlimBackupDate === dateKey) return false;
+      const slimJson = JSON.stringify(buildSavePayload({ omitImages: true }));
+      localStorage.setItem(STORAGE_SLIM_KEY, slimJson);
+      meta.backend = "idb";
+      meta.lastSlimBackupDate = dateKey;
+      meta.lastSlimBackupAt = Date.now();
+      writeStorageMeta(meta);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function writeSavePayload(jsonStr) {
+    if (storageBackend === "idb") {
+      idbPutFullJson(jsonStr)
+        .then(() => {
+          lastSavedAtMs = Date.now();
+          updateLastSavedIndicator(false);
+          maybeWriteDailySlimBackup(false);
+        })
+        .catch(() => {
+          updateLastSavedIndicator(true);
+        });
+      if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
+      return;
+    }
+    localStorage.setItem(STORAGE_KEY, jsonStr);
+    if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
+  }
+
+  async function initPersistentStorage() {
+    let parsed = null;
+    let source = "none";
+    try {
+      const idbJson = await idbGetFullJson();
+      if (idbJson) {
+        parsed = JSON.parse(idbJson);
+        source = "idb";
+      }
+    } catch (_) {}
+
+    if (!parsed) {
+      try {
+        const legacy = localStorage.getItem(STORAGE_KEY);
+        if (legacy) {
+          parsed = JSON.parse(legacy);
+          source = "legacy";
+        }
+      } catch (_) {}
+    }
+
+    if (!parsed) {
+      try {
+        const slim = localStorage.getItem(STORAGE_SLIM_KEY);
+        if (slim) {
+          parsed = JSON.parse(slim);
+          source = "slim";
+        }
+      } catch (_) {}
+    }
+
+    applySavePayload(parsed, { isFirstLoad: !parsed });
+    storageBackend = "idb";
+
+    try {
+      const fullJson = JSON.stringify(buildSavePayload());
+      await idbPutFullJson(fullJson);
+      const meta = readStorageMeta();
+      meta.backend = "idb";
+      meta.migratedFrom = source;
+      meta.migratedAt = Date.now();
+      writeStorageMeta(meta);
+      if (source === "legacy") {
+        try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+      }
+      // Ensure a slim no-image backup exists after migrate / first boot.
+      maybeWriteDailySlimBackup(source !== "idb" || !localStorage.getItem(STORAGE_SLIM_KEY));
+    } catch (_) {
+      // Fall back to localStorage full saves if IDB write fails.
+      storageBackend = "local";
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(buildSavePayload()));
+      } catch (_) {}
+    }
+  }
+
+  window.initPersistentStorage = initPersistentStorage;
 
   const PERF_DEBUG_KEY = "gacha-tracker-debug-perf";
 
@@ -906,11 +1192,6 @@
 
   window.bumpDataVersion = bumpDataVersion;
 
-  function writeSavePayload(jsonStr) {
-    localStorage.setItem(STORAGE_KEY, jsonStr);
-    if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
-  }
-
   let lastSavedAtMs = null;
 
   function updateLastSavedIndicator(failed) {
@@ -935,17 +1216,25 @@
     if (!pendingSaveJson) return;
     try {
       const json = pendingSaveJson;
+      pendingSaveJson = null;
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
       if (isPerfDebugEnabled()) perfMeasure("save.flush", () => writeSavePayload(json));
       else writeSavePayload(json);
-      lastSavedAtMs = Date.now();
-      updateLastSavedIndicator(false);
+      // IndexedDB path updates the indicator when the write resolves.
+      if (storageBackend !== "idb") {
+        lastSavedAtMs = Date.now();
+        updateLastSavedIndicator(false);
+      }
     } catch (_) {
+      pendingSaveJson = null;
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
       updateLastSavedIndicator(true);
-    }
-    pendingSaveJson = null;
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
     }
   }
 
@@ -979,10 +1268,18 @@
 
   window.__applyCloudData = function (jsonStr) {
     try {
-      localStorage.setItem(STORAGE_KEY, jsonStr);
-      load();
+      const parsed = JSON.parse(jsonStr);
+      applySavePayload(parsed, { isFirstLoad: false });
+      storageBackend = "idb";
+      save({ immediate: true });
       renderAll();
-    } catch (_) {}
+    } catch (_) {
+      try {
+        localStorage.setItem(STORAGE_KEY, jsonStr);
+        load();
+        renderAll();
+      } catch (__) {}
+    }
   };
 
   window.__uploadLocalToCloud = function () { save({ immediate: true }); };
@@ -2439,13 +2736,13 @@
       return v || fallback;
     };
     return {
-      bg: pick("--bg", "#170f24"),
-      elevated: pick("--bg-elevated", "#241638"),
-      panel: pick("--bg-panel", "#1b1230"),
-      text: pick("--text", "#e8e8f0"),
-      muted: pick("--text-muted", "#a0a0b8"),
-      border: pick("--border", "#34264d"),
-      accent: pick("--accent", "#7c3aed"),
+      bg: pick("--bg", "#0c0a12"),
+      elevated: pick("--bg-elevated", "#1a1526"),
+      panel: pick("--bg-panel", "#13101c"),
+      text: pick("--text", "#f5f2fa"),
+      muted: pick("--text-muted", "#a8a0b8"),
+      border: pick("--border", "#2e2740"),
+      accent: pick("--accent", "#a855f7"),
       dailies: pick("--pie-dailies", "#87ceeb"),
       weeklies: pick("--pie-weeklies", "#20b2aa"),
       endgame: pick("--pie-endgame", "#50c878"),
@@ -2507,7 +2804,7 @@
     const contentW = W - pad * 2;
     const gap = multi ? 10 : 14;
     const track = "rgba(255,255,255,0.08)";
-    const font = '"Outfit", "Segoe UI", system-ui, sans-serif';
+    const font = 'system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
     const cats = [
       { key: "dailies", label: "Dailies", color: colors.dailies, unit: "days" },
       { key: "weeklies", label: "Weeklies", color: colors.weeklies, unit: "" },
@@ -4763,6 +5060,8 @@
       bumpDataVersion();
       save();
     }
+    // Once per primary-server game day, refresh slim localStorage backup (no images).
+    if (storageBackend === "idb") maybeWriteDailySlimBackup(false);
     return didChange;
   }
 
@@ -7725,7 +8024,26 @@
     updateUnitToggles("timeLimit", lUnit);
 
     setExtraFields(taskType, task);
+    setActiveBannerUi("task");
+    taskModal.bannerTarget = "board";
+    const loaded = loadTaskBannersFromTask(task);
+    taskModal.bannerSource = loaded.source;
+    taskModal.bannerViews = loaded.views;
+    taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    resetTaskBannerCropState();
+    syncTaskBannerTargetButtons();
+    syncTaskBannerPreview();
     setModalOpen(true);
+    requestAnimationFrame(() => {
+      resizeTaskBannerCropStage();
+      drawTaskBannerCrop();
+      if (taskModal.bannerSource) {
+        loadTaskBannerSourceFromUrl(taskModal.bannerSource, { keepViews: true }).catch(() => {});
+      } else {
+        syncTaskBannerEditorFrames();
+        drawTaskBannerCrop();
+      }
+    });
     updateTaskTimeRemainingDisplay();
 
     // focus name input for quick typing
@@ -7737,6 +8055,13 @@
     taskModal.gameId = null;
     taskModal.taskType = null;
     taskModal.taskId = null;
+    taskModal.bannerTarget = "board";
+    taskModal.bannerSource = null;
+    taskModal.bannerViews = emptyTaskBannerViews();
+    taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    resetTaskBannerCropState();
+    syncTaskBannerPreview();
+    syncTaskBannerTargetButtons();
   }
 
   function getPreset(presetId) {
@@ -8512,7 +8837,7 @@
     if (titleEl) titleEl.textContent = layerLabel;
     modal.hidden = false;
     modal.setAttribute("aria-hidden", "false");
-    const rgb = hexToRgb(hex || "#7c3aed");
+    const rgb = hexToRgb(hex || "#a855f7");
     if (rgb) {
       colorPickerHsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
     }
@@ -8683,7 +9008,7 @@
       btn.dataset.presetId = preset.id;
       const swatch = document.createElement("span");
       swatch.className = "settings-saved-preset-swatch";
-      swatch.style.background = preset.colors?.accent || "#7c3aed";
+      swatch.style.background = preset.colors?.accent || "#a855f7";
       const label = document.createElement("span");
       label.className = "settings-saved-preset-name";
       label.textContent = preset.name || preset.id;
@@ -9047,22 +9372,77 @@
     }
 
 
+    function setSettingsSectionDropdownOpen(open) {
+      const trigger = qs("settingsSectionTrigger");
+      const menu = qs("settingsSectionMenu");
+      if (!trigger || !menu) return;
+      const isOpen = !!open;
+      trigger.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      menu.hidden = !isOpen;
+    }
+
+    function syncSettingsSectionDropdown(section) {
+      const labelEl = qs("settingsSectionTriggerLabel");
+      const menu = qs("settingsSectionMenu");
+      if (!menu) return;
+      let label = "Appearance";
+      menu.querySelectorAll('[role="option"]').forEach((opt) => {
+        const on = opt.getAttribute("data-settings-section") === section;
+        opt.setAttribute("aria-selected", on ? "true" : "false");
+        if (on) label = (opt.textContent || "").trim() || label;
+      });
+      if (labelEl) labelEl.textContent = label;
+    }
+
+    function activateSettingsSection(section) {
+      if (!section) return;
+      document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((b) => {
+        const on = b.getAttribute("data-settings-section") === section;
+        b.classList.toggle("active", on);
+        if (on) b.setAttribute("aria-current", "page");
+        else b.removeAttribute("aria-current");
+      });
+      document.querySelectorAll(".settings-section").forEach((sectionEl) => {
+        sectionEl.classList.remove("active");
+      });
+      const target = document.getElementById("settings-section-" + section);
+      if (target) target.classList.add("active");
+      syncSettingsSectionDropdown(section);
+      setSettingsSectionDropdownOpen(false);
+    }
+
     document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const section = btn.getAttribute("data-settings-section");
-        document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((b) => {
-          b.classList.remove("active");
-          b.removeAttribute("aria-current");
-        });
-        btn.classList.add("active");
-        btn.setAttribute("aria-current", "page");
-        document.querySelectorAll(".settings-section").forEach((sectionEl) => {
-          sectionEl.classList.remove("active");
-        });
-        const target = document.getElementById("settings-section-" + section);
-        if (target) target.classList.add("active");
+        activateSettingsSection(btn.getAttribute("data-settings-section"));
       });
     });
+
+    const settingsSectionTrigger = qs("settingsSectionTrigger");
+    const settingsSectionMenu = qs("settingsSectionMenu");
+    const settingsSectionDropdown = qs("settingsSectionDropdown");
+    if (settingsSectionTrigger && settingsSectionMenu) {
+      settingsSectionTrigger.addEventListener("click", (e) => {
+        e.preventDefault();
+        const open = settingsSectionTrigger.getAttribute("aria-expanded") === "true";
+        setSettingsSectionDropdownOpen(!open);
+      });
+      settingsSectionMenu.querySelectorAll('[role="option"]').forEach((opt) => {
+        opt.addEventListener("click", () => {
+          activateSettingsSection(opt.getAttribute("data-settings-section"));
+        });
+      });
+      document.addEventListener("click", (e) => {
+        if (!settingsSectionDropdown || settingsSectionMenu.hidden) return;
+        if (settingsSectionDropdown.contains(e.target)) return;
+        setSettingsSectionDropdownOpen(false);
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && settingsSectionTrigger.getAttribute("aria-expanded") === "true") {
+          setSettingsSectionDropdownOpen(false);
+          settingsSectionTrigger.focus();
+        }
+      });
+    }
 
     const textSizeEl = qs("settingsTextSize");
     if (textSizeEl) textSizeEl.addEventListener("change", () => {
@@ -9142,11 +9522,11 @@
 
     const exportBtn = qs("settingsExportBtn");
     if (exportBtn) exportBtn.addEventListener("click", () => {
-      // Ensure debounced edits are on disk before reading localStorage.
+      // Ensure debounced edits are flushed, then export the in-memory full payload (includes images).
       if (typeof flushPendingSave === "function") flushPendingSave();
       save({ immediate: true });
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
+      const raw = JSON.stringify(buildSavePayload());
+      if (!raw || raw === "{}") {
         alert("Nothing to export yet — local save is empty.");
         return;
       }
@@ -9541,6 +9921,1039 @@
 
   }
 
+  function emptyBannerView(aspect) {
+    return {
+      aspect: (Number.isFinite(aspect) && aspect > 0) ? aspect : 16 / 9,
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+    };
+  }
+
+  function emptyTaskBannerViews() {
+    return {
+      home: null,
+      games: null,
+      board: null,
+    };
+  }
+
+  function defaultFitBannerView(stageAspect, imageAspect) {
+    const aspect = (Number(stageAspect) > 0) ? Number(stageAspect) : 16 / 9;
+    const imgAspect = (Number(imageAspect) > 0) ? Number(imageAspect) : aspect;
+    if (imgAspect >= aspect) {
+      const h = aspect / imgAspect;
+      return { aspect: aspect, x: 0, y: (1 - h) / 2, w: 1, h: h };
+    }
+    const w = imgAspect / aspect;
+    return { aspect: aspect, x: (1 - w) / 2, y: 0, w: w, h: 1 };
+  }
+
+  function cloneBannerView(view, fallbackAspect) {
+    if (!view || typeof view !== "object") return emptyBannerView(fallbackAspect);
+    return {
+      aspect: (Number(view.aspect) > 0) ? Number(view.aspect) : (fallbackAspect || 16 / 9),
+      x: Number.isFinite(Number(view.x)) ? Number(view.x) : 0,
+      y: Number.isFinite(Number(view.y)) ? Number(view.y) : 0,
+      w: Number(view.w) > 0 ? Number(view.w) : 1,
+      h: Number(view.h) > 0 ? Number(view.h) : 1,
+    };
+  }
+
+  function resolveTaskBannerSource(task) {
+    if (!task) return null;
+    if (task.bannerSourceImage) return task.bannerSourceImage;
+    return task.bannerImage || task.bannerHomeImage || task.bannerGamesImage || null;
+  }
+
+  function resolveTaskBannerView(task, surface) {
+    const s = surface || "board";
+    const fallback = (TASK_BANNER_TARGETS[s] || TASK_BANNER_TARGETS.board).aspect;
+    if (task && task.bannerViews && task.bannerViews[s]) {
+      return cloneBannerView(task.bannerViews[s], fallback);
+    }
+    return null;
+  }
+
+  function loadTaskBannersFromTask(task) {
+    const source = resolveTaskBannerSource(task);
+    const views = emptyTaskBannerViews();
+    if (task && task.bannerViews) {
+      views.home = task.bannerViews.home ? cloneBannerView(task.bannerViews.home, TASK_BANNER_TARGETS.home.aspect) : null;
+      views.games = task.bannerViews.games ? cloneBannerView(task.bannerViews.games, TASK_BANNER_TARGETS.games.aspect) : null;
+      views.board = task.bannerViews.board ? cloneBannerView(task.bannerViews.board, TASK_BANNER_TARGETS.board.aspect) : null;
+    }
+    return { source: source, views: views };
+  }
+
+  function getActiveTaskBannerView() {
+    const key = taskModal.bannerTarget || "board";
+    if (!taskModal.bannerViews) taskModal.bannerViews = emptyTaskBannerViews();
+    const fallback = (TASK_BANNER_TARGETS[key] || TASK_BANNER_TARGETS.board).aspect;
+    if (!taskModal.bannerViews[key]) return null;
+    return cloneBannerView(taskModal.bannerViews[key], fallback);
+  }
+
+  function applyTaskBannersToSavePayload(next) {
+    if (taskModal.bannerSource) {
+      next.bannerSourceImage = taskModal.bannerSource;
+      const img = taskBannerCrop.sourceImg;
+      const imageAspect = (img && img.naturalWidth > 0)
+        ? (img.naturalWidth / img.naturalHeight)
+        : 16 / 9;
+      const ensureView = (key, fallbackAspect) => {
+        if (taskModal.bannerViews && taskModal.bannerViews[key]) {
+          return cloneBannerView(taskModal.bannerViews[key], fallbackAspect);
+        }
+        return defaultFitBannerView(fallbackAspect, imageAspect);
+      };
+      next.bannerViews = {
+        home: ensureView("home", TASK_BANNER_TARGETS.home.aspect),
+        games: ensureView("games", TASK_BANNER_TARGETS.games.aspect),
+        board: ensureView("board", TASK_BANNER_TARGETS.board.aspect),
+      };
+    } else {
+      next.bannerSourceImage = undefined;
+      next.bannerViews = undefined;
+    }
+    next.bannerImage = undefined;
+    next.bannerAspect = undefined;
+    next.bannerShape = undefined;
+    next.bannerHomeImage = undefined;
+    next.bannerHomeAspect = undefined;
+    next.bannerGamesImage = undefined;
+    next.bannerGamesAspect = undefined;
+  }
+
+  function clearTaskBannerFieldsFromMerged(merged) {
+    if (!taskModal.bannerSource) {
+      delete merged.bannerSourceImage;
+      delete merged.bannerViews;
+    }
+    delete merged.bannerImage;
+    delete merged.bannerAspect;
+    delete merged.bannerShape;
+    delete merged.bannerHomeImage;
+    delete merged.bannerHomeAspect;
+    delete merged.bannerGamesImage;
+    delete merged.bannerGamesAspect;
+  }
+
+  function resetTaskBannerCropState() {
+    taskBannerCrop.sourceImg = null;
+    taskBannerCrop.imgX = 0;
+    taskBannerCrop.imgY = 0;
+    taskBannerCrop.imgW = 0;
+    taskBannerCrop.imgH = 0;
+    taskBannerCrop.cropX = 0;
+    taskBannerCrop.cropY = 0;
+    taskBannerCrop.cropW = 0;
+    taskBannerCrop.cropH = 0;
+    taskBannerCrop.mode = null;
+    taskBannerCrop.clear = false;
+  }
+
+  function getTaskBannerCropAspect() {
+    const target = taskModal.bannerTarget || "board";
+    if (target === "home" || target === "games") {
+      return (TASK_BANNER_TARGETS[target] || TASK_BANNER_TARGETS.home).aspect;
+    }
+    if (taskBannerCrop.cropW > 0 && taskBannerCrop.cropH > 0) {
+      return taskBannerCrop.cropW / taskBannerCrop.cropH;
+    }
+    if (taskModal.bannerViews && taskModal.bannerViews.board && Number(taskModal.bannerViews.board.aspect) > 0) {
+      return Number(taskModal.bannerViews.board.aspect);
+    }
+    const img = taskBannerCrop.sourceImg;
+    if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+      return img.naturalWidth / img.naturalHeight;
+    }
+    return 16 / 9;
+  }
+
+  function getTaskBannerImageAspect() {
+    const img = taskBannerCrop.sourceImg;
+    if (!img || !(img.naturalWidth > 0) || !(img.naturalHeight > 0)) return 16 / 9;
+    return img.naturalWidth / img.naturalHeight;
+  }
+
+  function softClampTaskBannerRect(kind) {
+    const stage = TASK_BANNER_STAGE;
+    const margin = 24;
+    const isImg = kind === "img";
+    let x = isImg ? taskBannerCrop.imgX : taskBannerCrop.cropX;
+    let y = isImg ? taskBannerCrop.imgY : taskBannerCrop.cropY;
+    const w = isImg ? taskBannerCrop.imgW : taskBannerCrop.cropW;
+    const h = isImg ? taskBannerCrop.imgH : taskBannerCrop.cropH;
+    if (x + w < margin) x = margin - w;
+    if (y + h < margin) y = margin - h;
+    if (x > stage.w - margin) x = stage.w - margin;
+    if (y > stage.h - margin) y = stage.h - margin;
+    if (isImg) {
+      taskBannerCrop.imgX = x;
+      taskBannerCrop.imgY = y;
+    } else {
+      taskBannerCrop.cropX = x;
+      taskBannerCrop.cropY = y;
+    }
+  }
+
+  function placeTaskBannerCropBox(aspect) {
+    const stage = TASK_BANNER_STAGE;
+    const a = (Number(aspect) > 0) ? Number(aspect) : 16 / 9;
+    const pad = 28;
+    const maxW = Math.max(40, stage.w - pad * 2);
+    const maxH = Math.max(40, stage.h - pad * 2);
+    let cropW;
+    let cropH;
+    if (maxW / maxH > a) {
+      cropH = maxH * 0.82;
+      cropW = cropH * a;
+    } else {
+      cropW = maxW * 0.82;
+      cropH = cropW / a;
+    }
+    if (cropW < TASK_BANNER_CROP_MIN) {
+      cropW = TASK_BANNER_CROP_MIN;
+      cropH = cropW / a;
+    }
+    if (cropH < TASK_BANNER_CROP_MIN) {
+      cropH = TASK_BANNER_CROP_MIN;
+      cropW = cropH * a;
+    }
+    taskBannerCrop.cropW = cropW;
+    taskBannerCrop.cropH = cropH;
+    taskBannerCrop.cropX = (stage.w - cropW) / 2;
+    taskBannerCrop.cropY = (stage.h - cropH) / 2;
+  }
+
+  function fitTaskBannerImageToStage() {
+    const img = taskBannerCrop.sourceImg;
+    if (!img) return;
+    const stage = TASK_BANNER_STAGE;
+    const nw = img.naturalWidth || 1;
+    const nh = img.naturalHeight || 1;
+    const scale = Math.min(stage.w / nw, stage.h / nh) * 0.92;
+    taskBannerCrop.imgW = nw * scale;
+    taskBannerCrop.imgH = nh * scale;
+    taskBannerCrop.imgX = (stage.w - taskBannerCrop.imgW) / 2;
+    taskBannerCrop.imgY = (stage.h - taskBannerCrop.imgH) / 2;
+    placeTaskBannerCropBox(getTaskBannerCropAspect());
+  }
+
+  function applyBannerViewToStage(view) {
+    if (!view || !(Number(view.w) > 0) || !(Number(view.h) > 0)) {
+      fitTaskBannerImageToStage();
+      return;
+    }
+    const aspect = (Number(view.aspect) > 0)
+      ? Number(view.aspect)
+      : getTaskBannerCropAspect();
+    placeTaskBannerCropBox(aspect);
+    const v = cloneBannerView(view, aspect);
+    taskBannerCrop.imgX = taskBannerCrop.cropX + v.x * taskBannerCrop.cropW;
+    taskBannerCrop.imgY = taskBannerCrop.cropY + v.y * taskBannerCrop.cropH;
+    taskBannerCrop.imgW = Math.max(0.001, v.w) * taskBannerCrop.cropW;
+    taskBannerCrop.imgH = Math.max(0.001, v.h) * taskBannerCrop.cropH;
+    // Keep natural image aspect (no stretch)
+    const nat = getTaskBannerImageAspect();
+    const midX = taskBannerCrop.imgX + taskBannerCrop.imgW / 2;
+    const midY = taskBannerCrop.imgY + taskBannerCrop.imgH / 2;
+    if (taskBannerCrop.imgW / Math.max(0.001, taskBannerCrop.imgH) > nat) {
+      taskBannerCrop.imgH = taskBannerCrop.imgW / nat;
+    } else {
+      taskBannerCrop.imgW = taskBannerCrop.imgH * nat;
+    }
+    taskBannerCrop.imgX = midX - taskBannerCrop.imgW / 2;
+    taskBannerCrop.imgY = midY - taskBannerCrop.imgH / 2;
+  }
+
+  function captureBannerViewFromStage() {
+    const cw = Math.max(0.001, taskBannerCrop.cropW);
+    const ch = Math.max(0.001, taskBannerCrop.cropH);
+    return {
+      aspect: cw / ch,
+      x: (taskBannerCrop.imgX - taskBannerCrop.cropX) / cw,
+      y: (taskBannerCrop.imgY - taskBannerCrop.cropY) / ch,
+      w: taskBannerCrop.imgW / cw,
+      h: taskBannerCrop.imgH / ch,
+    };
+  }
+
+  function renderBannerViewDataUrl(img, view, maxLong) {
+    if (!img || !view) return null;
+    const aspect = (Number(view.aspect) > 0) ? Number(view.aspect) : 16 / 9;
+    const long = maxLong || 720;
+    let finalW;
+    let finalH;
+    if (aspect >= 1) {
+      finalW = long;
+      finalH = Math.max(1, Math.round(long / aspect));
+    } else {
+      finalH = long;
+      finalW = Math.max(1, Math.round(long * aspect));
+    }
+    const out = document.createElement("canvas");
+    out.width = finalW;
+    out.height = finalH;
+    const ctx = out.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, finalW, finalH);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(
+      img,
+      Number(view.x || 0) * finalW,
+      Number(view.y || 0) * finalH,
+      Math.max(0.001, Number(view.w || 1)) * finalW,
+      Math.max(0.001, Number(view.h || 1)) * finalH
+    );
+    return out.toDataURL("image/jpeg", 0.82);
+  }
+
+  function syncTaskBannerEditorFrames() {
+    const imgFrame = bannerEl("imgFrame");
+    const cropFrame = bannerEl("cropFrame");
+    const has = !!taskBannerCrop.sourceImg && !taskBannerCrop.clear;
+    [imgFrame, cropFrame].forEach((frame) => {
+      if (!frame) return;
+      frame.hidden = !has;
+      frame.setAttribute("aria-hidden", has ? "false" : "true");
+    });
+    if (!has) return;
+    if (imgFrame) {
+      imgFrame.style.left = taskBannerCrop.imgX + "px";
+      imgFrame.style.top = taskBannerCrop.imgY + "px";
+      imgFrame.style.width = taskBannerCrop.imgW + "px";
+      imgFrame.style.height = taskBannerCrop.imgH + "px";
+    }
+    if (cropFrame) {
+      cropFrame.style.left = taskBannerCrop.cropX + "px";
+      cropFrame.style.top = taskBannerCrop.cropY + "px";
+      cropFrame.style.width = taskBannerCrop.cropW + "px";
+      cropFrame.style.height = taskBannerCrop.cropH + "px";
+    }
+  }
+
+  function syncTaskBannerTargetButtons() {
+    const active = taskModal.bannerTarget || "board";
+    const hasSource = !!taskModal.bannerSource;
+    bannerRootEl().querySelectorAll(".task-banner-target-btn").forEach((btn) => {
+      const on = btn.dataset.bannerTarget === active;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      const key = btn.dataset.bannerTarget;
+      const preview = taskModal.bannerPreviewUrls && taskModal.bannerPreviewUrls[key];
+      btn.classList.toggle("has-image", !!(hasSource && preview));
+      const media = btn.querySelector(".task-banner-target-media");
+      if (media) {
+        if (hasSource && preview) {
+          media.style.backgroundImage = "url(\"" + String(preview).replace(/"/g, "%22") + "\")";
+        } else if (hasSource) {
+          media.style.backgroundImage = "url(\"" + String(taskModal.bannerSource).replace(/"/g, "%22") + "\")";
+        } else {
+          media.style.backgroundImage = "";
+        }
+      }
+    });
+  }
+
+  function resizeTaskBannerCropStage() {
+    const canvas = bannerEl("canvas");
+    const wrap = bannerEl("wrap");
+    if (!canvas || !wrap) return;
+    const prevW = TASK_BANNER_STAGE.w || 1;
+    const prevH = TASK_BANNER_STAGE.h || 1;
+    const cssW = Math.max(160, Math.round(wrap.clientWidth || (wrap.parentElement && wrap.parentElement.clientWidth) || 480));
+    // Fixed workspace (not tied to crop aspect) so image + crop can both move/scale
+    const cssH = Math.max(220, Math.min(420, Math.round(cssW * 9 / 16)));
+    if (cssW === TASK_BANNER_STAGE.w && cssH === TASK_BANNER_STAGE.h && canvas.width === cssW && canvas.height === cssH) {
+      return;
+    }
+    TASK_BANNER_STAGE.w = cssW;
+    TASK_BANNER_STAGE.h = cssH;
+    canvas.width = cssW;
+    canvas.height = cssH;
+    wrap.style.height = cssH + "px";
+    if (taskBannerCrop.sourceImg && prevW > 0 && prevH > 0) {
+      const sx = cssW / prevW;
+      const sy = cssH / prevH;
+      taskBannerCrop.imgX *= sx;
+      taskBannerCrop.imgY *= sy;
+      taskBannerCrop.imgW *= sx;
+      taskBannerCrop.imgH *= sy;
+      taskBannerCrop.cropX *= sx;
+      taskBannerCrop.cropY *= sy;
+      taskBannerCrop.cropW *= sx;
+      taskBannerCrop.cropH *= sy;
+    }
+  }
+
+  function drawTaskBannerCrop() {
+    const canvas = bannerEl("canvas");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, w, h);
+    const img = taskBannerCrop.sourceImg;
+    if (!img || taskBannerCrop.clear) {
+      syncTaskBannerEditorFrames();
+      return;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(
+      img,
+      taskBannerCrop.imgX,
+      taskBannerCrop.imgY,
+      taskBannerCrop.imgW,
+      taskBannerCrop.imgH
+    );
+    syncTaskBannerEditorFrames();
+  }
+
+  function commitTaskBannerCrop() {
+    const key = taskModal.bannerTarget || "board";
+    if (!taskModal.bannerViews) taskModal.bannerViews = emptyTaskBannerViews();
+    if (!taskModal.bannerPreviewUrls) {
+      taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    }
+    if (taskBannerCrop.clear || !taskBannerCrop.sourceImg) {
+      taskModal.bannerSource = null;
+      taskModal.bannerViews = emptyTaskBannerViews();
+      taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    } else {
+      taskModal.bannerSource = taskBannerCrop.sourceImg.src || taskModal.bannerSource;
+      const view = captureBannerViewFromStage();
+      if (key === "home" || key === "games") {
+        view.aspect = TASK_BANNER_TARGETS[key].aspect;
+      }
+      taskModal.bannerViews[key] = view;
+      const preview = renderBannerViewDataUrl(taskBannerCrop.sourceImg, view, 360);
+      if (preview) taskModal.bannerPreviewUrls[key] = preview;
+    }
+    syncTaskBannerPreview();
+    syncTaskBannerTargetButtons();
+  }
+
+  function loadTaskBannerSourceFromUrl(url, opts) {
+    const resetViews = !(opts && opts.keepViews === true);
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        taskBannerCrop.sourceImg = img;
+        taskBannerCrop.clear = false;
+        taskModal.bannerSource = url;
+        if (resetViews) {
+          taskModal.bannerViews = emptyTaskBannerViews();
+          taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+        }
+        resizeTaskBannerCropStage();
+        if (resetViews) fitTaskBannerImageToStage();
+        else applyBannerViewToStage(getActiveTaskBannerView());
+        drawTaskBannerCrop();
+        commitTaskBannerCrop();
+        resolve();
+      };
+      img.onerror = () => reject(new Error("Could not load image."));
+      img.src = url;
+    });
+  }
+
+  function getTaskBannerPreviewTaskStub() {
+    const nameInput = bannerEl("nameInput");
+    const label = (nameInput && nameInput.value.trim()) || "Task name";
+    return {
+      label: label,
+      bannerSourceImage: taskModal.bannerSource || null,
+      bannerViews: {
+        home: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.home, TASK_BANNER_TARGETS.home.aspect),
+        games: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.games, TASK_BANNER_TARGETS.games.aspect),
+        board: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.board, TASK_BANNER_TARGETS.board.aspect),
+      },
+    };
+  }
+
+  function getTaskBannerPreviewGame() {
+    if (activeBannerUiKey === "extra") {
+      const gameSelect = qs("extracurricularTaskGame");
+      const gameId = (gameSelect && gameSelect.value) || taskModal.gameId;
+      return getGame(gameId) || { name: (gameSelect && gameSelect.selectedOptions && gameSelect.selectedOptions[0] && gameSelect.selectedOptions[0].textContent) || "Game", iconImage: null };
+    }
+    return getGame(taskModal.gameId) || { name: "Game", iconImage: null };
+  }
+
+  function getTaskBannerPreviewPotential() {
+    if (activeBannerUiKey === "extra") {
+      const potInput = qs("extracurricularTaskCurrency");
+      const n = potInput ? Number(potInput.value) : 0;
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+    const type = taskModal.taskType;
+    const game = getTaskBannerPreviewGame();
+    const taskId = taskModal.taskId;
+    if (type === "weeklies" && game && taskId) {
+      const task = (game.weeklies || []).find((t) => (t.id || t.label) === taskId);
+      if (task && typeof getWeeklyPotential === "function") return getWeeklyPotential(task);
+    }
+    if (type === "endgame" && game && taskId) {
+      const task = (game.endgame || []).find((t) => (t.id || t.label) === taskId);
+      if (task && typeof getEndgamePotential === "function") return getEndgamePotential(task);
+    }
+    const potInput = qs("taskPotential") || qs("taskCurrency") || qs("endgameCurrencyMax");
+    const n = potInput ? Number(potInput.value) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function buildGamesBannerPreviewCard(task, pot, opts) {
+    const mobile = !!(opts && opts.mobile);
+    const row = document.createElement("div");
+    row.className = "task-item task-item-with-changer games-task-card task-banner-preview-games "
+      + (mobile ? "task-banner-preview-games-mobile" : "task-banner-preview-games-desktop");
+    appendGamesTaskSideMedia(row, task, { surface: mobile ? "home" : "games" });
+    const main = document.createElement("div");
+    main.className = "games-task-main";
+    const top = document.createElement("div");
+    top.className = "task-item-top games-task-top";
+    const titleLine = document.createElement("div");
+    titleLine.className = "games-task-title-line";
+    const label = document.createElement("span");
+    label.className = "task-label";
+    label.textContent = task.label;
+    titleLine.appendChild(label);
+    top.appendChild(titleLine);
+    main.appendChild(top);
+    if (pot > 0) {
+      const bottom = document.createElement("div");
+      bottom.className = "games-task-bottom";
+      const right = document.createElement("div");
+      right.className = "games-task-bottom-right";
+      const potSpan = document.createElement("span");
+      potSpan.className = "games-task-potential";
+      potSpan.textContent = "Potential: " + pot;
+      right.appendChild(potSpan);
+      bottom.appendChild(right);
+      main.appendChild(bottom);
+    }
+    row.appendChild(main);
+    return row;
+  }
+
+  function syncTaskBannerPreview() {
+    const wrap = bannerEl("previewWrap");
+    const cardHost = bannerEl("cardPreview");
+    const clearBtn = bannerEl("clearBtn");
+    const has = !!taskModal.bannerSource;
+    if (clearBtn) clearBtn.hidden = !(has || taskBannerCrop.sourceImg);
+    if (wrap) wrap.hidden = !has;
+    if (!cardHost) return;
+    cardHost.innerHTML = "";
+    if (!has) return;
+
+    const target = taskModal.bannerTarget || "board";
+    const task = getTaskBannerPreviewTaskStub();
+    const game = getTaskBannerPreviewGame();
+    const pot = getTaskBannerPreviewPotential();
+    const outerLabel = wrap && wrap.querySelector(":scope > .task-banner-preview-label");
+
+    if (target === "games") {
+      if (outerLabel) outerLabel.hidden = true;
+      cardHost.classList.add("task-banner-card-preview-dual");
+      const stack = document.createElement("div");
+      stack.className = "task-banner-preview-stack";
+
+      const deskBlock = document.createElement("div");
+      deskBlock.className = "task-banner-preview-block";
+      const deskLabel = document.createElement("span");
+      deskLabel.className = "task-banner-preview-label";
+      deskLabel.textContent = "Desktop";
+      deskBlock.appendChild(deskLabel);
+      deskBlock.appendChild(buildGamesBannerPreviewCard(task, pot, { mobile: false }));
+
+      const mobBlock = document.createElement("div");
+      mobBlock.className = "task-banner-preview-block";
+      const mobHead = document.createElement("div");
+      mobHead.className = "task-banner-preview-heading";
+      const mobLabel = document.createElement("span");
+      mobLabel.className = "task-banner-preview-label";
+      mobLabel.textContent = "Mobile / hamburger";
+      const mobNote = document.createElement("span");
+      mobNote.className = "task-banner-preview-note";
+      mobNote.textContent = "Uses the Home image setting (not Games) in hamburger / compressed mode.";
+      mobHead.appendChild(mobLabel);
+      mobHead.appendChild(mobNote);
+      mobBlock.appendChild(mobHead);
+      mobBlock.appendChild(buildGamesBannerPreviewCard(task, pot, { mobile: true }));
+
+      stack.appendChild(deskBlock);
+      stack.appendChild(mobBlock);
+      cardHost.appendChild(stack);
+      return;
+    }
+
+    if (outerLabel) {
+      outerLabel.hidden = false;
+      outerLabel.textContent = "Preview";
+    }
+    cardHost.classList.remove("task-banner-card-preview-dual");
+
+    const card = document.createElement("div");
+    card.className = "task-item task-card-knot task-banner-preview-card";
+    appendTaskCardMedia(card, task, game, { surface: target === "home" ? "home" : "board" });
+    const body = appendTaskCardBody(card);
+
+    const top = document.createElement("div");
+    top.className = "task-top task-card-title-row";
+    const titleCol = document.createElement("div");
+    titleCol.className = "task-game-heading-text";
+    const span = document.createElement("span");
+    span.className = "task-label";
+    span.textContent = task.label;
+    titleCol.appendChild(span);
+    if (pot > 0) {
+      const potSpan = document.createElement("span");
+      potSpan.className = "task-potential";
+      potSpan.textContent = "Potential: " + pot;
+      titleCol.appendChild(potSpan);
+    }
+    top.appendChild(titleCol);
+    body.appendChild(top);
+
+    const snippet = document.createElement("p");
+    snippet.className = "task-card-snippet";
+    snippet.textContent = "Incomplete · Preview";
+    body.appendChild(snippet);
+
+    const sub = document.createElement("div");
+    sub.className = "task-subrows";
+    const statusRow = document.createElement("div");
+    statusRow.className = "task-subrow";
+    const statusLeft = document.createElement("div");
+    statusLeft.className = "left";
+    const check = document.createElement("button");
+    check.type = "button";
+    check.className = "task-checkbox";
+    check.disabled = true;
+    check.setAttribute("aria-hidden", "true");
+    const statusLabel = document.createElement("span");
+    statusLabel.innerHTML = "<strong>Status:</strong> Incomplete";
+    statusLeft.appendChild(check);
+    statusLeft.appendChild(statusLabel);
+    statusRow.appendChild(statusLeft);
+    sub.appendChild(statusRow);
+
+    const remainingRow = document.createElement("div");
+    remainingRow.className = "task-subrow";
+    const remLeft = document.createElement("div");
+    remLeft.className = "left";
+    remLeft.innerHTML = "<strong>Time remaining:</strong>";
+    remainingRow.appendChild(remLeft);
+    const remVal = document.createElement("span");
+    remVal.className = "task-remaining";
+    remVal.textContent = "—";
+    remainingRow.appendChild(remVal);
+    sub.appendChild(remainingRow);
+    body.appendChild(sub);
+
+    cardHost.appendChild(card);
+  }
+
+  async function setTaskBannerFromFile(file) {
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: 1400, quality: 0.92 });
+      await loadTaskBannerSourceFromUrl(dataUrl);
+    } catch (err) {
+      alert((err && err.message) || "Could not use that image.");
+    }
+  }
+
+  async function switchTaskBannerTarget(target) {
+    if (!TASK_BANNER_TARGETS[target]) return;
+    if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
+    taskModal.bannerTarget = target;
+    syncTaskBannerTargetButtons();
+    resizeTaskBannerCropStage();
+    if (taskModal.bannerSource && taskBannerCrop.sourceImg) {
+      applyBannerViewToStage(getActiveTaskBannerView());
+      drawTaskBannerCrop();
+      syncTaskBannerPreview();
+    } else if (taskModal.bannerSource) {
+      try {
+        await loadTaskBannerSourceFromUrl(taskModal.bannerSource, { keepViews: true });
+      } catch (_) {
+        drawTaskBannerCrop();
+        syncTaskBannerPreview();
+      }
+    } else {
+      resetTaskBannerCropState();
+      drawTaskBannerCrop();
+      syncTaskBannerPreview();
+    }
+  }
+
+  function applyTaskBannerCornerScaleLocked(kind, mode, dx, dy, aspect) {
+    const min = TASK_BANNER_CROP_MIN;
+    const isImg = kind === "img";
+    const startX = isImg ? taskBannerCrop.startImgX : taskBannerCrop.startCropX;
+    const startY = isImg ? taskBannerCrop.startImgY : taskBannerCrop.startCropY;
+    const startW = isImg ? taskBannerCrop.startImgW : taskBannerCrop.startCropW;
+    const startH = isImg ? taskBannerCrop.startImgH : taskBannerCrop.startCropH;
+    let w = startW;
+    let h = startH;
+    const growW = (mode === "ne" || mode === "se") ? dx : -dx;
+    const growH = (mode === "sw" || mode === "se") ? dy : -dy;
+    if (Math.abs(growW) >= Math.abs(growH) * aspect) {
+      w = startW + growW;
+      h = w / aspect;
+    } else {
+      h = startH + growH;
+      w = h * aspect;
+    }
+    if (w < min) {
+      w = min;
+      h = w / aspect;
+    }
+    if (h < min) {
+      h = min;
+      w = h * aspect;
+    }
+    let x = startX;
+    let y = startY;
+    if (mode === "nw" || mode === "sw") x = startX + startW - w;
+    if (mode === "nw" || mode === "ne") y = startY + startH - h;
+    if (isImg) {
+      taskBannerCrop.imgX = x;
+      taskBannerCrop.imgY = y;
+      taskBannerCrop.imgW = w;
+      taskBannerCrop.imgH = h;
+      softClampTaskBannerRect("img");
+    } else {
+      taskBannerCrop.cropX = x;
+      taskBannerCrop.cropY = y;
+      taskBannerCrop.cropW = w;
+      taskBannerCrop.cropH = h;
+      softClampTaskBannerRect("crop");
+    }
+  }
+
+  function applyTaskBannerCropFreeScale(mode, dx, dy) {
+    const min = TASK_BANNER_CROP_MIN;
+    let x = taskBannerCrop.startCropX;
+    let y = taskBannerCrop.startCropY;
+    let w = taskBannerCrop.startCropW;
+    let h = taskBannerCrop.startCropH;
+    if (mode === "nw") {
+      x = taskBannerCrop.startCropX + dx;
+      y = taskBannerCrop.startCropY + dy;
+      w = taskBannerCrop.startCropW - dx;
+      h = taskBannerCrop.startCropH - dy;
+    } else if (mode === "ne") {
+      y = taskBannerCrop.startCropY + dy;
+      w = taskBannerCrop.startCropW + dx;
+      h = taskBannerCrop.startCropH - dy;
+    } else if (mode === "sw") {
+      x = taskBannerCrop.startCropX + dx;
+      w = taskBannerCrop.startCropW - dx;
+      h = taskBannerCrop.startCropH + dy;
+    } else {
+      w = taskBannerCrop.startCropW + dx;
+      h = taskBannerCrop.startCropH + dy;
+    }
+    if (w < min) {
+      if (mode === "nw" || mode === "sw") x = taskBannerCrop.startCropX + taskBannerCrop.startCropW - min;
+      w = min;
+    }
+    if (h < min) {
+      if (mode === "nw" || mode === "ne") y = taskBannerCrop.startCropY + taskBannerCrop.startCropH - min;
+      h = min;
+    }
+    taskBannerCrop.cropX = x;
+    taskBannerCrop.cropY = y;
+    taskBannerCrop.cropW = w;
+    taskBannerCrop.cropH = h;
+    softClampTaskBannerRect("crop");
+  }
+
+  function pointInRect(px, py, x, y, w, h) {
+    return px >= x && px <= x + w && py >= y && py <= y + h;
+  }
+
+  function nearTaskBannerCropBorder(px, py, band) {
+    const b = band || 12;
+    const x = taskBannerCrop.cropX;
+    const y = taskBannerCrop.cropY;
+    const w = taskBannerCrop.cropW;
+    const h = taskBannerCrop.cropH;
+    if (!pointInRect(px, py, x - b, y - b, w + b * 2, h + b * 2)) return false;
+    return !pointInRect(px, py, x + b, y + b, Math.max(0, w - b * 2), Math.max(0, h - b * 2));
+  }
+
+  function hitBannerFrameHandle(px, py, x, y, w, h, pad) {
+    const size = pad || 14;
+    const corners = {
+      nw: [x, y],
+      ne: [x + w, y],
+      sw: [x, y + h],
+      se: [x + w, y + h],
+    };
+    for (const key of Object.keys(corners)) {
+      const hx = corners[key][0];
+      const hy = corners[key][1];
+      if (Math.abs(px - hx) <= size && Math.abs(py - hy) <= size) return key;
+    }
+    return null;
+  }
+
+  function initTaskBannerControls() {
+    const pointerPos = (clientX, clientY) => {
+      const wrap = bannerEl("wrap");
+      if (!wrap) return { x: 0, y: 0 };
+      const rect = wrap.getBoundingClientRect();
+      const sx = TASK_BANNER_STAGE.w / Math.max(1, rect.width);
+      const sy = TASK_BANNER_STAGE.h / Math.max(1, rect.height);
+      return {
+        x: (clientX - rect.left) * sx,
+        y: (clientY - rect.top) * sy,
+      };
+    };
+
+    const snapshotDragStart = (p) => {
+      taskBannerCrop.dragStartX = p.x;
+      taskBannerCrop.dragStartY = p.y;
+      taskBannerCrop.startImgX = taskBannerCrop.imgX;
+      taskBannerCrop.startImgY = taskBannerCrop.imgY;
+      taskBannerCrop.startImgW = taskBannerCrop.imgW;
+      taskBannerCrop.startImgH = taskBannerCrop.imgH;
+      taskBannerCrop.startCropX = taskBannerCrop.cropX;
+      taskBannerCrop.startCropY = taskBannerCrop.cropY;
+      taskBannerCrop.startCropW = taskBannerCrop.cropW;
+      taskBannerCrop.startCropH = taskBannerCrop.cropH;
+    };
+
+    const onDown = (clientX, clientY, forcedMode) => {
+      if (!taskBannerCrop.sourceImg) return;
+      const p = pointerPos(clientX, clientY);
+      snapshotDragStart(p);
+      if (forcedMode) {
+        taskBannerCrop.mode = forcedMode;
+        return;
+      }
+      const cropHandle = hitBannerFrameHandle(
+        p.x, p.y,
+        taskBannerCrop.cropX, taskBannerCrop.cropY,
+        taskBannerCrop.cropW, taskBannerCrop.cropH
+      );
+      if (cropHandle) {
+        taskBannerCrop.mode = "scale-crop-" + cropHandle;
+        return;
+      }
+      const imgHandle = hitBannerFrameHandle(
+        p.x, p.y,
+        taskBannerCrop.imgX, taskBannerCrop.imgY,
+        taskBannerCrop.imgW, taskBannerCrop.imgH
+      );
+      if (imgHandle) {
+        taskBannerCrop.mode = "scale-img-" + imgHandle;
+        return;
+      }
+      if (nearTaskBannerCropBorder(p.x, p.y)) {
+        taskBannerCrop.mode = "move-crop";
+        return;
+      }
+      if (pointInRect(p.x, p.y, taskBannerCrop.imgX, taskBannerCrop.imgY, taskBannerCrop.imgW, taskBannerCrop.imgH)) {
+        taskBannerCrop.mode = "move-img";
+        return;
+      }
+      if (pointInRect(p.x, p.y, taskBannerCrop.cropX, taskBannerCrop.cropY, taskBannerCrop.cropW, taskBannerCrop.cropH)) {
+        taskBannerCrop.mode = "move-crop";
+        return;
+      }
+      taskBannerCrop.mode = null;
+    };
+
+    const onMove = (clientX, clientY) => {
+      if (!taskBannerCrop.mode) return;
+      const p = pointerPos(clientX, clientY);
+      const dx = p.x - taskBannerCrop.dragStartX;
+      const dy = p.y - taskBannerCrop.dragStartY;
+      const mode = taskBannerCrop.mode;
+
+      if (mode === "move-img") {
+        taskBannerCrop.imgX = taskBannerCrop.startImgX + dx;
+        taskBannerCrop.imgY = taskBannerCrop.startImgY + dy;
+        softClampTaskBannerRect("img");
+      } else if (mode === "move-crop") {
+        taskBannerCrop.cropX = taskBannerCrop.startCropX + dx;
+        taskBannerCrop.cropY = taskBannerCrop.startCropY + dy;
+        softClampTaskBannerRect("crop");
+      } else if (mode.indexOf("scale-img-") === 0) {
+        applyTaskBannerCornerScaleLocked("img", mode.slice("scale-img-".length), dx, dy, getTaskBannerImageAspect());
+      } else if (mode.indexOf("scale-crop-") === 0) {
+        const corner = mode.slice("scale-crop-".length);
+        const target = taskModal.bannerTarget || "board";
+        if (target === "board") {
+          applyTaskBannerCropFreeScale(corner, dx, dy);
+        } else {
+          applyTaskBannerCornerScaleLocked("crop", corner, dx, dy, getTaskBannerCropAspect());
+        }
+      }
+      drawTaskBannerCrop();
+    };
+
+    const onUp = () => {
+      if (!taskBannerCrop.mode) return;
+      taskBannerCrop.mode = null;
+      if (taskBannerCrop.sourceImg) commitTaskBannerCrop();
+    };
+
+    function bindOneBannerUi(uiKey) {
+      const prev = activeBannerUiKey;
+      setActiveBannerUi(uiKey);
+      const fileInput = bannerEl("file");
+      const chooseBtn = bannerEl("chooseBtn");
+      const clearBtn = bannerEl("clearBtn");
+      const wrap = bannerEl("wrap");
+      const imgFrame = bannerEl("imgFrame");
+      const cropFrame = bannerEl("cropFrame");
+      const nameInput = bannerEl("nameInput");
+      const root = bannerRootEl();
+      setActiveBannerUi(prev);
+      if (!fileInput || !root) return;
+
+      const activate = () => setActiveBannerUi(uiKey);
+
+      if (typeof ResizeObserver !== "undefined" && wrap) {
+        const ro = new ResizeObserver(() => {
+          if (!wrap.isConnected) return;
+          if (activeBannerUiKey !== uiKey) return;
+          resizeTaskBannerCropStage();
+          drawTaskBannerCrop();
+        });
+        ro.observe(wrap);
+      }
+
+      root.querySelectorAll(".task-banner-target-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          activate();
+          switchTaskBannerTarget(btn.dataset.bannerTarget || "board");
+        });
+      });
+
+      if (chooseBtn) {
+        chooseBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          activate();
+          fileInput.click();
+        });
+      }
+      fileInput.addEventListener("change", () => {
+        activate();
+        const file = fileInput.files && fileInput.files[0];
+        fileInput.value = "";
+        if (file) setTaskBannerFromFile(file);
+      });
+
+      if (wrap) {
+        ["dragenter", "dragover"].forEach((type) => {
+          wrap.addEventListener(type, (e) => {
+            e.preventDefault();
+            wrap.classList.add("is-dragover");
+          });
+        });
+        ["dragleave", "drop"].forEach((type) => {
+          wrap.addEventListener(type, (e) => {
+            e.preventDefault();
+            wrap.classList.remove("is-dragover");
+          });
+        });
+        wrap.addEventListener("drop", (e) => {
+          activate();
+          const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+          if (file) setTaskBannerFromFile(file);
+        });
+        wrap.addEventListener("mousedown", (e) => {
+          if (e.target && e.target.classList && e.target.classList.contains("task-banner-crop-handle")) return;
+          e.preventDefault();
+          activate();
+          onDown(e.clientX, e.clientY, null);
+        });
+        wrap.addEventListener("touchstart", (e) => {
+          if (!e.touches || !e.touches[0]) return;
+          if (e.target && e.target.classList && e.target.classList.contains("task-banner-crop-handle")) return;
+          activate();
+          onDown(e.touches[0].clientX, e.touches[0].clientY, null);
+        }, { passive: true });
+      }
+
+      if (clearBtn) {
+        clearBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          activate();
+          resetTaskBannerCropState();
+          taskBannerCrop.clear = true;
+          taskModal.bannerSource = null;
+          taskModal.bannerViews = emptyTaskBannerViews();
+          taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+          resizeTaskBannerCropStage();
+          drawTaskBannerCrop();
+          syncTaskBannerPreview();
+          syncTaskBannerTargetButtons();
+        });
+      }
+
+      if (nameInput) {
+        nameInput.addEventListener("input", () => {
+          if (activeBannerUiKey !== uiKey) return;
+          if (taskModal.bannerSource) syncTaskBannerPreview();
+        });
+      }
+
+      const bindFrameDown = (frame, frameKind) => {
+        if (!frame) return;
+        frame.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          activate();
+          const handle = e.target && e.target.getAttribute && e.target.getAttribute("data-handle");
+          if (handle) {
+            onDown(e.clientX, e.clientY, "scale-" + frameKind + "-" + handle);
+          } else {
+            onDown(e.clientX, e.clientY, "move-" + frameKind);
+          }
+        });
+        frame.addEventListener("touchstart", (e) => {
+          if (!e.touches || !e.touches[0]) return;
+          activate();
+          const handle = e.target && e.target.getAttribute && e.target.getAttribute("data-handle");
+          if (handle) {
+            onDown(e.touches[0].clientX, e.touches[0].clientY, "scale-" + frameKind + "-" + handle);
+          } else {
+            onDown(e.touches[0].clientX, e.touches[0].clientY, "move-" + frameKind);
+          }
+        }, { passive: true });
+      };
+      bindFrameDown(imgFrame, "img");
+      bindFrameDown(cropFrame, "crop");
+    }
+
+    Object.keys(TASK_BANNER_UI).forEach(bindOneBannerUi);
+
+    window.addEventListener("mousemove", (e) => onMove(e.clientX, e.clientY));
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", (e) => {
+      if (!taskBannerCrop.mode || !e.touches || !e.touches[0]) return;
+      e.preventDefault();
+      onMove(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: false });
+    window.addEventListener("touchend", onUp);
+  }
+
   function initTaskModal() {
     const modalEl = qs("taskModal");
     const closeBtn = qs("taskModalClose");
@@ -9555,6 +10968,7 @@
     });
     if (closeBtn) closeBtn.addEventListener("click", closeTaskModal);
     if (cancelBtn) cancelBtn.addEventListener("click", closeTaskModal);
+    initTaskBannerControls();
 
     const resetTime = qs("taskResetTime");
     const sameEndToggle = qs("taskCycleEndTimeSameAsBegin");
@@ -9704,6 +11118,8 @@
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
+        if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
+        applyTaskBannersToSavePayload(next);
         if (existingIdx >= 0) {
           const merged = { ...game.weeklies[existingIdx], ...next };
           if (!cycleEndEnabled) {
@@ -9721,6 +11137,7 @@
             delete merged.cycleEndHour;
             delete merged.cycleEndMinute;
           }
+          clearTaskBannerFieldsFromMerged(merged);
           game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
       } else if (taskModal.taskType === "endgame") {
@@ -9751,6 +11168,8 @@
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
         };
+        if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
+        applyTaskBannersToSavePayload(next);
         if (existingIdx >= 0) {
           const prev = game.endgame[existingIdx];
           const oldCurrency = getEndgamePotential(prev);
@@ -9778,6 +11197,7 @@
             delete merged.cycleEndHour;
             delete merged.cycleEndMinute;
           }
+          clearTaskBannerFieldsFromMerged(merged);
           game.endgame[existingIdx] = merged;
         } else {
           game.endgame.push(next);
@@ -10108,11 +11528,32 @@
     return true;
   }
 
+  function isTaskHiddenInData(task) {
+    return !!(task && (task.hideInData || task.excludeFromData));
+  }
+
+  function setTaskHideInData(gameId, taskType, taskId, hidden) {
+    const game = getGame(gameId);
+    if (!game) return false;
+    const list = taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []);
+    const task = list.find((t) => (t.id || t.label) === taskId);
+    if (!task) return false;
+    if (hidden) task.hideInData = true;
+    else delete task.hideInData;
+    bumpDataVersion();
+    save();
+    renderActiveTab();
+    return true;
+  }
+
   function appendTaskCycleEndFooter(parent, game, task, taskType) {
     if (!parent || !game || !task) return;
     const taskId = task.id || task.label;
     const footer = document.createElement("div");
     footer.className = "task-panel-cycle-end-footer";
+
+    const left = document.createElement("div");
+    left.className = "task-panel-cycle-end-left";
 
     const toggleLabel = document.createElement("label");
     toggleLabel.className = "task-panel-cycle-end-toggle";
@@ -10136,8 +11577,26 @@
 
     toggleLabel.appendChild(toggle);
     toggleLabel.appendChild(toggleText);
-    footer.appendChild(toggleLabel);
-    footer.appendChild(dateInput);
+    left.appendChild(toggleLabel);
+    left.appendChild(dateInput);
+    footer.appendChild(left);
+
+    const hideLabel = document.createElement("label");
+    hideLabel.className = "task-panel-cycle-end-toggle task-panel-hide-in-data-toggle";
+    hideLabel.title = "Hide this task from the Data tab";
+    const hideToggle = document.createElement("input");
+    hideToggle.type = "checkbox";
+    hideToggle.className = "fill-toggle";
+    hideToggle.checked = !!task.hideInData;
+    hideToggle.setAttribute("aria-label", "Hide in Data");
+    const hideText = document.createElement("span");
+    hideText.textContent = "Hide in Data";
+    hideLabel.appendChild(hideToggle);
+    hideLabel.appendChild(hideText);
+    hideToggle.addEventListener("change", () => {
+      setTaskHideInData(game.id, taskType, taskId, hideToggle.checked);
+    });
+    footer.appendChild(hideLabel);
 
     toggle.addEventListener("change", () => {
       dateInput.hidden = !toggle.checked;
@@ -10357,6 +11816,7 @@
 
     let wEarned = 0, wPotential = 0;
     (game.weeklies || []).forEach((t) => {
+      if (isTaskHiddenInData(t)) return;
       const key = game.id + "." + (t.id || t.label);
       const pot = getWeeklyPotential(t);
       const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
@@ -10366,6 +11826,7 @@
 
     let eEarned = 0, ePotential = 0;
     (game.endgame || []).forEach((t) => {
+      if (isTaskHiddenInData(t)) return;
       const key = game.id + "." + (t.id || t.label);
       const taskId = t.id || t.label;
       const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
@@ -10376,6 +11837,7 @@
     let xEarned = 0, xPotential = 0;
     (state.extracurricularTasks || []).forEach((t) => {
       if (t.gameId !== game.id) return;
+      if (isTaskHiddenInData(t)) return;
       const cur = Math.max(0, Number(t.currency) || 0);
       if (cur > 0) xPotential += cur;
       if (!state.extracurricularCompleted[t.id]) return;
@@ -10553,92 +12015,644 @@
       panel.classList.toggle("active", name === state.tab);
       panel.hidden = name !== state.tab;
     });
-    updateFormatButtons();
   }
 
-  function updateFormatButtons() {
-    ["dailies", "weeklies", "endgame", "extracurricular"].forEach((panel) => {
-      const view = state[panel + "View"] || "list";
-      const wrap = document.getElementById("format-toggle-" + panel);
-      if (!wrap) return;
-      wrap.querySelectorAll(".format-btn").forEach((btn) => {
-        const isActive = btn.dataset.format === view;
-        btn.classList.toggle("active", isActive);
-      });
+  /** Pack .task-grid cards into equal-width shortest-column masonry (up to 4 cols). Skips home checklist strip. */
+  function unwrapTaskMasonry(root) {
+    if (!root) return;
+    root.querySelectorAll(":scope > .task-masonry-col").forEach((col) => {
+      while (col.firstChild) root.insertBefore(col.firstChild, col);
+      col.remove();
+    });
+    root.classList.remove("task-grid-masonry-js", "task-grid-masonry-single");
+  }
+
+  function applyTaskMasonry(root, opts) {
+    if (!root || !root.classList || !root.classList.contains("task-grid")) return;
+    if (root.closest(".home-dwe-checklist-scroll")) return;
+    const force = !!(opts && opts.force);
+    const items = Array.from(root.querySelectorAll(":scope > .task-item, :scope > .task-masonry-col > .task-item"));
+    if (items.length === 0) {
+      unwrapTaskMasonry(root);
+      return;
+    }
+    const gap = 12;
+    const minColRaw = Number(root.dataset.masonryMin);
+    const minColDefault = root.classList.contains("task-grid-dailies") ? 300 : 200;
+    const minCol = Number.isFinite(minColRaw) && minColRaw >= 120 ? minColRaw : minColDefault;
+    const width = root.getBoundingClientRect().width || root.clientWidth || 0;
+    if (width < 40) return;
+    const maxColsRaw = Number(root.dataset.masonryMax);
+    const maxCols = Number.isFinite(maxColsRaw) && maxColsRaw > 0 ? Math.min(4, Math.floor(maxColsRaw)) : 4;
+    let colCount = Math.floor((width + gap) / (minCol + gap));
+    colCount = Math.max(1, Math.min(maxCols, colCount));
+    const prevCols = Number(root.dataset.masonryCols || 0);
+    const alreadyPacked = !!root.querySelector(":scope > .task-masonry-col");
+    if (!force && alreadyPacked && prevCols === colCount) return;
+
+    unwrapTaskMasonry(root);
+    root.dataset.masonryCols = String(colCount);
+    if (colCount === 1) {
+      root.classList.add("task-grid-masonry-js", "task-grid-masonry-single");
+      return;
+    }
+    root.classList.add("task-grid-masonry-js");
+    const columns = [];
+    const heights = [];
+    for (let i = 0; i < colCount; i++) {
+      const col = document.createElement("div");
+      col.className = "task-masonry-col";
+      root.appendChild(col);
+      columns.push(col);
+      heights.push(0);
+    }
+    items.forEach((item) => {
+      let best = 0;
+      for (let i = 1; i < colCount; i++) {
+        if (heights[i] < heights[best]) best = i;
+      }
+      columns[best].appendChild(item);
+      heights[best] += (item.getBoundingClientRect().height || 140) + gap;
     });
   }
 
-  function initFormatToggles() {
-    document.querySelectorAll(".format-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const panel = btn.dataset.panel;
-        const format = btn.dataset.format;
-        if (!panel || !format) return;
-        const key = panel + "View";
-        if (state[key] !== format) {
-          state[key] = format;
-          save();
-          renderActiveTab();
+  let taskMasonryResizeObserver = null;
+  /**
+   * Pack task cards into a staggered masonry grid.
+   * Packs once on open; does not reshuffle as images load (banner aspect-ratio
+   * reserves height). Window resize only re-packs if the column count changes.
+   */
+  function scheduleTaskMasonry(root) {
+    if (!root) return;
+    requestAnimationFrame(() => {
+      applyTaskMasonry(root, { force: true });
+      if (typeof ResizeObserver === "undefined") return;
+      if (!taskMasonryResizeObserver) {
+        taskMasonryResizeObserver = new ResizeObserver((entries) => {
+          // force:false → only re-pack when column count changes (see applyTaskMasonry).
+          entries.forEach((entry) => applyTaskMasonry(entry.target, { force: false }));
+        });
+      }
+      try {
+        taskMasonryResizeObserver.observe(root);
+      } catch (_) {}
+    });
+  }
+
+  /** Sort board entries: incomplete first by soonest due, completed at end. */
+  function sortBoardTaskEntries(entries) {
+    return [...entries].sort((a, b) => {
+      if (!!a.completed !== !!b.completed) return a.completed ? 1 : -1;
+      const aDue = Number.isFinite(a.dueMs) ? a.dueMs : Number.POSITIVE_INFINITY;
+      const bDue = Number.isFinite(b.dueMs) ? b.dueMs : Number.POSITIVE_INFINITY;
+      if (aDue !== bDue) return aDue - bDue;
+      if ((a.gameOrder || 0) !== (b.gameOrder || 0)) return (a.gameOrder || 0) - (b.gameOrder || 0);
+      return (a.taskOrder || 0) - (b.taskOrder || 0);
+    });
+  }
+
+  function normalizeTaskBannerShape(shape) {
+    if (shape === "square" || shape === "vertical" || shape === "horizontal") return shape;
+    return "horizontal";
+  }
+
+  /** Resolved banner aspect ratio (width/height). Supports freeform bannerAspect + legacy shapes. */
+  function getTaskBannerAspect(task) {
+    if (task && Number.isFinite(Number(task.bannerAspect)) && Number(task.bannerAspect) > 0) {
+      return Number(task.bannerAspect);
+    }
+    const shape = normalizeTaskBannerShape(task && task.bannerShape);
+    if (shape === "square") return 1;
+    if (shape === "vertical") return 9 / 16;
+    return 16 / 9;
+  }
+
+  /** surface: "home" | "games" | "board" (default). Uses shared bannerSourceImage + bannerViews. */
+  function getTaskBannerForSurface(task, surface) {
+    const s = surface || "board";
+    if (!task) return { image: null, aspect: 16 / 9, source: null };
+    const source = (typeof resolveTaskBannerSource === "function")
+      ? resolveTaskBannerSource(task)
+      : (task.bannerSourceImage || task.bannerImage || task.bannerHomeImage || task.bannerGamesImage || null);
+    const view = (typeof resolveTaskBannerView === "function")
+      ? resolveTaskBannerView(task, s)
+      : null;
+    if (source) {
+      let aspect = (view && Number(view.aspect) > 0) ? Number(view.aspect) : null;
+      if (!aspect) {
+        if (s === "home") aspect = 16 / 9;
+        else if (s === "games") aspect = 3 / 4;
+        else aspect = getTaskBannerAspect(task);
+      }
+      return { image: source, aspect: aspect, view: view, source: source };
+    }
+    // Legacy per-surface images (pre single-source)
+    if (s === "home" && task.bannerHomeImage) {
+      return {
+        image: task.bannerHomeImage,
+        aspect: (Number(task.bannerHomeAspect) > 0 ? Number(task.bannerHomeAspect) : 16 / 9),
+        view: null,
+        source: null,
+      };
+    }
+    if (s === "games" && task.bannerGamesImage) {
+      return {
+        image: task.bannerGamesImage,
+        aspect: (Number(task.bannerGamesAspect) > 0 ? Number(task.bannerGamesAspect) : 3 / 4),
+        view: null,
+        source: null,
+      };
+    }
+    if (task.bannerImage) {
+      return {
+        image: task.bannerImage,
+        aspect: getTaskBannerAspect(task),
+        view: null,
+        source: null,
+      };
+    }
+    return { image: null, aspect: (view && view.aspect) || 16 / 9, view: null, source: null };
+  }
+
+  function applyBannerViewportImgStyles(img, view) {
+    if (!img) return;
+    if (!view) {
+      img.style.left = "0";
+      img.style.top = "0";
+      img.style.width = "100%";
+      img.style.height = "100%";
+      img.style.objectFit = "cover";
+      return;
+    }
+    img.style.left = (Number(view.x || 0) * 100) + "%";
+    img.style.top = (Number(view.y || 0) * 100) + "%";
+    img.style.width = (Math.max(0.001, Number(view.w || 1)) * 100) + "%";
+    img.style.height = (Math.max(0.001, Number(view.h || 1)) * 100) + "%";
+    img.style.objectFit = "fill";
+    img.style.objectPosition = "center";
+  }
+
+  /** Banner strip/thumb for weekly & endgame task cards. variant: "card" | "thumb" */
+  function appendTaskBanner(parent, task, variant) {
+    if (!parent || !task) return null;
+    const surface = variant === "thumb" ? "games" : "board";
+    const banner = getTaskBannerForSurface(task, surface);
+    if (!banner.image) return null;
+    const wrap = document.createElement("div");
+    wrap.className = (variant === "thumb" ? "task-banner-thumb-wrap" : "task-banner-card-wrap");
+    wrap.style.aspectRatio = String(banner.aspect);
+    const img = document.createElement("img");
+    img.className = (variant === "thumb" ? "task-banner-thumb" : "task-banner-card") + " task-banner-viewport-img";
+    img.src = banner.image;
+    img.alt = "";
+    img.loading = "lazy";
+    img.draggable = false;
+    applyBannerViewportImgStyles(img, banner.view);
+    wrap.appendChild(img);
+    parent.insertBefore(wrap, parent.firstChild);
+    parent.classList.add(variant === "thumb" ? "has-task-banner-thumb" : "has-task-banner");
+    return img;
+  }
+
+  function isGamesBannerHamburgerMode() {
+    try {
+      return !!(window.matchMedia && window.matchMedia("(max-width: 768px)").matches);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /** Full-height left media panel for Games-page managed task cards.
+   *  opts.surface: force "home" | "games". Default: home in hamburger, games otherwise. */
+  function appendGamesTaskSideMedia(cardEl, task, opts) {
+    if (!cardEl) return null;
+    const media = document.createElement("div");
+    media.className = "games-task-media";
+    const forced = opts && opts.surface;
+    const surface = (forced === "home" || forced === "games")
+      ? forced
+      : (isGamesBannerHamburgerMode() ? "home" : "games");
+    const banner = getTaskBannerForSurface(task, surface);
+    if (banner.image) {
+      const stage = document.createElement("div");
+      stage.className = "games-task-media-stage";
+      const fallbackAspect = surface === "home" ? (16 / 9) : (3 / 4);
+      const aspect = Number(banner.aspect) > 0 ? Number(banner.aspect) : fallbackAspect;
+      stage.style.aspectRatio = String(aspect);
+      stage.style.setProperty("--banner-aspect", String(aspect));
+      media.style.setProperty("--banner-aspect", String(aspect));
+      const img = document.createElement("img");
+      img.className = "games-task-media-img task-banner-viewport-img";
+      img.src = banner.image;
+      img.alt = "";
+      img.loading = "lazy";
+      img.draggable = false;
+      applyBannerViewportImgStyles(img, banner.view);
+      stage.appendChild(img);
+      media.appendChild(stage);
+      cardEl.classList.add("has-games-task-media");
+    } else {
+      const ph = document.createElement("div");
+      ph.className = "games-task-media-placeholder";
+      ph.setAttribute("aria-hidden", "true");
+      media.appendChild(ph);
+    }
+    cardEl.insertBefore(media, cardEl.firstChild);
+    return media;
+  }
+
+  function buildTaskCardAvatar(game) {
+    if (game && game.iconImage) {
+      const img = document.createElement("img");
+      img.className = "task-card-avatar";
+      img.src = game.iconImage;
+      img.alt = "";
+      img.draggable = false;
+      return img;
+    }
+    const ph = document.createElement("div");
+    ph.className = "task-card-avatar task-card-avatar-placeholder";
+    ph.setAttribute("aria-hidden", "true");
+    ph.textContent = ((game && game.name) || "?").trim().charAt(0).toUpperCase() || "?";
+    return ph;
+  }
+
+  /**
+   * Home/dailies heading: game icon left of name, optional potential under the name.
+   * Returns { el, nameEl }.
+   */
+  function buildTaskGameHeading(game, opts) {
+    const o = opts || {};
+    const wrap = document.createElement("div");
+    wrap.className = "task-game-heading" + (o.className ? " " + o.className : "");
+
+    if (game && game.iconImage) {
+      const img = document.createElement("img");
+      img.className = "task-game-heading-icon";
+      img.src = game.iconImage;
+      img.alt = "";
+      img.draggable = false;
+      wrap.appendChild(img);
+    } else {
+      const ph = document.createElement("div");
+      ph.className = "task-game-heading-icon task-game-heading-icon-placeholder";
+      ph.setAttribute("aria-hidden", "true");
+      ph.textContent = ((game && game.name) || o.title || "?").trim().charAt(0).toUpperCase() || "?";
+      wrap.appendChild(ph);
+    }
+
+    const text = document.createElement("div");
+    text.className = "task-game-heading-text";
+    const nameEl = document.createElement("span");
+    nameEl.className = "task-label";
+    nameEl.textContent = o.title || (game && game.name) || "Game";
+    text.appendChild(nameEl);
+    if (o.potential != null && String(o.potential).trim() !== "") {
+      const pot = document.createElement("span");
+      pot.className = "task-potential";
+      pot.textContent = o.potential;
+      text.appendChild(pot);
+    }
+    wrap.appendChild(text);
+    return { el: wrap, nameEl: nameEl };
+  }
+
+  /**
+   * Inter-Knot style media header: banner (or placeholder) + overlapping game avatar/name.
+   * opts.surface: "home" | "board" | "games" (default board)
+   * Empty banners shrink to the game-name byline except on home (keeps full placeholder).
+   */
+  function appendTaskCardMedia(cardEl, task, game, opts) {
+    if (!cardEl) return null;
+    const surface = (opts && opts.surface) || "board";
+    const banner = getTaskBannerForSurface(task, surface);
+    const hasBanner = !!banner.image;
+    const shrinkEmpty = !hasBanner && surface !== "home";
+    const aspect = hasBanner ? banner.aspect : 16 / 9;
+    const media = document.createElement("div");
+    media.className = "task-card-media"
+      + (hasBanner ? "" : " task-card-media-empty")
+      + (shrinkEmpty ? " task-card-media-compact" : "");
+    if (!shrinkEmpty) media.style.aspectRatio = String(aspect);
+
+    if (hasBanner) {
+      const img = document.createElement("img");
+      img.className = "task-banner-card task-banner-viewport-img";
+      img.src = banner.image;
+      img.alt = "";
+      img.loading = "lazy";
+      img.draggable = false;
+      applyBannerViewportImgStyles(img, banner.view);
+      media.appendChild(img);
+      cardEl.classList.add("has-task-banner");
+    } else if (!shrinkEmpty) {
+      const ph = document.createElement("div");
+      ph.className = "task-card-media-placeholder";
+      ph.setAttribute("aria-hidden", "true");
+      media.appendChild(ph);
+    }
+
+    const byline = document.createElement("div");
+    byline.className = "task-card-byline";
+    byline.appendChild(buildTaskCardAvatar(game));
+    const author = document.createElement("span");
+    author.className = "task-card-author";
+    author.textContent = (game && game.name) || "Game";
+    byline.appendChild(author);
+    media.appendChild(byline);
+
+    cardEl.classList.add("task-card-knot");
+    cardEl.appendChild(media);
+    return media;
+  }
+
+  function appendTaskCardBody(cardEl) {
+    const body = document.createElement("div");
+    body.className = "task-card-body";
+    cardEl.appendChild(body);
+    return body;
+  }
+
+  /** Compress an image file to a JPEG data URL (shared by task banners + game icons). */
+  function compressImageFileToDataUrl(file, opts) {
+    const options = opts || {};
+    const maxW = options.maxWidth || 720;
+    const quality = options.quality == null ? 0.72 : options.quality;
+    const maxBytes = options.maxBytes || 4 * 1024 * 1024;
+    return new Promise((resolve, reject) => {
+      if (!file || !String(file.type || "").startsWith("image/")) {
+        reject(new Error("Choose an image file."));
+        return;
+      }
+      if (file.size > maxBytes) {
+        reject(new Error("Image is too large (max " + Math.round(maxBytes / (1024 * 1024)) + "MB)."));
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, maxW / Math.max(1, img.naturalWidth || img.width));
+        const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+        const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Could not process image."));
+          return;
         }
-      });
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not load image."));
+      };
+      img.src = url;
     });
+  }
+
+  /**
+   * Game identity row: square icon + name + optional subtitle (list headers / Games title).
+   * opts: { tagName?, className?, showPlaceholder?, interactive? }
+   */
+  function buildGameIdentityHeader(game, opts) {
+    const o = opts || {};
+    const el = document.createElement(o.tagName || "div");
+    const shape = (game && (game.iconShape === "circle" || game.iconShape === "square" || game.iconShape === "rounded"))
+      ? game.iconShape
+      : "rounded";
+    el.className =
+      "game-identity game-identity-shape-" +
+      shape +
+      (o.className ? " " + o.className : "") +
+      (o.interactive ? " game-identity-interactive" : "");
+    if (o.interactive) {
+      el.setAttribute("role", "button");
+      el.tabIndex = 0;
+      el.setAttribute("aria-label", "Edit game identity for " + ((game && game.name) || "game"));
+    }
+    if (game && game.iconImage) {
+      const icon = document.createElement("img");
+      icon.className = "game-identity-icon";
+      icon.src = game.iconImage;
+      icon.alt = "";
+      icon.draggable = false;
+      el.appendChild(icon);
+    } else if (o.showPlaceholder) {
+      const ph = document.createElement("div");
+      ph.className = "game-identity-icon game-identity-icon-placeholder";
+      ph.setAttribute("aria-hidden", "true");
+      const letter = ((game && game.name) || "?").trim().charAt(0).toUpperCase() || "?";
+      ph.textContent = letter;
+      el.appendChild(ph);
+    }
+    const text = document.createElement("div");
+    text.className = "game-identity-text";
+    const name = document.createElement("div");
+    name.className = "game-identity-name";
+    name.textContent = (game && game.name) || "Game";
+    text.appendChild(name);
+    const sub = (game && game.subtitle && String(game.subtitle).trim()) || "";
+    if (sub) {
+      const subtitle = document.createElement("div");
+      subtitle.className = "game-identity-subtitle";
+      subtitle.textContent = sub;
+      text.appendChild(subtitle);
+    } else if (o.interactive) {
+      const hint = document.createElement("div");
+      hint.className = "game-identity-subtitle game-identity-hint";
+      hint.textContent = "Click to edit icon, name, and subtitle";
+      text.appendChild(hint);
+    }
+    el.appendChild(text);
+    return el;
   }
 
 
   function buildDailyTaskItem(game, tagName) {
     const doneToday = isCompletedToday("dailies", game.id);
     const el = document.createElement(tagName || "li");
-    el.className = "task-item" + (doneToday ? " done" : "");
+    el.className = "task-item task-item-daily" + (doneToday ? " done" : "");
 
-    const top = document.createElement("div");
-    top.className = "task-top";
-    const span = document.createElement("span");
-    span.className = "task-label";
-    span.textContent = game.name || game.id;
-    const potSpan = document.createElement("span");
-    potSpan.className = "task-potential";
-    potSpan.textContent = "Potential: " + getDailyPotential(game);
-    top.appendChild(span);
-    top.appendChild(potSpan);
-    el.appendChild(top);
+    const iconWrap = document.createElement("div");
+    iconWrap.className = "task-daily-icon";
+    if (game && game.iconImage) {
+      const img = document.createElement("img");
+      img.src = game.iconImage;
+      img.alt = "";
+      img.draggable = false;
+      iconWrap.appendChild(img);
+    } else {
+      const ph = document.createElement("div");
+      ph.className = "task-daily-icon-placeholder";
+      ph.setAttribute("aria-hidden", "true");
+      ph.textContent = ((game && game.name) || "?").trim().charAt(0).toUpperCase() || "?";
+      iconWrap.appendChild(ph);
+    }
+    el.appendChild(iconWrap);
 
-    const sub = document.createElement("div");
-    sub.className = "task-subrows";
-    const row1 = document.createElement("div");
-    row1.className = "task-subrow";
-    const left1 = document.createElement("div");
-    left1.className = "left";
+    const main = document.createElement("div");
+    main.className = "task-daily-main";
+
+    const head = document.createElement("div");
+    head.className = "task-daily-head";
+    const nameEl = document.createElement("span");
+    nameEl.className = "task-label";
+    nameEl.textContent = (game && game.name) || game.id;
+    nameEl.addEventListener("click", () => toggleDaily(game.id));
+    head.appendChild(nameEl);
+    const pot = document.createElement("span");
+    pot.className = "task-potential";
+    pot.textContent = "Potential: " + getDailyPotential(game);
+    head.appendChild(pot);
+    main.appendChild(head);
+
+    const statusRow = document.createElement("div");
+    statusRow.className = "task-daily-status";
     const check = document.createElement("button");
     check.type = "button";
     check.className = "task-checkbox";
     check.setAttribute("aria-label", doneToday ? "Mark incomplete" : "Mark complete");
     check.addEventListener("click", () => toggleDaily(game.id));
-    const label1 = document.createElement("span");
-    label1.innerHTML = "<strong>Completion Status:</strong> " + (doneToday ? "Complete" : "Incomplete");
-    span.addEventListener("click", () => toggleDaily(game.id));
-    left1.appendChild(check);
-    left1.appendChild(label1);
-    row1.appendChild(left1);
-    sub.appendChild(row1);
+    statusRow.appendChild(check);
+    const statusText = document.createElement("div");
+    statusText.className = "task-daily-status-text";
+    const statusLabel = document.createElement("strong");
+    statusLabel.textContent = "Completion Status:";
+    const statusVal = document.createElement("span");
+    statusVal.textContent = doneToday ? "Complete" : "Incomplete";
+    statusText.appendChild(statusLabel);
+    statusText.appendChild(statusVal);
+    statusRow.appendChild(statusText);
+    main.appendChild(statusRow);
 
     const remainingRow = document.createElement("div");
-    remainingRow.className = "task-subrow";
-    const leftR = document.createElement("div");
-    leftR.className = "left";
-    const labelR = document.createElement("span");
-    labelR.innerHTML = "<strong>Time remaining:</strong>";
-    leftR.appendChild(labelR);
-    remainingRow.appendChild(leftR);
+    remainingRow.className = "task-daily-remaining";
+    const remLabel = document.createElement("span");
+    remLabel.innerHTML = "<strong>Time remaining:</strong>";
+    remainingRow.appendChild(remLabel);
     const remainingVal = document.createElement("span");
     remainingVal.className = "task-remaining";
     remainingVal.dataset.type = "daily";
     remainingVal.dataset.gameId = game.id;
     remainingVal.textContent = getDailyTimeRemainingText(game, getSimulatedNow());
     remainingRow.appendChild(remainingVal);
-    sub.appendChild(remainingRow);
+    main.appendChild(remainingRow);
 
-    el.appendChild(sub);
+    el.appendChild(main);
     return el;
+  }
+
+  /** Square left icon sized to card height, but capped so it never covers text on narrow screens. */
+  function syncDailyCardIconSizes(root) {
+    if (!root) return;
+    const cards = Array.from(root.querySelectorAll(".task-item-daily"));
+    if (cards.length === 0) return;
+    cards.forEach((card) => {
+      const icon = card.querySelector(".task-daily-icon");
+      if (!icon) return;
+      icon.style.width = "";
+      icon.style.minWidth = "";
+      icon.style.height = "";
+      icon.style.minHeight = "";
+    });
+    cards.forEach((card) => {
+      const icon = card.querySelector(".task-daily-icon");
+      if (!icon) return;
+      const cs = getComputedStyle(card);
+      const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      const rect = card.getBoundingClientRect();
+      const fromHeight = Math.max(56, Math.round(rect.height - padY));
+      // Keep enough room for the text column on narrow / hamburger layouts.
+      const maxFromWidth = Math.max(56, Math.floor((rect.width - padX) * 0.4));
+      const side = Math.min(fromHeight, maxFromWidth);
+      icon.style.width = side + "px";
+      icon.style.minWidth = side + "px";
+      icon.style.height = side + "px";
+      icon.style.minHeight = side + "px";
+    });
+  }
+
+  /** Size home daily cards; use 2 rows when hamburger / only ~2 would fit in one row. */
+  function syncHomeDailyCardSizes(grid) {
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll(":scope > .task-item-daily"));
+    if (cards.length === 0) return;
+
+    const scroll = grid.closest(".home-dwe-checklist-scroll");
+    const viewportW = scroll ? scroll.clientWidth : 0;
+    const styles = scroll ? getComputedStyle(scroll) : null;
+    const padX = styles
+      ? (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0)
+      : 16;
+    const gap = parseFloat(getComputedStyle(grid).gap) || 8;
+    const usable = viewportW > 0 ? Math.max(0, viewportW - padX) : 0;
+    const isNarrow = viewportW > 0 && viewportW < 769;
+    const minSingle = isNarrow ? 300 : 280;
+    const colsIfSingle = usable > 0
+      ? Math.floor((usable + gap) / (minSingle + gap))
+      : 4;
+    const useTwoRows = cards.length >= 2 && (isNarrow || colsIfSingle <= 2);
+
+    let visibleCols;
+    let minCard;
+    if (useTwoRows) {
+      // Prefer 2 columns across when width allows; otherwise one column + peek scroll.
+      visibleCols = usable >= (minSingle * 2 + gap) ? 2 : 1.25;
+      minCard = isNarrow ? 280 : 260;
+    } else {
+      visibleCols = 3.5;
+      minCard = 280;
+    }
+    const fitW = usable > 0
+      ? Math.floor((usable - gap * Math.max(0, visibleCols - 1)) / visibleCols)
+      : 0;
+
+    cards.forEach((card) => {
+      card.style.width = "auto";
+      card.style.minWidth = "0";
+      card.style.height = "auto";
+      card.style.minHeight = "0";
+      card.style.maxHeight = "none";
+      const icon = card.querySelector(".task-daily-icon");
+      if (icon) {
+        icon.style.width = "";
+        icon.style.minWidth = "";
+        icon.style.height = "";
+        icon.style.minHeight = "";
+        icon.style.flex = "";
+      }
+    });
+
+    const cardW = Math.max(minCard, fitW || minCard);
+    grid.classList.toggle("home-dailies-two-rows", useTwoRows);
+    grid.style.gridAutoColumns = cardW + "px";
+    grid.style.gridAutoFlow = "column";
+    grid.style.gridTemplateRows = useTwoRows ? "auto auto" : "1fr";
+    cards.forEach((card) => {
+      card.style.width = cardW + "px";
+      card.style.minWidth = cardW + "px";
+    });
+
+    let maxH = 0;
+    cards.forEach((card) => {
+      maxH = Math.max(maxH, Math.ceil(card.scrollHeight), Math.ceil(card.getBoundingClientRect().height));
+    });
+    maxH = Math.max(140, maxH);
+
+    cards.forEach((card) => {
+      card.style.height = maxH + "px";
+      card.style.minHeight = maxH + "px";
+      card.style.maxHeight = maxH + "px";
+    });
+    if (useTwoRows) {
+      grid.style.gridTemplateRows = maxH + "px " + maxH + "px";
+    }
+    syncDailyCardIconSizes(grid);
   }
 
   function renderDailies() {
@@ -10646,34 +12660,37 @@
     if (!content) return;
     content.innerHTML = "";
     const games = getAllGames();
-    const isGrid = state.dailiesView === "grid";
-    const tag = isGrid ? "div" : "li";
-    const list = document.createElement(isGrid ? "div" : "ul");
+    const list = document.createElement("div");
     list.id = "list-dailies";
-    list.className = isGrid ? "task-grid" : "task-list";
+    list.className = "task-grid task-grid-dailies";
+    list.dataset.masonryMax = "3";
     list.setAttribute("data-type", "dailies");
 
     let hasAny = false;
     games.forEach((game) => {
       if (!game.dailies) return;
       hasAny = true;
-      list.appendChild(buildDailyTaskItem(game, tag));
+      list.appendChild(buildDailyTaskItem(game, "div"));
     });
     if (!hasAny) {
-      const empty = document.createElement(tag);
+      const empty = document.createElement("div");
       empty.className = "empty-state";
-      if (!isGrid) empty.setAttribute("data-list-empty", "1");
+      empty.style.gridColumn = "1 / -1";
       empty.textContent = "No games yet. Add one in the Games tab.";
-      if (isGrid) {
-        empty.style.gridColumn = "1 / -1";
-      }
       list.appendChild(empty);
     }
     content.appendChild(list);
+    scheduleTaskMasonry(list);
+    requestAnimationFrame(() => {
+      syncDailyCardIconSizes(list);
+      list.querySelectorAll("img").forEach((img) => {
+        if (img.complete) return;
+        img.addEventListener("load", () => syncDailyCardIconSizes(list), { once: true });
+      });
+    });
   }
 
-
-  function buildWeeklyTaskItem(game, task, tagName) {
+  function buildWeeklyTaskItem(game, task, tagName, opts) {
     const key = game.id + "." + (task.id || task.label);
     const now = getSimulatedNow();
     const ended = isTaskCycleEnded(task, now, game);
@@ -10682,17 +12699,30 @@
     const el = document.createElement(tagName || "li");
     el.className = "task-item" + (doneToday ? " done" : "") + (ended ? " task-item-ended" : "") + (locked ? " task-item-locked" : "");
 
+    appendTaskCardMedia(el, task, game, opts);
+    const body = appendTaskCardBody(el);
+
     const top = document.createElement("div");
-    top.className = "task-top";
+    top.className = "task-top task-card-title-row";
+    const titleCol = document.createElement("div");
+    titleCol.className = "task-game-heading-text";
     const span = document.createElement("span");
     span.className = "task-label";
     span.textContent = task.label || "Weekly";
     const potSpan = document.createElement("span");
     potSpan.className = "task-potential";
     potSpan.textContent = "Potential: " + getWeeklyPotential(task);
-    top.appendChild(span);
-    top.appendChild(potSpan);
-    el.appendChild(top);
+    titleCol.appendChild(span);
+    titleCol.appendChild(potSpan);
+    top.appendChild(titleCol);
+    body.appendChild(top);
+
+    const remainingText = ended ? "Ended" : getWeeklyTimeRemainingText(task, now, game);
+    const statusText = ended ? "Ended" : (doneToday ? "Complete" : (locked ? "Locked" : "Incomplete"));
+    const snippet = document.createElement("p");
+    snippet.className = "task-card-snippet";
+    snippet.textContent = statusText + " · " + remainingText;
+    body.appendChild(snippet);
 
     const sub = document.createElement("div");
     sub.className = "task-subrows";
@@ -10715,7 +12745,7 @@
     check.addEventListener("click", () => toggleWeekly(game.id, task.id || task.label));
     const label1 = document.createElement("span");
     label1.id = statusId;
-    label1.innerHTML = "<strong>Completion Status:</strong> " + (ended ? "Ended" : (doneToday ? "Complete" : (locked ? ("Locked — " + unlockHint) : "Incomplete")));
+    label1.innerHTML = "<strong>Status:</strong> " + (ended ? "Ended" : (doneToday ? "Complete" : (locked ? ("Locked — " + unlockHint) : "Incomplete")));
     if (!ended && !locked) span.addEventListener("click", () => toggleWeekly(game.id, task.id || task.label));
     left1.appendChild(check);
     left1.appendChild(label1);
@@ -10735,28 +12765,33 @@
     remainingVal.dataset.type = "weekly";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
-    remainingVal.textContent = ended ? "Ended" : getWeeklyTimeRemainingText(task, now, game);
+    remainingVal.textContent = remainingText;
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 
-    el.appendChild(sub);
+    body.appendChild(sub);
     return el;
   }
 
-  function appendWeeklyTasksForGame(container, game, tagName, endedOnly) {
+  function collectWeeklyBoardEntries() {
     const now = getSimulatedNow();
-    const tasks = (game.weeklies || []).filter((task) => isTaskCycleEnded(task, now, game) === !!endedOnly);
-    tasks.forEach((task) => {
-      const item = buildWeeklyTaskItem(game, task, tagName);
-      if (tagName === "div") {
-        const gameLabel = document.createElement("div");
-        gameLabel.className = "task-grid-game-label";
-        gameLabel.textContent = game.name;
-        item.insertBefore(gameLabel, item.firstChild);
-      }
-      container.appendChild(item);
+    const todayStr = getDateStr();
+    const entries = [];
+    getAllGames().forEach((game, gameIdx) => {
+      (game.weeklies || []).forEach((task, taskIdx) => {
+        if (isTaskCycleEnded(task, now, game)) return;
+        const key = game.id + "." + (task.id || task.label);
+        entries.push({
+          game,
+          task,
+          completed: isWeeklyCompletedInCurrentCycle(key, todayStr),
+          dueMs: now.getTime() + getWeeklyTimeRemainingMs(task, now, game),
+          gameOrder: gameIdx,
+          taskOrder: taskIdx,
+        });
+      });
     });
-    return tasks.length;
+    return sortBoardTaskEntries(entries);
   }
 
   function renderWeeklies() {
@@ -10764,7 +12799,7 @@
     if (!content) return;
     content.innerHTML = "";
     const games = getAllGames();
-    const isGrid = state.weekliesView === "grid";
+    const entries = collectWeeklyBoardEntries();
 
     if (games.length === 0) {
       const p = document.createElement("p");
@@ -10774,88 +12809,26 @@
       return;
     }
 
-    if (isGrid) {
-      const list = document.createElement("div");
-      list.id = "list-weeklies";
-      list.className = "task-grid";
-      list.setAttribute("data-type", "weeklies");
-      let hasAny = false;
-      games.forEach((game) => {
-        hasAny = appendWeeklyTasksForGame(list, game, "div", false) > 0 || hasAny;
-      });
-      if (!hasAny) {
-        const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.style.gridColumn = "1 / -1";
-        empty.textContent = "No active weekly tasks. Add tasks in the Games tab.";
-        list.appendChild(empty);
-      }
-      content.appendChild(list);
-      const endedGrid = document.createElement("div");
-      endedGrid.className = "task-grid task-grid-ended";
-      let hasEnded = false;
-      games.forEach((game) => {
-        hasEnded = appendWeeklyTasksForGame(endedGrid, game, "div", true) > 0 || hasEnded;
-      });
-      if (hasEnded) {
-        const endedHeading = document.createElement("h3");
-        endedHeading.className = "games-cycle-ended-section-label";
-        endedHeading.textContent = "Ended";
-        content.appendChild(endedHeading);
-        content.appendChild(endedGrid);
-      }
-    } else {
-      let hasAny = false;
-      const container = document.createElement("div");
-      container.id = "list-weeklies";
-      container.className = "game-sections-container";
-      container.setAttribute("data-type", "weeklies");
-      games.forEach((game) => {
-        const now = getSimulatedNow();
-        const activeTasks = (game.weeklies || []).filter((t) => !isTaskCycleEnded(t, now, game));
-        const endedTasks = (game.weeklies || []).filter((t) => isTaskCycleEnded(t, now, game));
-        if (activeTasks.length === 0 && endedTasks.length === 0) return;
-        hasAny = true;
-        const section = document.createElement("div");
-        section.className = "game-section";
-        const heading = document.createElement("h3");
-        heading.className = "game-section-title";
-        heading.textContent = game.name;
-        section.appendChild(heading);
-        if (activeTasks.length > 0) {
-          const ul = document.createElement("ul");
-          ul.className = "task-list";
-          activeTasks.forEach((task) => {
-            ul.appendChild(buildWeeklyTaskItem(game, task, "li"));
-          });
-          section.appendChild(ul);
-        }
-        if (endedTasks.length > 0) {
-          const endedLabel = document.createElement("p");
-          endedLabel.className = "games-cycle-ended-section-label";
-          endedLabel.textContent = "Ended";
-          section.appendChild(endedLabel);
-          const endedUl = document.createElement("ul");
-          endedUl.className = "task-list task-list-ended";
-          endedTasks.forEach((task) => {
-            endedUl.appendChild(buildWeeklyTaskItem(game, task, "li"));
-          });
-          section.appendChild(endedUl);
-        }
-        container.appendChild(section);
-      });
-      if (!hasAny) {
-        const p = document.createElement("p");
-        p.className = "empty-state";
-        p.textContent = "No tasks yet. Add tasks in the Games tab.";
-        container.appendChild(p);
-      }
-      content.appendChild(container);
+    if (entries.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty-state";
+      p.textContent = "No active weekly tasks. Add tasks in the Games tab.";
+      content.appendChild(p);
+      return;
     }
+
+    const list = document.createElement("div");
+    list.id = "list-weeklies";
+    list.className = "task-grid task-grid-knot";
+    list.setAttribute("data-type", "weeklies");
+    entries.forEach((entry) => {
+      list.appendChild(buildWeeklyTaskItem(entry.game, entry.task, "div"));
+    });
+    content.appendChild(list);
+    scheduleTaskMasonry(list);
   }
 
-
-  function buildEndgameTaskItem(game, task, tagName) {
+  function buildEndgameTaskItem(game, task, tagName, opts) {
     const key = game.id + "." + (task.id || task.label);
     const now = getSimulatedNow();
     const ended = isTaskCycleEnded(task, now, game);
@@ -10864,17 +12837,30 @@
     const el = document.createElement(tagName || "li");
     el.className = "task-item" + (doneToday ? " done" : "") + (ended ? " task-item-ended" : "") + (locked ? " task-item-locked" : "");
 
+    appendTaskCardMedia(el, task, game, opts);
+    const body = appendTaskCardBody(el);
+
     const top = document.createElement("div");
-    top.className = "task-top";
+    top.className = "task-top task-card-title-row";
+    const titleCol = document.createElement("div");
+    titleCol.className = "task-game-heading-text";
     const span = document.createElement("span");
     span.className = "task-label";
     span.textContent = task.label || "Endgame";
     const potSpan = document.createElement("span");
     potSpan.className = "task-potential";
     potSpan.textContent = "Potential: " + getEndgamePotential(task);
-    top.appendChild(span);
-    top.appendChild(potSpan);
-    el.appendChild(top);
+    titleCol.appendChild(span);
+    titleCol.appendChild(potSpan);
+    top.appendChild(titleCol);
+    body.appendChild(top);
+
+    const remainingText = ended ? "Ended" : getEndgameTimeRemainingText(task, now, game);
+    const statusText = ended ? "Ended" : (doneToday ? "Complete" : (locked ? "Locked" : "Incomplete"));
+    const snippet = document.createElement("p");
+    snippet.className = "task-card-snippet";
+    snippet.textContent = statusText + " · " + remainingText;
+    body.appendChild(snippet);
 
     const sub = document.createElement("div");
     sub.className = "task-subrows";
@@ -10898,7 +12884,7 @@
     check.addEventListener("click", () => requestToggleEndgame(game.id, task.id || task.label));
     const label1 = document.createElement("span");
     label1.id = statusId;
-    label1.innerHTML = "<strong>Completion Status:</strong> " + (ended ? "Ended" : (doneToday ? "Complete" : (locked ? ("Locked — " + unlockHint) : "Incomplete")));
+    label1.innerHTML = "<strong>Status:</strong> " + (ended ? "Ended" : (doneToday ? "Complete" : (locked ? ("Locked — " + unlockHint) : "Incomplete")));
     if (!ended && !locked) span.addEventListener("click", () => requestToggleEndgame(game.id, task.id || task.label));
     left1.appendChild(check);
     left1.appendChild(label1);
@@ -10918,7 +12904,7 @@
     remainingVal.dataset.type = "endgame";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
-    remainingVal.textContent = ended ? "Ended" : getEndgameTimeRemainingText(task, now, game);
+    remainingVal.textContent = remainingText;
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 
@@ -10957,24 +12943,29 @@
     row2.appendChild(inp);
     sub.appendChild(row2);
 
-    el.appendChild(sub);
+    body.appendChild(sub);
     return el;
   }
 
-  function appendEndgameTasksForGame(container, game, tagName, endedOnly) {
+  function collectEndgameBoardEntries() {
     const now = getSimulatedNow();
-    const tasks = (game.endgame || []).filter((task) => isTaskCycleEnded(task, now, game) === !!endedOnly);
-    tasks.forEach((task) => {
-      const item = buildEndgameTaskItem(game, task, tagName);
-      if (tagName === "div") {
-        const gameLabel = document.createElement("div");
-        gameLabel.className = "task-grid-game-label";
-        gameLabel.textContent = game.name;
-        item.insertBefore(gameLabel, item.firstChild);
-      }
-      container.appendChild(item);
+    const todayStr = getDateStr();
+    const entries = [];
+    getAllGames().forEach((game, gameIdx) => {
+      (game.endgame || []).forEach((task, taskIdx) => {
+        if (isTaskCycleEnded(task, now, game)) return;
+        const key = game.id + "." + (task.id || task.label);
+        entries.push({
+          game,
+          task,
+          completed: isEndgameCompletedInCurrentCycle(key, todayStr),
+          dueMs: now.getTime() + getEndgameTimeRemainingMs(task, now, game),
+          gameOrder: gameIdx,
+          taskOrder: taskIdx,
+        });
+      });
     });
-    return tasks.length;
+    return sortBoardTaskEntries(entries);
   }
 
   function renderEndgame() {
@@ -10982,7 +12973,7 @@
     if (!content) return;
     content.innerHTML = "";
     const games = getAllGames();
-    const isGrid = state.endgameView === "grid";
+    const entries = collectEndgameBoardEntries();
 
     if (games.length === 0) {
       const p = document.createElement("p");
@@ -10992,84 +12983,23 @@
       return;
     }
 
-    if (isGrid) {
-      const list = document.createElement("div");
-      list.id = "list-endgame";
-      list.className = "task-grid";
-      list.setAttribute("data-type", "endgame");
-      let hasAny = false;
-      games.forEach((game) => {
-        hasAny = appendEndgameTasksForGame(list, game, "div", false) > 0 || hasAny;
-      });
-      if (!hasAny) {
-        const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.style.gridColumn = "1 / -1";
-        empty.textContent = "No active endgame tasks. Add tasks in the Games tab.";
-        list.appendChild(empty);
-      }
-      content.appendChild(list);
-      const endedGrid = document.createElement("div");
-      endedGrid.className = "task-grid task-grid-ended";
-      let hasEnded = false;
-      games.forEach((game) => {
-        hasEnded = appendEndgameTasksForGame(endedGrid, game, "div", true) > 0 || hasEnded;
-      });
-      if (hasEnded) {
-        const endedHeading = document.createElement("h3");
-        endedHeading.className = "games-cycle-ended-section-label";
-        endedHeading.textContent = "Ended";
-        content.appendChild(endedHeading);
-        content.appendChild(endedGrid);
-      }
-    } else {
-      let hasAny = false;
-      const container = document.createElement("div");
-      container.id = "list-endgame";
-      container.className = "game-sections-container";
-      container.setAttribute("data-type", "endgame");
-      games.forEach((game) => {
-        const now = getSimulatedNow();
-        const activeTasks = (game.endgame || []).filter((t) => !isTaskCycleEnded(t, now, game));
-        const endedTasks = (game.endgame || []).filter((t) => isTaskCycleEnded(t, now, game));
-        if (activeTasks.length === 0 && endedTasks.length === 0) return;
-        hasAny = true;
-        const section = document.createElement("div");
-        section.className = "game-section";
-        const heading = document.createElement("h3");
-        heading.className = "game-section-title";
-        heading.textContent = game.name;
-        section.appendChild(heading);
-        if (activeTasks.length > 0) {
-          const ul = document.createElement("ul");
-          ul.className = "task-list";
-          activeTasks.forEach((task) => {
-            ul.appendChild(buildEndgameTaskItem(game, task, "li"));
-          });
-          section.appendChild(ul);
-        }
-        if (endedTasks.length > 0) {
-          const endedLabel = document.createElement("p");
-          endedLabel.className = "games-cycle-ended-section-label";
-          endedLabel.textContent = "Ended";
-          section.appendChild(endedLabel);
-          const endedUl = document.createElement("ul");
-          endedUl.className = "task-list task-list-ended";
-          endedTasks.forEach((task) => {
-            endedUl.appendChild(buildEndgameTaskItem(game, task, "li"));
-          });
-          section.appendChild(endedUl);
-        }
-        container.appendChild(section);
-      });
-      if (!hasAny) {
-        const p = document.createElement("p");
-        p.className = "empty-state";
-        p.textContent = "No tasks yet. Add tasks in the Games tab.";
-        container.appendChild(p);
-      }
-      content.appendChild(container);
+    if (entries.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty-state";
+      p.textContent = "No active endgame tasks. Add tasks in the Games tab.";
+      content.appendChild(p);
+      return;
     }
+
+    const list = document.createElement("div");
+    list.id = "list-endgame";
+    list.className = "task-grid task-grid-knot";
+    list.setAttribute("data-type", "endgame");
+    entries.forEach((entry) => {
+      list.appendChild(buildEndgameTaskItem(entry.game, entry.task, "div"));
+    });
+    content.appendChild(list);
+    scheduleTaskMasonry(list);
   }
 
   function updateTaskRemainingTexts() {
@@ -11148,7 +13078,80 @@
     return labels;
   }
 
+  let historyDweTooltipActive = null;
+  let historyDweTooltipWrap = null;
+
+  function hideHistoryDweTooltip() {
+    const tip = historyDweTooltipActive;
+    const wrap = historyDweTooltipWrap;
+    historyDweTooltipActive = null;
+    historyDweTooltipWrap = null;
+    if (!tip) return;
+    tip.classList.remove("is-open");
+    tip.style.position = "";
+    tip.style.left = "";
+    tip.style.top = "";
+    tip.style.bottom = "";
+    tip.style.transform = "";
+    tip.style.zIndex = "";
+    tip.style.maxWidth = "";
+    if (wrap && tip.parentNode !== wrap) wrap.appendChild(tip);
+    else if (!wrap && tip.parentNode === document.body) tip.remove();
+  }
+
+  function positionHistoryDweTooltip(wrap, tip) {
+    const rect = wrap.getBoundingClientRect();
+    tip.style.position = "fixed";
+    tip.style.bottom = "auto";
+    tip.style.zIndex = "10000";
+    tip.style.maxWidth = "min(22rem, calc(100vw - 1rem))";
+    tip.style.left = Math.max(8, rect.left) + "px";
+    tip.style.top = rect.top + "px";
+    tip.style.transform = "translateY(-100%) translateY(-0.35rem)";
+    const tipRect = tip.getBoundingClientRect();
+    if (tipRect.top < 8) {
+      tip.style.top = rect.bottom + "px";
+      tip.style.transform = "translateY(0.35rem)";
+    }
+    const tipRect2 = tip.getBoundingClientRect();
+    if (tipRect2.right > window.innerWidth - 8) {
+      tip.style.left = Math.max(8, window.innerWidth - tipRect2.width - 8) + "px";
+    }
+  }
+
+  function showHistoryDweTooltip(wrap) {
+    const tip = wrap.querySelector(".history-dwe-tooltip");
+    if (!tip) return;
+    if (historyDweTooltipActive && historyDweTooltipActive !== tip) hideHistoryDweTooltip();
+    historyDweTooltipActive = tip;
+    historyDweTooltipWrap = wrap;
+    document.body.appendChild(tip);
+    tip.classList.add("is-open");
+    positionHistoryDweTooltip(wrap, tip);
+  }
+
+  function bindHistoryDweTooltips(root) {
+    if (!root) return;
+    root.querySelectorAll(".history-dwe-bar-wrap").forEach((wrap) => {
+      if (!wrap.querySelector(".history-dwe-tooltip")) return;
+      wrap.addEventListener("mouseenter", () => showHistoryDweTooltip(wrap));
+      wrap.addEventListener("mouseleave", hideHistoryDweTooltip);
+      wrap.addEventListener("focusin", () => showHistoryDweTooltip(wrap));
+      wrap.addEventListener("focusout", (e) => {
+        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+        hideHistoryDweTooltip();
+      });
+    });
+    root.addEventListener("scroll", hideHistoryDweTooltip, { passive: true });
+    if (!bindHistoryDweTooltips._windowBound) {
+      bindHistoryDweTooltips._windowBound = true;
+      window.addEventListener("scroll", hideHistoryDweTooltip, true);
+      window.addEventListener("resize", hideHistoryDweTooltip);
+    }
+  }
+
   function renderAttendanceHistory(container) {
+    hideHistoryDweTooltip();
     const now = getSimulatedNow();
     let month = state.historyMonth != null ? Number(state.historyMonth) : now.getMonth();
     let year = state.historyYear != null ? Number(state.historyYear) : now.getFullYear();
@@ -11531,6 +13534,7 @@
         gridWrap.scrollLeft = Math.max(0, scrollLeft);
       });
     }
+    bindHistoryDweTooltips(gridWrap);
   }
 
   let lastAttendanceViewKey = "";
@@ -11546,6 +13550,7 @@
       JSON.stringify(state.attendancePieInclude || {}),
       JSON.stringify(state.timestampsSelectedGameIds || {}),
       JSON.stringify(state.timestampsSelectedEndgameTasks || {}),
+      state.timestampsEndgamePickerGameId || "",
       getAllGames().map((g) => g.id).join(","),
     ].join("|");
   }
@@ -11556,6 +13561,7 @@
     const viewKey = getAttendanceViewKey();
     if (viewKey === lastAttendanceViewKey && container.childElementCount > 0) return;
     lastAttendanceViewKey = viewKey;
+    hideHistoryDweTooltip();
     container.innerHTML = "";
     const games = getAllGames();
     if (games.length === 0) {
@@ -12102,20 +14108,85 @@
     const showNoneEndgame = !!endgameTaskSelected[TIMESTAMPS_NONE];
     const endgameTaskIds = Object.keys(endgameTaskSelected).filter((k) => k !== TIMESTAMPS_NONE);
     const showAllEndgameTasks = !showNoneEndgame && endgameTaskIds.length === 0;
+    const allEndgameKeys = allEndgameTasks.map((et) => et.key);
+
+    function isEndgameTaskSelected(key) {
+      return showAllEndgameTasks || !!endgameTaskSelected[key];
+    }
+
+    function setEndgameTaskSelected(key, wantOn) {
+      delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
+      const currentlyOn = isEndgameTaskSelected(key);
+      if (wantOn === currentlyOn) return;
+      if (currentlyOn) {
+        if (showAllEndgameTasks) {
+          const others = allEndgameKeys.filter((k) => k !== key);
+          state.timestampsSelectedEndgameTasks = {};
+          others.forEach((k) => { state.timestampsSelectedEndgameTasks[k] = true; });
+        } else {
+          delete state.timestampsSelectedEndgameTasks[key];
+        }
+        if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === 0) {
+          state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
+        }
+      } else {
+        state.timestampsSelectedEndgameTasks[key] = true;
+        if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === allEndgameKeys.length) {
+          state.timestampsSelectedEndgameTasks = {};
+        }
+      }
+    }
+
+    function setEndgameTasksForGame(gameId, wantOn) {
+      const gameKeys = allEndgameTasks.filter((et) => et.gameId === gameId).map((et) => et.key);
+      if (gameKeys.length === 0) return;
+      if (wantOn) {
+        if (showNoneEndgame) state.timestampsSelectedEndgameTasks = {};
+        delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
+        if (showAllEndgameTasks) return;
+        gameKeys.forEach((k) => { state.timestampsSelectedEndgameTasks[k] = true; });
+        if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === allEndgameKeys.length) {
+          state.timestampsSelectedEndgameTasks = {};
+        }
+      } else {
+        delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
+        if (showAllEndgameTasks) {
+          state.timestampsSelectedEndgameTasks = {};
+          allEndgameKeys.filter((k) => !gameKeys.includes(k)).forEach((k) => {
+            state.timestampsSelectedEndgameTasks[k] = true;
+          });
+        } else {
+          gameKeys.forEach((k) => { delete state.timestampsSelectedEndgameTasks[k]; });
+        }
+        if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === 0) {
+          state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
+        }
+      }
+    }
+
+    const gamesWithEndgame = [];
+    const seenGameIds = {};
+    allEndgameTasks.forEach((et) => {
+      if (seenGameIds[et.gameId]) return;
+      seenGameIds[et.gameId] = true;
+      gamesWithEndgame.push({ id: et.gameId, name: et.gameName });
+    });
+
+    let pickerGameId = state.timestampsEndgamePickerGameId;
+    if (!pickerGameId || !seenGameIds[pickerGameId]) {
+      pickerGameId = gamesWithEndgame[0] ? gamesWithEndgame[0].id : null;
+      state.timestampsEndgamePickerGameId = pickerGameId;
+    }
+    const tasksForPickerGame = allEndgameTasks.filter((et) => et.gameId === pickerGameId);
+    const selectedVisibleCount = allEndgameTasks.filter((et) => isEndgameTaskSelected(et.key)).length;
 
     const endgameTaskLabelRow = document.createElement("div");
-    endgameTaskLabelRow.style.display = "flex";
-    endgameTaskLabelRow.style.alignItems = "center";
-    endgameTaskLabelRow.style.gap = "0.5rem";
-    endgameTaskLabelRow.style.marginTop = "1.5rem";
+    endgameTaskLabelRow.className = "timestamps-endgame-picker-header";
     const endgameTaskLabel = document.createElement("h4");
     endgameTaskLabel.className = "data-section-label";
     endgameTaskLabel.textContent = "Endgame tasks";
     endgameTaskLabel.style.margin = "0";
     endgameTaskLabelRow.appendChild(endgameTaskLabel);
-    const unselectAllEndgameBtn = document.createElement("button");
-    unselectAllEndgameBtn.type = "button";
-    unselectAllEndgameBtn.className = "btn btn-ghost";
     const selectAllEndgameBtn = document.createElement("button");
     selectAllEndgameBtn.type = "button";
     selectAllEndgameBtn.className = "btn btn-ghost";
@@ -12127,6 +14198,9 @@
       renderActiveTab();
     });
     endgameTaskLabelRow.appendChild(selectAllEndgameBtn);
+    const unselectAllEndgameBtn = document.createElement("button");
+    unselectAllEndgameBtn.type = "button";
+    unselectAllEndgameBtn.className = "btn btn-ghost";
     unselectAllEndgameBtn.textContent = "Unselect all";
     unselectAllEndgameBtn.title = "Deselect all endgame tasks (show none)";
     unselectAllEndgameBtn.addEventListener("click", () => {
@@ -12136,40 +14210,112 @@
     });
     endgameTaskLabelRow.appendChild(unselectAllEndgameBtn);
     container.appendChild(endgameTaskLabelRow);
-    const endgameTaskWrap = document.createElement("div");
-    endgameTaskWrap.className = "timestamps-game-selector";
-    endgameTaskWrap.style.display = "flex";
-    endgameTaskWrap.style.flexWrap = "wrap";
-    endgameTaskWrap.style.gap = "0.5rem";
-    endgameTaskWrap.style.marginBottom = "0.75rem";
-    allEndgameTasks.forEach(({ key, gameName, taskLabel }) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "timestamps-game-pill timestamps-endgame-pill";
-      btn.textContent = taskLabel + (games.length > 1 ? " (" + gameName + ")" : "");
-      btn.setAttribute("aria-pressed", (showAllEndgameTasks || endgameTaskSelected[key]) ? "true" : "false");
-      if (showAllEndgameTasks || endgameTaskSelected[key]) btn.classList.add("filled");
-      btn.addEventListener("click", () => {
-        delete state.timestampsSelectedEndgameTasks[TIMESTAMPS_NONE];
-        if (showAllEndgameTasks || endgameTaskSelected[key]) {
-          if (showAllEndgameTasks) {
-            const others = allEndgameTasks.filter((et) => et.key !== key).map((et) => et.key);
-            state.timestampsSelectedEndgameTasks = {};
-            others.forEach((k) => { state.timestampsSelectedEndgameTasks[k] = true; });
-          } else {
-            delete state.timestampsSelectedEndgameTasks[key];
-          }
-          if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === 0) state.timestampsSelectedEndgameTasks = { [TIMESTAMPS_NONE]: true };
-        } else {
-          state.timestampsSelectedEndgameTasks[key] = true;
-          if (Object.keys(state.timestampsSelectedEndgameTasks).filter((k) => k !== TIMESTAMPS_NONE).length === allEndgameTasks.length) state.timestampsSelectedEndgameTasks = {};
-        }
+
+    const endgamePicker = document.createElement("div");
+    endgamePicker.className = "timestamps-endgame-picker";
+
+    if (gamesWithEndgame.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "timestamps-endgame-picker-empty";
+      empty.textContent = "No endgame tasks in the current game selection.";
+      endgamePicker.appendChild(empty);
+    } else {
+      const pickerControls = document.createElement("div");
+      pickerControls.className = "timestamps-endgame-picker-controls";
+
+      const gameField = document.createElement("label");
+      gameField.className = "timestamps-endgame-picker-field";
+      const gameFieldLabel = document.createElement("span");
+      gameFieldLabel.textContent = "Game";
+      gameField.appendChild(gameFieldLabel);
+      const gameSelect = document.createElement("select");
+      gameSelect.className = "timestamps-endgame-game-select";
+      gameSelect.setAttribute("aria-label", "Endgame tasks game");
+      gamesWithEndgame.forEach((g) => {
+        const opt = document.createElement("option");
+        opt.value = g.id;
+        opt.textContent = g.name;
+        if (g.id === pickerGameId) opt.selected = true;
+        gameSelect.appendChild(opt);
+      });
+      gameSelect.addEventListener("change", () => {
+        state.timestampsEndgamePickerGameId = gameSelect.value || null;
         save();
         renderActiveTab();
       });
-      endgameTaskWrap.appendChild(btn);
-    });
-    container.appendChild(endgameTaskWrap);
+      gameField.appendChild(gameSelect);
+      pickerControls.appendChild(gameField);
+
+      const gameActionRow = document.createElement("div");
+      gameActionRow.className = "timestamps-endgame-picker-actions";
+      const selectGameBtn = document.createElement("button");
+      selectGameBtn.type = "button";
+      selectGameBtn.className = "btn btn-ghost btn-sm";
+      selectGameBtn.textContent = "Select all in game";
+      selectGameBtn.addEventListener("click", () => {
+        setEndgameTasksForGame(pickerGameId, true);
+        save();
+        renderActiveTab();
+      });
+      gameActionRow.appendChild(selectGameBtn);
+      const clearGameBtn = document.createElement("button");
+      clearGameBtn.type = "button";
+      clearGameBtn.className = "btn btn-ghost btn-sm";
+      clearGameBtn.textContent = "Clear game";
+      clearGameBtn.addEventListener("click", () => {
+        setEndgameTasksForGame(pickerGameId, false);
+        save();
+        renderActiveTab();
+      });
+      gameActionRow.appendChild(clearGameBtn);
+      pickerControls.appendChild(gameActionRow);
+      endgamePicker.appendChild(pickerControls);
+
+      const summary = document.createElement("p");
+      summary.className = "timestamps-endgame-picker-summary";
+      summary.textContent =
+        selectedVisibleCount +
+        " of " +
+        allEndgameTasks.length +
+        " endgame task" +
+        (allEndgameTasks.length === 1 ? "" : "s") +
+        " shown";
+      endgamePicker.appendChild(summary);
+
+      const taskList = document.createElement("div");
+      taskList.className = "timestamps-endgame-task-list";
+      taskList.setAttribute("role", "group");
+      taskList.setAttribute("aria-label", "Endgame tasks for selected game");
+
+      if (tasksForPickerGame.length === 0) {
+        const emptyTasks = document.createElement("p");
+        emptyTasks.className = "timestamps-endgame-picker-empty";
+        emptyTasks.textContent = "No endgame tasks for this game.";
+        taskList.appendChild(emptyTasks);
+      } else {
+        tasksForPickerGame.forEach(({ key, taskLabel }) => {
+          const row = document.createElement("label");
+          row.className = "timestamps-endgame-task-row";
+          const check = document.createElement("input");
+          check.type = "checkbox";
+          check.checked = isEndgameTaskSelected(key);
+          check.addEventListener("change", () => {
+            setEndgameTaskSelected(key, check.checked);
+            save();
+            renderActiveTab();
+          });
+          const name = document.createElement("span");
+          name.className = "timestamps-endgame-task-name";
+          name.textContent = taskLabel;
+          row.appendChild(check);
+          row.appendChild(name);
+          taskList.appendChild(row);
+        });
+      }
+      endgamePicker.appendChild(taskList);
+    }
+
+    container.appendChild(endgamePicker);
 
     const taskPoints = {};
     allEndgameTasks.forEach(({ key, gameId, taskId, gameName, taskLabel }) => {
@@ -12184,29 +14330,41 @@
       const timeLimitMs = hasExplicitLimit ? getIntervalMs(task.timeLimitEvery, limitUnit) : getIntervalMs(task.frequencyEvery, (task.frequencyUnit === "day") ? "day" : "week");
       const byCycle = {};
       events.forEach((t) => {
-        let cycleStartMs, cycleEndMs;
+        let cycleStartMs, cycleEndMs, cycleStartStr;
         if (t.cycleStartStr && t.cycleEndStr) {
           const startMom = getResetMomentForDateStr(task, game, t.cycleStartStr);
           const endMom = getResetMomentForDateStr(task, game, t.cycleEndStr);
           if (!startMom || !endMom || endMom.getTime() <= startMom.getTime()) return;
           cycleStartMs = startMom.getTime();
           cycleEndMs = endMom.getTime();
+          cycleStartStr = t.cycleStartStr;
         } else {
           const cycleStart = getCycleStartForDate(task, t.dateStr, game);
           cycleStartMs = cycleStart.getTime();
           cycleEndMs = cycleStartMs + timeLimitMs;
+          cycleStartStr = getDateStr(cycleStart);
         }
         let pct;
+        let daysAfter = 0;
+        let hoursAfter = 0;
         if (t.skipped) {
           pct = 0;
+          daysAfter = null;
+          hoursAfter = null;
         } else {
           const completionMs = new Date(t.dateStr + "T" + String(t.hour).padStart(2, "0") + ":00:00").getTime();
           const cycleLen = cycleEndMs - cycleStartMs;
           if (cycleLen <= 0) return;
           pct = ((cycleEndMs - completionMs) / cycleLen) * 100;
           pct = Math.max(0, Math.min(100, pct));
+          const elapsedMs = Math.max(0, completionMs - cycleStartMs);
+          const totalHours = Math.floor(elapsedMs / (60 * 60 * 1000));
+          daysAfter = Math.floor(totalHours / 24);
+          hoursAfter = totalHours % 24;
         }
-        if (byCycle[cycleStartMs] == null || pct > byCycle[cycleStartMs]) byCycle[cycleStartMs] = pct;
+        if (byCycle[cycleStartMs] == null || pct > byCycle[cycleStartMs].pct) {
+          byCycle[cycleStartMs] = { pct, daysAfter, hoursAfter, skipped: !!t.skipped };
+        }
       });
       const sortedCycles = Object.keys(byCycle).map(Number).sort((a, b) => a - b);
       if (sortedCycles.length > 0) {
@@ -12222,8 +14380,8 @@
     const lineGraphWrap = document.createElement("div");
     lineGraphWrap.className = "timestamps-line-graph";
     const graphWidth = 400;
-    const graphHeight = 200;
-    const padding = { top: 20, right: 20, bottom: 40, left: 45 };
+    const graphHeight = 220;
+    const padding = { top: 28, right: 20, bottom: 40, left: 45 };
     const plotWidth = graphWidth - padding.left - padding.right;
     const plotHeight = graphHeight - padding.top - padding.bottom;
     const maxX = Math.max(1, ...Object.values(taskPoints).map((tp) => tp.points.length));
@@ -12234,36 +14392,146 @@
     svg.setAttribute("height", "auto");
     svg.style.maxWidth = graphWidth + "px";
     svg.style.display = "block";
-    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-    const colors = ["var(--pie-endgame)", "var(--pie-dailies)", "var(--pie-weeklies)", "#f472b6", "#fbbf24"];
+    const colors = ["var(--pie-endgame)", "var(--pie-dailies)", "var(--pie-weeklies)", "#f472b6", "#fbbf24", "#a3e635", "#38bdf8", "#c084fc", "#fb923c", "#2dd4bf"];
+    const pointTip = document.createElement("div");
+    pointTip.className = "timestamps-trend-point-tooltip";
+    pointTip.hidden = true;
+    pointTip.setAttribute("role", "tooltip");
+
+    function hideTrendPointTip() {
+      pointTip.hidden = true;
+      pointTip.textContent = "";
+      pointTip.classList.remove("timestamps-trend-point-tooltip-below");
+    }
+
+    function formatTrendElapsedLabel(daysAfter, hoursAfter) {
+      const parts = [];
+      if (daysAfter > 0) parts.push(daysAfter + " day" + (daysAfter === 1 ? "" : "s"));
+      if (hoursAfter > 0 || daysAfter === 0) {
+        parts.push(hoursAfter + " hour" + (hoursAfter === 1 ? "" : "s"));
+      }
+      return "completed " + parts.join(" ") + " after cycle started";
+    }
+
+    function showTrendPointTip(circleEl, point, seriesLabel) {
+      const pctStr = Math.round(point.pct) + "%";
+      let detail;
+      if (point.skipped || point.daysAfter == null) {
+        detail = "Skipped (0% time remaining)";
+      } else {
+        detail = formatTrendElapsedLabel(point.daysAfter, point.hoursAfter || 0);
+      }
+      pointTip.replaceChildren();
+      const title = document.createElement("strong");
+      title.textContent = seriesLabel;
+      pointTip.appendChild(title);
+      pointTip.appendChild(document.createElement("br"));
+      pointTip.appendChild(document.createTextNode(pctStr + " time remaining"));
+      pointTip.appendChild(document.createElement("br"));
+      pointTip.appendChild(document.createTextNode(detail));
+      pointTip.hidden = false;
+      const wrapRect = lineGraphWrap.getBoundingClientRect();
+      const cRect = circleEl.getBoundingClientRect();
+      const left = cRect.left - wrapRect.left + cRect.width / 2;
+      const top = cRect.top - wrapRect.top;
+      pointTip.style.left = left + "px";
+      pointTip.style.top = top + "px";
+      requestAnimationFrame(() => {
+        const tipRect = pointTip.getBoundingClientRect();
+        let nextLeft = left;
+        if (tipRect.right > wrapRect.right - 4) nextLeft -= tipRect.right - wrapRect.right + 4;
+        if (nextLeft < 4) nextLeft = 4;
+        pointTip.style.left = nextLeft + "px";
+        if (tipRect.top < wrapRect.top + 4) {
+          pointTip.style.top = top + cRect.height + 10 + "px";
+          pointTip.classList.add("timestamps-trend-point-tooltip-below");
+        } else {
+          pointTip.classList.remove("timestamps-trend-point-tooltip-below");
+        }
+      });
+    }
+
     Object.keys(taskPoints).forEach((key, idx) => {
       const tp = taskPoints[key];
       if (tp.points.length === 0) return;
-      const pathD = tp.points.map((pct, i) => {
+      const color = colors[idx % colors.length];
+      const seriesG = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      seriesG.classList.add("timestamps-trend-series");
+      seriesG.setAttribute("data-series", key);
+
+      const pathD = tp.points.map((point, i) => {
         const x = padding.left + (i / xDivisor) * plotWidth;
-        const y = padding.top + plotHeight - (pct / 100) * plotHeight;
+        const y = padding.top + plotHeight - (point.pct / 100) * plotHeight;
         return (i === 0 ? "M" : "L") + x + "," + y;
       }).join(" ");
+
+      const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      hitPath.setAttribute("d", pathD);
+      hitPath.setAttribute("fill", "none");
+      hitPath.setAttribute("stroke", "transparent");
+      hitPath.setAttribute("stroke-width", "14");
+      hitPath.setAttribute("stroke-linecap", "round");
+      hitPath.setAttribute("stroke-linejoin", "round");
+      hitPath.classList.add("timestamps-trend-hit");
+      seriesG.appendChild(hitPath);
+
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute("d", pathD);
       path.setAttribute("fill", "none");
-      path.setAttribute("stroke", colors[idx % colors.length]);
+      path.setAttribute("stroke", color);
       path.setAttribute("stroke-width", "2");
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
-      svg.appendChild(path);
-      tp.points.forEach((pct, i) => {
+      path.classList.add("timestamps-trend-line");
+      seriesG.appendChild(path);
+
+      tp.points.forEach((point, i) => {
         const x = padding.left + (i / xDivisor) * plotWidth;
-        const y = padding.top + plotHeight - (pct / 100) * plotHeight;
+        const y = padding.top + plotHeight - (point.pct / 100) * plotHeight;
+        const pctLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        pctLabel.classList.add("timestamps-trend-pct-label");
+        pctLabel.setAttribute("x", x);
+        pctLabel.setAttribute("y", y - 8);
+        pctLabel.setAttribute("text-anchor", "middle");
+        pctLabel.setAttribute("fill", color);
+        pctLabel.setAttribute("font-size", "9");
+        pctLabel.setAttribute("font-weight", "700");
+        pctLabel.textContent = Math.round(point.pct) + "%";
+        seriesG.appendChild(pctLabel);
+
         const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         circle.setAttribute("cx", x);
         circle.setAttribute("cy", y);
-        circle.setAttribute("r", "4");
-        circle.setAttribute("fill", colors[idx % colors.length]);
+        circle.setAttribute("r", "5");
+        circle.setAttribute("fill", color);
         circle.setAttribute("stroke", "var(--bg)");
         circle.setAttribute("stroke-width", "1");
-        svg.appendChild(circle);
+        circle.classList.add("timestamps-trend-point");
+        circle.style.cursor = "pointer";
+        circle.addEventListener("mouseenter", (e) => {
+          e.stopPropagation();
+          seriesG.classList.add("is-hovered");
+          svg.classList.add("has-series-hover");
+          showTrendPointTip(circle, point, tp.label);
+        });
+        circle.addEventListener("mouseleave", () => {
+          hideTrendPointTip();
+        });
+        seriesG.appendChild(circle);
       });
+
+      seriesG.addEventListener("mouseenter", () => {
+        seriesG.classList.add("is-hovered");
+        svg.classList.add("has-series-hover");
+      });
+      seriesG.addEventListener("mouseleave", () => {
+        seriesG.classList.remove("is-hovered");
+        if (!svg.querySelector(".timestamps-trend-series.is-hovered")) {
+          svg.classList.remove("has-series-hover");
+        }
+        hideTrendPointTip();
+      });
+      svg.appendChild(seriesG);
     });
     const yAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
     yAxis.setAttribute("x1", padding.left);
@@ -12337,10 +14605,11 @@
       dot.style.borderRadius = "50%";
       dot.style.background = colors[idx % colors.length];
       item.appendChild(dot);
-      item.appendChild(document.createTextNode(escapeHtml(tp.label)));
+      item.appendChild(document.createTextNode(tp.label));
       legendWrap.appendChild(item);
     });
     lineGraphWrap.appendChild(svg);
+    lineGraphWrap.appendChild(pointTip);
     if (Object.keys(taskPoints).length > 0) lineGraphWrap.appendChild(legendWrap);
     if (Object.keys(taskPoints).length === 0) {
       const empty = document.createElement("p");
@@ -12582,22 +14851,40 @@
     return box;
   }
 
-  function createExtracurricularCurrencyPieBox(task, earned, potential) {
+  function formatExtracurricularDateRangeLabel(task) {
+    if (!task) return "";
+    const start =
+      task.startDate && isValidDateStr(task.startDate) ? formatDate(task.startDate) : "—";
+    let end = "TBD";
+    if (!task.endDateTBD && task.endDate && isValidDateStr(task.endDate)) {
+      end = formatDate(task.endDate);
+    }
+    return start + " – " + end;
+  }
+
+  function createExtracurricularCurrencyPieBox(task, earned, potential, opts) {
     const pot = Math.max(0, Number(potential) || 0);
     const e = Math.max(0, Number(earned) || 0);
     const total = Math.max(pot, e, 1);
     const earnedPct = total ? (e / total) * 360 : 0;
     const box = document.createElement("div");
     box.className = "pie-box";
+    const subtitle = (opts && opts.hideDates) ? "" : formatExtracurricularDateRangeLabel(task);
+    const subHtml =
+      "<p class=\"pie-box-subtitle" + (subtitle ? " task-counting-since-tag" : "") + "\">" +
+      (subtitle ? escapeHtml(subtitle) : "&nbsp;") +
+      "</p>";
     if (total === 0 || (e === 0 && pot === 0)) {
       box.innerHTML =
         "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+        subHtml +
         "<div class=\"pie-chart pie-chart-empty\"></div>" +
         "<div class=\"pie-legend\">No currency earned yet</div>";
       return box;
     }
     box.innerHTML =
       "<h3>" + escapeHtml(task.label || "Task") + "</h3>" +
+      subHtml +
       "<div class=\"pie-chart\" style=\"--pct: " + earnedPct + "deg\"></div>" +
       "<div class=\"pie-legend pie-legend-split\">" +
       "<span class=\"pie-legend-item completed\">Earned: " + e + (total ? " (" + Math.round((e / total) * 100) + "%)" : "") + "</span>" +
@@ -12700,6 +14987,7 @@
   }
 
   function getArchivedExtracurricularTasks() {
+    // Keep array order — History should not be re-sorted on each render.
     return (state.extracurricularTasks || []).filter((t) => isExtracurricularArchived(t));
   }
 
@@ -12708,36 +14996,36 @@
     else clearExtracurricularCompletion(taskId);
   }
 
-  /** Builds a card for the home page checklist, matching the format of weekly/endgame cards (title, potential, completion status, time remaining). */
+  /** Builds a card for the home page checklist, matching dailies/weeklies/endgame (same task-item hover). */
   function buildExtracurricularTaskItemForHome(task, tagName) {
     const completed = !!state.extracurricularCompleted[task.id];
     const el = document.createElement(tagName || "div");
-    el.className = "task-item home-dwe-checklist-item home-dwe-checklist-item-extracurricular" + (completed ? " done" : "");
+    el.className = "task-item" + (completed ? " done" : "");
 
-    if (task.gameId) {
-      const game = getGame(task.gameId);
-      if (game) {
-        const gameLabel = document.createElement("div");
-        gameLabel.className = "task-grid-game-label";
-        gameLabel.textContent = game.name || task.gameId;
-        el.appendChild(gameLabel);
-      }
-    }
+    const game = task.gameId ? getGame(task.gameId) : null;
+    appendTaskCardMedia(el, task, game || { name: task.label || "Task" }, { surface: "home" });
+    const body = appendTaskCardBody(el);
 
-    const top = document.createElement("div");
-    top.className = "task-top";
-    const span = document.createElement("span");
-    span.className = "task-label home-dwe-checklist-label";
-    span.textContent = task.label || "Task";
-    top.appendChild(span);
     const pot = Math.max(0, Number(task.currency) || 0);
+    const top = document.createElement("div");
+    top.className = "task-top task-card-title-row";
+    const titleCol = document.createElement("div");
+    titleCol.className = "task-game-heading-text";
+    const span = document.createElement("span");
+    span.className = "task-label";
+    span.textContent = task.label || "Task";
+    span.addEventListener("click", () => {
+      setExtracurricularCompleted(task.id, !completed);
+    });
+    titleCol.appendChild(span);
     if (pot > 0) {
       const potSpan = document.createElement("span");
       potSpan.className = "task-potential";
       potSpan.textContent = "Potential: " + pot;
-      top.appendChild(potSpan);
+      titleCol.appendChild(potSpan);
     }
-    el.appendChild(top);
+    top.appendChild(titleCol);
+    body.appendChild(top);
 
     const sub = document.createElement("div");
     sub.className = "task-subrows";
@@ -12754,9 +15042,6 @@
     });
     const label1 = document.createElement("span");
     label1.innerHTML = "<strong>Completion Status:</strong> " + (completed ? "Complete" : "Incomplete");
-    span.addEventListener("click", () => {
-      setExtracurricularCompleted(task.id, !completed);
-    });
     left1.appendChild(check);
     left1.appendChild(label1);
     row1.appendChild(left1);
@@ -12779,28 +15064,48 @@
       sub.appendChild(remainingRow);
     }
 
-    el.appendChild(sub);
+    body.appendChild(sub);
     return el;
   }
 
-  function buildExtracurricularTaskItem(task, listOrGrid) {
+  function buildExtracurricularTaskItem(task, tagName, opts) {
     const completed = state.extracurricularCompleted[task.id];
-    const li = document.createElement("li");
-    li.className = "task-item task-item-with-changer";
+    const li = document.createElement(tagName || "li");
+    li.className = "task-item task-item-with-changer task-card-knot";
     if (completed) li.classList.add("done");
 
-    if (task.gameId) {
-      const game = getGame(task.gameId);
-      if (game) {
-        const gameLabel = document.createElement("div");
-        gameLabel.className = "extracurricular-task-game-label";
-        gameLabel.textContent = game.name || task.gameId;
-        li.appendChild(gameLabel);
-      }
-    }
+    const game = task.gameId ? getGame(task.gameId) : null;
+    const surface = (opts && opts.surface) || "board";
+    const media = appendTaskCardMedia(li, task, game || { name: task.gameId || "Task" }, { surface: surface });
+
+    const actions = document.createElement("div");
+    actions.className = "task-card-media-actions";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn";
+    editBtn.textContent = "✎";
+    editBtn.setAttribute("aria-label", "Edit task");
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openExtracurricularTaskModal(task);
+    });
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "icon-btn";
+    deleteBtn.textContent = "×";
+    deleteBtn.setAttribute("aria-label", "Delete task");
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteExtracurricularTask(task.id);
+    });
+    actions.appendChild(editBtn);
+    actions.appendChild(deleteBtn);
+    if (media) media.appendChild(actions);
+
+    const body = appendTaskCardBody(li);
 
     const top = document.createElement("div");
-    top.className = "task-item-top";
+    top.className = "task-item-top task-card-title-row";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "task-checkbox";
@@ -12821,14 +15126,14 @@
     const label = document.createElement("span");
     label.className = "task-label";
     label.textContent = task.label || "Task";
-    const info = document.createElement("span");
-    info.className = "extracurricular-task-info";
+    labelWrap.appendChild(label);
+    top.appendChild(labelWrap);
+    body.appendChild(top);
+
     const startStr = task.startDate || "";
     const endStr = task.endDateTBD ? "TBD" : (task.endDate || "");
     const endDisplay = endStr + (task.endTime && !task.endDateTBD ? " " + task.endTime : "");
-    info.textContent = startStr + (endDisplay ? " — " + endDisplay : "");
-    labelWrap.appendChild(label);
-    labelWrap.appendChild(info);
+    const dateLine = startStr + (endDisplay ? " — " + endDisplay : "");
     const pot = Math.max(0, Number(task.currency) || 0);
     let earnedStr = "—";
     if (completed) {
@@ -12836,42 +15141,41 @@
       const e = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
       earnedStr = String(e);
     }
-    const currencyLine = document.createElement("span");
-    currencyLine.className = "extracurricular-task-currency-line";
-    currencyLine.textContent = "Potential: " + pot + " · Earned: " + earnedStr;
-    labelWrap.appendChild(currencyLine);
     const remainingText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
-    if (remainingText && remainingText !== "TBD") {
-      const remainingSpan = document.createElement("span");
-      remainingSpan.className = "extracurricular-task-remaining";
-      remainingSpan.textContent = remainingText + " left";
-      labelWrap.appendChild(remainingSpan);
+    const snippetParts = [];
+    if (task.description) snippetParts.push(task.description);
+    else if (dateLine) snippetParts.push(dateLine);
+    snippetParts.push("Potential: " + pot + " · Earned: " + earnedStr);
+    if (remainingText && remainingText !== "TBD") snippetParts.push(remainingText + " left");
+    const snippet = document.createElement("p");
+    snippet.className = "task-card-snippet";
+    snippet.textContent = snippetParts.join(" · ");
+    body.appendChild(snippet);
+
+    const meta = document.createElement("div");
+    meta.className = "task-subrows";
+    if (dateLine) {
+      const info = document.createElement("div");
+      info.className = "task-subrow";
+      const infoSpan = document.createElement("span");
+      const strong = document.createElement("strong");
+      strong.textContent = "Dates: ";
+      infoSpan.appendChild(strong);
+      infoSpan.appendChild(document.createTextNode(dateLine));
+      info.appendChild(infoSpan);
+      meta.appendChild(info);
     }
-    top.appendChild(labelWrap);
-    const actions = document.createElement("div");
-    actions.className = "task-item-actions";
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "icon-btn";
-    editBtn.textContent = "✎";
-    editBtn.setAttribute("aria-label", "Edit task");
-    editBtn.addEventListener("click", () => openExtracurricularTaskModal(task));
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "icon-btn";
-    deleteBtn.textContent = "×";
-    deleteBtn.setAttribute("aria-label", "Delete task");
-    deleteBtn.addEventListener("click", () => deleteExtracurricularTask(task.id));
-    actions.appendChild(editBtn);
-    actions.appendChild(deleteBtn);
-    top.appendChild(actions);
-    li.appendChild(top);
-    if (task.description) {
-      const desc = document.createElement("p");
-      desc.className = "extracurricular-task-desc";
-      desc.textContent = task.description;
-      li.appendChild(desc);
-    }
+    const currencyRow = document.createElement("div");
+    currencyRow.className = "task-subrow";
+    const currencySpan = document.createElement("span");
+    const currencyStrong = document.createElement("strong");
+    currencyStrong.textContent = "Currency: ";
+    currencySpan.appendChild(currencyStrong);
+    currencySpan.appendChild(document.createTextNode("Potential " + pot + " · Earned " + earnedStr));
+    currencyRow.appendChild(currencySpan);
+    meta.appendChild(currencyRow);
+    body.appendChild(meta);
+
     return li;
   }
 
@@ -12880,7 +15184,6 @@
     if (!container) return;
     container.innerHTML = "";
     const viewMode = state.extracurricularViewMode || "tasks";
-    const view = state.extracurricularView || "list";
 
     const headerRow = document.createElement("div");
     headerRow.className = "extracurricular-header-row";
@@ -12915,7 +15218,21 @@
     }
     container.appendChild(headerRow);
 
-    const tasks = viewMode === "history" ? getArchivedExtracurricularTasks() : getActiveExtracurricularTasks();
+    const tasksRaw = viewMode === "history" ? getArchivedExtracurricularTasks() : getActiveExtracurricularTasks();
+    const now = getSimulatedNow();
+    // Active board: due-date / completion sort. History: leave in saved order (no re-sort).
+    const tasks = viewMode === "history"
+      ? tasksRaw
+      : sortBoardTaskEntries(tasksRaw.map((task, taskOrder) => {
+          const rem = getExtracurricularTimeRemainingMs(task, now);
+          return {
+            task,
+            completed: !!state.extracurricularCompleted[task.id],
+            dueMs: rem == null ? Number.POSITIVE_INFINITY : (now.getTime() + rem),
+            gameOrder: 0,
+            taskOrder,
+          };
+        })).map((entry) => entry.task);
 
     if (tasks.length === 0) {
       const empty = document.createElement("p");
@@ -12927,10 +15244,11 @@
       return;
     }
 
-    const list = document.createElement("ul");
-    list.className = "task-list" + (view === "grid" ? " task-list-grid" : "");
-    tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task)));
+    const list = document.createElement("div");
+    list.className = "task-grid task-grid-knot";
+    tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task, "div")));
     container.appendChild(list);
+    scheduleTaskMasonry(list);
   }
 
   function updateExtracurricularTimeRemainingDisplay() {
@@ -13013,6 +15331,7 @@
 
     if (title) title.textContent = task ? "Edit task" : "Add task";
     const currencyInput = document.getElementById("extracurricularTaskCurrency");
+    const excludeFromDataInput = document.getElementById("extracurricularTaskExcludeFromData");
     if (nameInput) nameInput.value = task ? (task.label || "") : "";
     if (startInput) startInput.value = task && task.startDate ? task.startDate : getDateStr();
     if (endTBDInput) endTBDInput.checked = !!(task && task.endDateTBD);
@@ -13023,6 +15342,7 @@
     if (endTimeInput) endTimeInput.value = (task && task.endTime) ? task.endTime : "23:59";
     if (descInput) descInput.value = task ? (task.description || "") : "";
     if (currencyInput) currencyInput.value = task && task.currency != null ? String(task.currency) : "";
+    if (excludeFromDataInput) excludeFromDataInput.checked = !!(task && task.excludeFromData);
     if (gameSelect) {
       gameSelect.innerHTML = "<option value=\"\">— None —</option>";
       getAllGames().forEach((g) => {
@@ -13060,6 +15380,19 @@
       "Reads event name and time left (e.g. 37d). When Skip description is on, description is left alone."
     );
 
+    if (typeof setActiveBannerUi === "function") setActiveBannerUi("extra");
+    taskModal.bannerTarget = "home";
+    taskModal.gameId = (task && task.gameId) || null;
+    const loaded = typeof loadTaskBannersFromTask === "function"
+      ? loadTaskBannersFromTask(task)
+      : { source: null, views: emptyTaskBannerViews() };
+    taskModal.bannerSource = loaded.source;
+    taskModal.bannerViews = loaded.views;
+    taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    if (typeof resetTaskBannerCropState === "function") resetTaskBannerCropState();
+    if (typeof syncTaskBannerTargetButtons === "function") syncTaskBannerTargetButtons();
+    if (typeof syncTaskBannerPreview === "function") syncTaskBannerPreview();
+
     if (modal) {
       modal.hidden = false;
       modal.setAttribute("aria-hidden", "false");
@@ -13067,6 +15400,17 @@
       if (typeof activateModalFocus === "function") activateModalFocus(modal);
     }
     extracurricularTaskModalState.task = task;
+    requestAnimationFrame(() => {
+      if (typeof setActiveBannerUi === "function") setActiveBannerUi("extra");
+      if (typeof resizeTaskBannerCropStage === "function") resizeTaskBannerCropStage();
+      if (typeof drawTaskBannerCrop === "function") drawTaskBannerCrop();
+      if (taskModal.bannerSource && typeof loadTaskBannerSourceFromUrl === "function") {
+        loadTaskBannerSourceFromUrl(taskModal.bannerSource, { keepViews: true }).catch(() => {});
+      } else if (typeof syncTaskBannerEditorFrames === "function") {
+        syncTaskBannerEditorFrames();
+        if (typeof drawTaskBannerCrop === "function") drawTaskBannerCrop();
+      }
+    });
     if (nameInput) setTimeout(() => nameInput.focus(), 0);
   }
 
@@ -13079,6 +15423,11 @@
       if (typeof deactivateModalFocus === "function") deactivateModalFocus();
     }
     extracurricularTaskModalState.task = null;
+    if (typeof setActiveBannerUi === "function") setActiveBannerUi("task");
+    if (typeof resetTaskBannerCropState === "function") resetTaskBannerCropState();
+    taskModal.bannerSource = null;
+    taskModal.bannerViews = typeof emptyTaskBannerViews === "function" ? emptyTaskBannerViews() : { home: null, games: null, board: null };
+    taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
   }
 
   function deleteExtracurricularTask(taskId) {
@@ -13534,6 +15883,7 @@
       const descInput = document.getElementById("extracurricularTaskDescription");
       const gameSelect = document.getElementById("extracurricularTaskGame");
       const currencyInput = document.getElementById("extracurricularTaskCurrency");
+      const excludeFromDataInput = document.getElementById("extracurricularTaskExcludeFromData");
 
       const label = (nameInput && nameInput.value || "").trim();
       if (!label) {
@@ -13545,6 +15895,7 @@
       const currency = Math.max(0, Number(currencyInput && currencyInput.value) || 0);
       const endTimeInput = document.getElementById("extracurricularTaskEndTime");
       const endTimeVal = endTBDInput && endTBDInput.checked ? null : (endTimeInput && endTimeInput.value ? endTimeInput.value.trim() : null);
+      const excludeFromData = !!(excludeFromDataInput && excludeFromDataInput.checked);
       const payload = {
         id: task ? task.id : "ex_" + Date.now(),
         label,
@@ -13555,11 +15906,23 @@
         description: (descInput && descInput.value || "").trim() || null,
         gameId: (gameSelect && gameSelect.value) || null,
         currency: currency || undefined,
+        excludeFromData: excludeFromData || undefined,
       };
+
+      if (typeof setActiveBannerUi === "function") setActiveBannerUi("extra");
+      if (typeof commitTaskBannerCrop === "function" && taskBannerCrop.sourceImg && !taskBannerCrop.clear) {
+        commitTaskBannerCrop();
+      }
+      if (typeof applyTaskBannersToSavePayload === "function") applyTaskBannersToSavePayload(payload);
 
       if (task) {
         const idx = (state.extracurricularTasks || []).findIndex((t) => t.id === task.id);
-        if (idx >= 0) state.extracurricularTasks[idx] = { ...state.extracurricularTasks[idx], ...payload };
+        if (idx >= 0) {
+          const merged = { ...state.extracurricularTasks[idx], ...payload };
+          if (!excludeFromData) delete merged.excludeFromData;
+          if (typeof clearTaskBannerFieldsFromMerged === "function") clearTaskBannerFieldsFromMerged(merged);
+          state.extracurricularTasks[idx] = merged;
+        }
       } else {
         state.extracurricularTasks = state.extracurricularTasks || [];
         state.extracurricularTasks.push(payload);
@@ -13568,6 +15931,20 @@
       closeExtracurricularTaskModal();
       renderActiveTab();
     });
+
+    const gameSelectLive = document.getElementById("extracurricularTaskGame");
+    const currencyLive = document.getElementById("extracurricularTaskCurrency");
+    const refreshPreview = () => {
+      if (activeBannerUiKey !== "extra") return;
+      if (taskModal.bannerSource && typeof syncTaskBannerPreview === "function") syncTaskBannerPreview();
+    };
+    if (gameSelectLive) {
+      gameSelectLive.addEventListener("change", () => {
+        taskModal.gameId = gameSelectLive.value || null;
+        refreshPreview();
+      });
+    }
+    if (currencyLive) currencyLive.addEventListener("input", refreshPreview);
   }
 
   function getDataExcludeInProgress(gameId) {
@@ -13578,6 +15955,15 @@
   function setDataExcludeInProgress(gameId, value) {
     if (!state.dataExcludeInProgress) state.dataExcludeInProgress = {};
     state.dataExcludeInProgress[gameId] = value;
+  }
+
+  function getDataHideDates(gameId) {
+    return !!(state.dataHideDates && state.dataHideDates[gameId]);
+  }
+
+  function setDataHideDates(gameId, value) {
+    if (!state.dataHideDates) state.dataHideDates = {};
+    state.dataHideDates[gameId] = !!value;
   }
 
   function getDataPieInclude(gameId, category) {
@@ -13602,6 +15988,7 @@
       state.dateFormat,
       JSON.stringify(state.dataPieInclude[game.id] || {}),
       getDataExcludeInProgress(game.id) ? "1" : "0",
+      getDataHideDates(game.id) ? "1" : "0",
     ].join("|");
   }
 
@@ -13642,6 +16029,30 @@
     exclToggle.appendChild(exclText);
     exclToggleWrap.appendChild(exclToggle);
     container.appendChild(exclToggleWrap);
+
+    const hideDatesWrap = document.createElement("div");
+    hideDatesWrap.className = "data-excl-toggle-wrap";
+    const hideDatesToggle = document.createElement("label");
+    hideDatesToggle.className = "data-excl-toggle";
+    const hideDatesCheck = document.createElement("input");
+    hideDatesCheck.type = "checkbox";
+    hideDatesCheck.checked = getDataHideDates(game.id);
+    hideDatesCheck.setAttribute("aria-label", "Hide dates");
+    hideDatesCheck.addEventListener("change", () => {
+      setDataHideDates(game.id, hideDatesCheck.checked);
+      save();
+      renderActiveTab();
+    });
+    hideDatesToggle.appendChild(hideDatesCheck);
+    const hideDatesText = document.createElement("span");
+    hideDatesText.className = "data-excl-text";
+    hideDatesText.textContent = "Hide dates";
+    hideDatesToggle.appendChild(hideDatesText);
+    hideDatesWrap.appendChild(hideDatesToggle);
+    container.appendChild(hideDatesWrap);
+
+    const hideDates = getDataHideDates(game.id);
+    const sinceLabel = (type, key) => (hideDates ? null : formatCountingSinceLabel(game, type, key));
 
     const ep = getGameEarnedAndPotential(game);
     const cpp = Math.max(0, Number(game.currencyPerPull) || 0);
@@ -13777,7 +16188,7 @@
     const dCompleted = dCa.completed;
     const dAttempted = dCa.attempted;
     const dTotal = game.dailies ? (dAttempted > 0 ? dAttempted : Math.max(dCompleted, 1)) : 0;
-    const weeklies = game.weeklies || [];
+    const weeklies = (game.weeklies || []).filter((t) => !isTaskHiddenInData(t));
     let wCompleted = 0, wAttempted = 0;
     weeklies.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
@@ -13786,7 +16197,7 @@
       wAttempted += ca.attempted;
     });
     const wTotal = wAttempted > 0 ? wAttempted : Math.max(wCompleted, weeklies.length || 1);
-    const endgame = game.endgame || [];
+    const endgame = (game.endgame || []).filter((t) => !isTaskHiddenInData(t));
     let eCompleted = 0, eAttempted = 0;
     endgame.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
@@ -13806,7 +16217,7 @@
       dCompleted,
       dTotal,
       false,
-      game.dailies ? formatCountingSinceLabel(game, "dailies", game.id) : null
+      game.dailies ? sinceLabel("dailies", game.id) : null
     ));
     overallPies.appendChild(createCompletionPieBox("Weeklies", wCompleted, wTotal, false));
     overallPies.appendChild(createCompletionPieBox("Endgame", eCompleted, eTotal, true));
@@ -13827,7 +16238,7 @@
         const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
         const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
         const taskLabel = (task.label || "Weekly") + (isTaskCycleEnded(task, getSimulatedNow(), game) ? " (Ended)" : "");
-        wPies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, false, formatCountingSinceLabel(game, "weeklies", key)));
+        wPies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, false, sinceLabel("weeklies", key)));
       });
       weekliesSection.appendChild(wPies);
       container.appendChild(weekliesSection);
@@ -13847,7 +16258,7 @@
         const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
         const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
         const taskLabel = (task.label || "Endgame") + (isTaskCycleEnded(task, getSimulatedNow(), game) ? " (Ended)" : "");
-        ePies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, true, formatCountingSinceLabel(game, "endgame", key)));
+        ePies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, true, sinceLabel("endgame", key)));
       });
       endgameSection.appendChild(ePies);
       container.appendChild(endgameSection);
@@ -13865,14 +16276,25 @@
         const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
         const earned = getEndgameEarnedCompletedCyclesOnly(game.id, task.id || task.label, ca.completed);
         const potential = getEndgamePotentialSum(game.id, task.id || task.label, task, ca.attempted);
-        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, potential, formatCountingSinceLabel(game, "endgame", key)));
+        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, potential, sinceLabel("endgame", key)));
       });
       currencySection.appendChild(currencyPies);
       container.appendChild(currencySection);
     }
 
-    const exTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === game.id);
-    if (exTasks.length > 0) {
+    const exTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === game.id && !isTaskHiddenInData(t));
+    const exPieTasks = [];
+    exTasks.forEach((task) => {
+      const pot = Math.max(0, Number(task.currency) || 0);
+      let earned = 0;
+      if (state.extracurricularCompleted[task.id]) {
+        const rec = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[task.id];
+        earned = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
+      }
+      if (earned <= 0) return;
+      exPieTasks.push({ task, earned, pot });
+    });
+    if (exPieTasks.length > 0) {
       const exSection = document.createElement("div");
       exSection.className = "data-pie-section";
       const exh = document.createElement("h4");
@@ -13881,14 +16303,8 @@
       exSection.appendChild(exh);
       const exPies = document.createElement("div");
       exPies.className = "pie-row";
-      exTasks.forEach((task) => {
-        const pot = Math.max(0, Number(task.currency) || 0);
-        let earned = 0;
-        if (state.extracurricularCompleted[task.id]) {
-          const rec = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[task.id];
-          earned = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
-        }
-        exPies.appendChild(createExtracurricularCurrencyPieBox(task, earned, pot));
+      exPieTasks.forEach(({ task, earned, pot }) => {
+        exPies.appendChild(createExtracurricularCurrencyPieBox(task, earned, pot, { hideDates }));
       });
       exSection.appendChild(exPies);
       container.appendChild(exSection);
@@ -14017,6 +16433,85 @@
       tag.title = "No calendar completions yet. Tallies start after the first completion, or enable “Count from cycle start date” on the task.";
     }
     parent.appendChild(tag);
+    return tag;
+  }
+
+  /** Shell for Games weeklies/endgame cards: left media + right main column. */
+  function createGamesManagedTaskCard(selected, t, taskType) {
+    const key = selected.id + "." + (t.id || t.label);
+    const li = document.createElement("li");
+    li.className = "task-item task-item-with-changer games-task-card";
+    appendGamesTaskSideMedia(li, t);
+
+    const main = document.createElement("div");
+    main.className = "games-task-main";
+
+    const top = document.createElement("div");
+    top.className = "task-item-top games-task-top";
+
+    const header = document.createElement("div");
+    header.className = "games-task-header";
+    const titleLine = document.createElement("div");
+    titleLine.className = "games-task-title-line";
+    const label = document.createElement("span");
+    label.className = "task-label";
+    label.textContent = t.label || "";
+    titleLine.appendChild(label);
+    header.appendChild(titleLine);
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "icon-btn";
+    editBtn.textContent = "✎";
+    editBtn.setAttribute("aria-label", "Edit task");
+    editBtn.addEventListener("click", () => openTaskModal({ gameId: selected.id, taskType: taskType, task: t }));
+    header.appendChild(editBtn);
+    top.appendChild(header);
+
+    const meta = document.createElement("div");
+    meta.className = "games-task-meta";
+
+    const metaLine = document.createElement("div");
+    metaLine.className = "games-task-meta-line";
+    const resetSpan = document.createElement("span");
+    resetSpan.className = "games-task-reset";
+    resetSpan.textContent = "Resets: " + (
+      taskType === "endgame"
+        ? getEndgameResetDisplay(t, getSimulatedNow(), selected)
+        : getWeeklyResetDisplay(t, getSimulatedNow(), selected)
+    );
+    metaLine.appendChild(resetSpan);
+
+    const dateStartSpan = document.createElement("span");
+    dateStartSpan.className = taskType === "endgame" ? "games-endgame-date-start" : "games-weekly-date-start";
+    const ds = isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr();
+    const dsDate = new Date(ds + "T12:00:00");
+    dateStartSpan.textContent = "Started: " + formatDate(dsDate);
+    dateStartSpan.title = "Date started: " + ds;
+    metaLine.appendChild(dateStartSpan);
+    meta.appendChild(metaLine);
+
+    appendCountingSinceTag(meta, selected, taskType, key);
+    appendCycleEndedBadge(meta, t, selected);
+    top.appendChild(meta);
+
+    main.appendChild(top);
+    li.appendChild(main);
+    return { li, main, key };
+  }
+
+  function appendGamesTaskBottom(main, selected, t, taskType, potentialText) {
+    const bottom = document.createElement("div");
+    bottom.className = "games-task-bottom";
+    const right = document.createElement("div");
+    right.className = "games-task-bottom-right";
+    const potSpan = document.createElement("span");
+    potSpan.className = "games-task-potential";
+    potSpan.textContent = potentialText;
+    right.appendChild(potSpan);
+    appendTaskCycleEndFooter(right, selected, t, taskType);
+    bottom.appendChild(right);
+    main.appendChild(bottom);
   }
 
   function formatCountingSinceLabel(game, type, key) {
@@ -14031,6 +16526,312 @@
     btn.addEventListener("click", onSync);
   }
 
+  const gameIdentityModalState = {
+    open: false,
+    gameId: null,
+    sourceImg: null,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    shape: "rounded",
+    dragging: false,
+    dragStartX: 0,
+    dragStartY: 0,
+    panStartX: 0,
+    panStartY: 0,
+    clearIcon: false,
+  };
+
+  function setGameIdentityModalOpen(open) {
+    const el = document.getElementById("gameIdentityModal");
+    if (!el) return;
+    gameIdentityModalState.open = !!open;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+  }
+
+  function closeGameIdentityModal() {
+    setGameIdentityModalOpen(false);
+    gameIdentityModalState.gameId = null;
+    gameIdentityModalState.sourceImg = null;
+    gameIdentityModalState.clearIcon = false;
+  }
+
+  function syncGameIdentityShapeButtons() {
+    document.querySelectorAll(".game-icon-shape-btn").forEach((btn) => {
+      const active = btn.dataset.shape === gameIdentityModalState.shape;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    const frame = document.getElementById("gameIdentityCropFrame");
+    const wrap = document.getElementById("gameIdentityCropWrap");
+    if (frame) {
+      frame.className = "game-icon-crop-frame game-icon-crop-frame-" + gameIdentityModalState.shape;
+    }
+    if (wrap) {
+      wrap.className = "game-icon-crop-wrap game-icon-crop-wrap-" + gameIdentityModalState.shape;
+    }
+  }
+
+  function updateGameIdentityLivePreview() {
+    const box = document.getElementById("gameIdentityLivePreview");
+    if (!box) return;
+    const nameInput = document.getElementById("gameIdentityName");
+    const subInput = document.getElementById("gameIdentitySubtitle");
+    const draft = {
+      name: (nameInput && nameInput.value.trim()) || "Game",
+      subtitle: (subInput && subInput.value.trim()) || "",
+      iconShape: gameIdentityModalState.shape,
+      iconImage: null,
+    };
+    if (!gameIdentityModalState.clearIcon) {
+      if (gameIdentityModalState.sourceImg) {
+        draft.iconImage = exportGameIdentityCropDataUrl(96) || null;
+      } else {
+        const game = getGame(gameIdentityModalState.gameId);
+        if (game && game.iconImage) draft.iconImage = game.iconImage;
+      }
+    }
+    box.innerHTML = "";
+    const label = document.createElement("div");
+    label.className = "game-identity-preview-label";
+    label.textContent = "Preview";
+    box.appendChild(label);
+    box.appendChild(buildGameIdentityHeader(draft, { className: "games-selected-identity", showPlaceholder: true }));
+  }
+
+  function drawGameIdentityCrop() {
+    const canvas = document.getElementById("gameIdentityCropCanvas");
+    const empty = document.getElementById("gameIdentityCropEmpty");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(0, 0, w, h);
+    const img = gameIdentityModalState.sourceImg;
+    if (!img) {
+      if (empty) empty.hidden = false;
+      return;
+    }
+    if (empty) empty.hidden = true;
+    const base = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+    const scale = base * gameIdentityModalState.zoom;
+    const drawW = img.naturalWidth * scale;
+    const drawH = img.naturalHeight * scale;
+    const x = (w - drawW) / 2 + gameIdentityModalState.panX;
+    const y = (h - drawH) / 2 + gameIdentityModalState.panY;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, x, y, drawW, drawH);
+  }
+
+  function exportGameIdentityCropDataUrl(outSize) {
+    const img = gameIdentityModalState.sourceImg;
+    if (!img) return null;
+    const stage = 280;
+    const size = outSize || 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const base = Math.max(stage / img.naturalWidth, stage / img.naturalHeight);
+    const scale = base * gameIdentityModalState.zoom;
+    const drawW = img.naturalWidth * scale * (size / stage);
+    const drawH = img.naturalHeight * scale * (size / stage);
+    const x = (size - drawW) / 2 + gameIdentityModalState.panX * (size / stage);
+    const y = (size - drawH) / 2 + gameIdentityModalState.panY * (size / stage);
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(0, 0, size, size);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, x, y, drawW, drawH);
+    return canvas.toDataURL("image/jpeg", 0.88);
+  }
+
+  function loadGameIdentitySourceFromUrl(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        gameIdentityModalState.sourceImg = img;
+        gameIdentityModalState.zoom = 1;
+        gameIdentityModalState.panX = 0;
+        gameIdentityModalState.panY = 0;
+        gameIdentityModalState.clearIcon = false;
+        const zoom = document.getElementById("gameIdentityZoom");
+        if (zoom) zoom.value = "1";
+        drawGameIdentityCrop();
+        updateGameIdentityLivePreview();
+        resolve();
+      };
+      img.onerror = () => reject(new Error("Could not load image."));
+      img.src = url;
+    });
+  }
+
+  async function openGameIdentityModal(gameId) {
+    const game = getGame(gameId);
+    if (!game) return;
+    gameIdentityModalState.gameId = gameId;
+    gameIdentityModalState.shape = (game.iconShape === "circle" || game.iconShape === "square") ? game.iconShape : "rounded";
+    gameIdentityModalState.clearIcon = false;
+    gameIdentityModalState.sourceImg = null;
+    const nameInput = document.getElementById("gameIdentityName");
+    const subInput = document.getElementById("gameIdentitySubtitle");
+    if (nameInput) nameInput.value = game.name || "";
+    if (subInput) subInput.value = game.subtitle || "";
+    syncGameIdentityShapeButtons();
+    drawGameIdentityCrop();
+    if (game.iconImage) {
+      try {
+        await loadGameIdentitySourceFromUrl(game.iconImage);
+      } catch (_) {
+        updateGameIdentityLivePreview();
+      }
+    } else {
+      const empty = document.getElementById("gameIdentityCropEmpty");
+      if (empty) empty.hidden = false;
+      updateGameIdentityLivePreview();
+    }
+    setGameIdentityModalOpen(true);
+    if (nameInput) setTimeout(() => nameInput.focus(), 0);
+  }
+
+  function initGameIdentityModal() {
+    const modalEl = document.getElementById("gameIdentityModal");
+    const form = document.getElementById("gameIdentityForm");
+    const closeBtn = document.getElementById("gameIdentityModalClose");
+    const cancelBtn = document.getElementById("gameIdentityModalCancel");
+    const chooseBtn = document.getElementById("gameIdentityChooseIconBtn");
+    const clearBtn = document.getElementById("gameIdentityClearIconBtn");
+    const fileInput = document.getElementById("gameIdentityIconFile");
+    const zoom = document.getElementById("gameIdentityZoom");
+    const canvas = document.getElementById("gameIdentityCropCanvas");
+    const nameInput = document.getElementById("gameIdentityName");
+    const subInput = document.getElementById("gameIdentitySubtitle");
+    if (!modalEl || !form) return;
+
+    modalEl.addEventListener("click", (e) => {
+      if (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true") closeGameIdentityModal();
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeGameIdentityModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeGameIdentityModal);
+    document.addEventListener("keydown", (e) => {
+      if (!gameIdentityModalState.open) return;
+      if (e.key === "Escape") closeGameIdentityModal();
+    });
+
+    document.querySelectorAll(".game-icon-shape-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        gameIdentityModalState.shape = btn.dataset.shape || "rounded";
+        syncGameIdentityShapeButtons();
+        updateGameIdentityLivePreview();
+      });
+    });
+
+    if (chooseBtn && fileInput) {
+      chooseBtn.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", async () => {
+        const file = fileInput.files && fileInput.files[0];
+        fileInput.value = "";
+        if (!file) return;
+        try {
+          const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: 1200, quality: 0.92 });
+          await loadGameIdentitySourceFromUrl(dataUrl);
+        } catch (err) {
+          alert((err && err.message) || "Could not use that image.");
+        }
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        gameIdentityModalState.sourceImg = null;
+        gameIdentityModalState.clearIcon = true;
+        gameIdentityModalState.zoom = 1;
+        gameIdentityModalState.panX = 0;
+        gameIdentityModalState.panY = 0;
+        if (zoom) zoom.value = "1";
+        drawGameIdentityCrop();
+        updateGameIdentityLivePreview();
+      });
+    }
+    if (zoom) {
+      zoom.addEventListener("input", () => {
+        gameIdentityModalState.zoom = Number(zoom.value) || 1;
+        drawGameIdentityCrop();
+        updateGameIdentityLivePreview();
+      });
+    }
+    if (nameInput) nameInput.addEventListener("input", updateGameIdentityLivePreview);
+    if (subInput) subInput.addEventListener("input", updateGameIdentityLivePreview);
+
+    if (canvas) {
+      const onDown = (clientX, clientY) => {
+        if (!gameIdentityModalState.sourceImg) return;
+        gameIdentityModalState.dragging = true;
+        gameIdentityModalState.dragStartX = clientX;
+        gameIdentityModalState.dragStartY = clientY;
+        gameIdentityModalState.panStartX = gameIdentityModalState.panX;
+        gameIdentityModalState.panStartY = gameIdentityModalState.panY;
+      };
+      const onMove = (clientX, clientY) => {
+        if (!gameIdentityModalState.dragging) return;
+        gameIdentityModalState.panX = gameIdentityModalState.panStartX + (clientX - gameIdentityModalState.dragStartX);
+        gameIdentityModalState.panY = gameIdentityModalState.panStartY + (clientY - gameIdentityModalState.dragStartY);
+        drawGameIdentityCrop();
+      };
+      const onUp = () => {
+        if (!gameIdentityModalState.dragging) return;
+        gameIdentityModalState.dragging = false;
+        updateGameIdentityLivePreview();
+      };
+      canvas.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        onDown(e.clientX, e.clientY);
+      });
+      window.addEventListener("mousemove", (e) => onMove(e.clientX, e.clientY));
+      window.addEventListener("mouseup", onUp);
+      canvas.addEventListener("touchstart", (e) => {
+        if (!e.touches || !e.touches[0]) return;
+        onDown(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: true });
+      canvas.addEventListener("touchmove", (e) => {
+        if (!e.touches || !e.touches[0]) return;
+        e.preventDefault();
+        onMove(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: false });
+      canvas.addEventListener("touchend", onUp);
+    }
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const game = getGame(gameIdentityModalState.gameId);
+      if (!game) return;
+      const name = nameInput && nameInput.value.trim();
+      if (!name) {
+        if (nameInput) nameInput.focus();
+        return;
+      }
+      game.name = name;
+      const sub = subInput && subInput.value.trim();
+      if (sub) game.subtitle = sub;
+      else delete game.subtitle;
+      game.iconShape = gameIdentityModalState.shape;
+      if (gameIdentityModalState.clearIcon) {
+        delete game.iconImage;
+      } else if (gameIdentityModalState.sourceImg) {
+        const cropped = exportGameIdentityCropDataUrl(256);
+        if (cropped) game.iconImage = cropped;
+      }
+      save();
+      closeGameIdentityModal();
+      renderActiveTab();
+    });
+  }
+
   function renderGames() {
     const container = document.getElementById("gamesContainer");
     if (!container) return;
@@ -14043,24 +16844,22 @@
     const selected = getGame(state.gamesSelectedId) || games[0];
     const titleRow = document.createElement("div");
     titleRow.className = "games-title-row";
-    const gameTitle = document.createElement("h3");
-    gameTitle.className = "games-selected-title";
-    gameTitle.textContent = selected.name;
-    titleRow.appendChild(gameTitle);
-    const editNameBtn = document.createElement("button");
-    editNameBtn.type = "button";
-    editNameBtn.className = "btn btn-ghost games-edit-name-btn";
-    editNameBtn.textContent = "Edit name";
-    editNameBtn.setAttribute("aria-label", "Edit game name");
-    editNameBtn.addEventListener("click", () => {
-      const newName = prompt("Game name", selected.name || "");
-      if (newName != null && String(newName).trim()) {
-        selected.name = String(newName).trim();
-        save();
-        renderActiveTab();
+    const identity = buildGameIdentityHeader(selected, {
+      className: "games-selected-identity",
+      showPlaceholder: true,
+      interactive: true,
+    });
+    identity.addEventListener("click", () => openGameIdentityModal(selected.id));
+    identity.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openGameIdentityModal(selected.id);
       }
     });
-    titleRow.appendChild(editNameBtn);
+    titleRow.appendChild(identity);
+
+    const actions = document.createElement("div");
+    actions.className = "games-title-actions";
     const syncBtn = document.createElement("button");
     syncBtn.type = "button";
     syncBtn.className = "btn btn-ghost games-sync-btn";
@@ -14070,7 +16869,7 @@
     bindSyncButton(syncBtn, () => {
       syncAllTasksForGame(selected);
     });
-    titleRow.appendChild(syncBtn);
+    actions.appendChild(syncBtn);
     const clearDataBtn = document.createElement("button");
     clearDataBtn.type = "button";
     clearDataBtn.className = "btn btn-ghost games-clear-data-btn";
@@ -14078,13 +16877,14 @@
     clearDataBtn.setAttribute("aria-label", "Clear all attempts and completions for this game");
     clearDataBtn.title = "Reset all attempts and completions to zero";
     clearDataBtn.addEventListener("click", () => openClearGameDataModal(selected.id));
-    titleRow.appendChild(clearDataBtn);
+    actions.appendChild(clearDataBtn);
     const deleteGameBtn = document.createElement("button");
     deleteGameBtn.type = "button";
     deleteGameBtn.className = "btn btn-ghost games-delete-btn";
     deleteGameBtn.textContent = "Delete game";
     deleteGameBtn.addEventListener("click", () => deleteGame(selected.id));
-    titleRow.appendChild(deleteGameBtn);
+    actions.appendChild(deleteGameBtn);
+    titleRow.appendChild(actions);
     container.appendChild(titleRow);
     const titleSep = document.createElement("div");
     titleSep.className = "games-separator";
@@ -14256,10 +17056,12 @@
           activeLabel.className = "games-extracurricular-section-label";
           activeLabel.textContent = "Active";
           section.appendChild(activeLabel);
-          const activeList = document.createElement("ul");
-          activeList.className = "task-list";
-          activeTasks.forEach((task) => activeList.appendChild(buildExtracurricularTaskItem(task)));
+          const activeList = document.createElement("div");
+          activeList.className = "task-grid task-grid-knot";
+          activeList.dataset.masonryMax = "3";
+          activeTasks.forEach((task) => activeList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "games" })));
           section.appendChild(activeList);
+          scheduleTaskMasonry(activeList);
         }
         if (archivedTasks.length > 0) {
           const archivedLabel = document.createElement("p");
@@ -14267,10 +17069,12 @@
           archivedLabel.textContent = "History";
           archivedLabel.style.marginTop = "1rem";
           section.appendChild(archivedLabel);
-          const archivedList = document.createElement("ul");
-          archivedList.className = "task-list";
-          archivedTasks.forEach((task) => archivedList.appendChild(buildExtracurricularTaskItem(task)));
+          const archivedList = document.createElement("div");
+          archivedList.className = "task-grid task-grid-knot";
+          archivedList.dataset.masonryMax = "3";
+          archivedTasks.forEach((task) => archivedList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "games" })));
           section.appendChild(archivedList);
+          scheduleTaskMasonry(archivedList);
         }
         content.appendChild(section);
       }
@@ -14359,43 +17163,11 @@
       const ul = document.createElement("ul");
       ul.className = "task-list";
       (list || []).forEach((t) => {
-        const li = document.createElement("li");
-        li.className = "task-item task-item-with-changer";
-        const top = document.createElement("div");
-        top.className = "task-item-top";
-        const info = document.createElement("div");
-        info.className = "task-item-info";
-        const label = document.createElement("span");
-        label.className = "task-label";
-        label.textContent = t.label || "";
-        const key = selected.id + "." + (t.id || t.label);
-        const potSpan = document.createElement("span");
-        potSpan.className = "games-task-potential";
-        potSpan.textContent = "Potential: " + getWeeklyPotential(t);
-        const resetSpan = document.createElement("span");
-        resetSpan.className = "games-task-reset";
-        resetSpan.textContent = "Resets: " + getWeeklyResetDisplay(t, getSimulatedNow(), selected);
-        const dateStartSpan = document.createElement("span");
-        dateStartSpan.className = "games-weekly-date-start";
-        const ds = isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr();
-        const dsDate = new Date(ds + "T12:00:00");
-        dateStartSpan.textContent = "Started: " + formatDate(dsDate);
-        dateStartSpan.title = "Date started: " + ds;
-        info.appendChild(label);
-        info.appendChild(potSpan);
-        info.appendChild(resetSpan);
-        info.appendChild(dateStartSpan);
-        appendCountingSinceTag(info, selected, "weeklies", key);
-        appendCycleEndedBadge(info, t, selected);
-        const editBtn = document.createElement("button");
-        editBtn.type = "button";
-        editBtn.className = "icon-btn";
-        editBtn.textContent = "✎";
-        editBtn.setAttribute("aria-label", "Edit task");
-        editBtn.addEventListener("click", () => openTaskModal({ gameId: selected.id, taskType: "weeklies", task: t }));
-        top.appendChild(info);
-        top.appendChild(editBtn);
-        li.appendChild(top);
+        const built = createGamesManagedTaskCard(selected, t, "weeklies");
+        const li = built.li;
+        const main = built.main;
+        const key = built.key;
+
         const changerRow = document.createElement("div");
         changerRow.className = "games-changer-row";
         changerRow.innerHTML = "<label>Completed amount:</label>";
@@ -14413,7 +17185,7 @@
           renderActiveTab();
         });
         changerRow.appendChild(changerInput);
-        li.appendChild(changerRow);
+        main.appendChild(changerRow);
 
         const attemptRow = document.createElement("div");
         attemptRow.className = "games-changer-row";
@@ -14425,7 +17197,7 @@
         attemptInput.value = String(getAttemptedAmount(state.weekliesAttempted, key));
         attemptInput.addEventListener("change", () => setWeekliesAttempted(selected.id, t.id || t.label, attemptInput.value));
         attemptRow.appendChild(attemptInput);
-        li.appendChild(attemptRow);
+        main.appendChild(attemptRow);
 
         const historyRow = document.createElement("div");
         historyRow.className = "games-changer-row";
@@ -14435,7 +17207,7 @@
         historyBtn.textContent = "Completion History";
         historyBtn.addEventListener("click", () => openEarningsModal(selected.id, t, "weeklies"));
         historyRow.appendChild(historyBtn);
-        li.appendChild(historyRow);
+        main.appendChild(historyRow);
 
         const syncRow = document.createElement("div");
         syncRow.className = "games-changer-row";
@@ -14446,10 +17218,9 @@
         syncBtn.title = "Update Completed/Attempted from calendar history (tally from first complete to today)";
         bindSyncButton(syncBtn, () => syncTaskWithCalendar(selected, "weeklies", key));
         syncRow.appendChild(syncBtn);
-        li.appendChild(syncRow);
+        main.appendChild(syncRow);
 
-        appendTaskCycleEndFooter(li, selected, t, "weeklies");
-
+        appendGamesTaskBottom(main, selected, t, "weeklies", "Potential: " + getWeeklyPotential(t));
         ul.appendChild(li);
       });
       content.appendChild(ul);
@@ -14466,43 +17237,11 @@
       const ul = document.createElement("ul");
       ul.className = "task-list";
       (list || []).forEach((t) => {
-        const li = document.createElement("li");
-        li.className = "task-item task-item-with-changer";
-        const top = document.createElement("div");
-        top.className = "task-item-top";
-        const info = document.createElement("div");
-        info.className = "task-item-info";
-        const label = document.createElement("span");
-        label.className = "task-label";
-        label.textContent = t.label || "";
-        const key = selected.id + "." + (t.id || t.label);
-        const potSpan = document.createElement("span");
-        potSpan.className = "games-task-potential";
-        potSpan.textContent = "Potential: " + getEndgamePotential(t);
-        const resetSpan = document.createElement("span");
-        resetSpan.className = "games-task-reset";
-        resetSpan.textContent = "Resets: " + getEndgameResetDisplay(t, getSimulatedNow(), selected);
-        const dateStartSpan = document.createElement("span");
-        dateStartSpan.className = "games-endgame-date-start";
-        const ds = isValidDateStr(t.dateStarted) ? t.dateStarted : getDateStr();
-        const dsDate = new Date(ds + "T12:00:00");
-        dateStartSpan.textContent = "Started: " + formatDate(dsDate);
-        dateStartSpan.title = "Date started: " + ds;
-        info.appendChild(label);
-        info.appendChild(potSpan);
-        info.appendChild(resetSpan);
-        info.appendChild(dateStartSpan);
-        appendCountingSinceTag(info, selected, "endgame", key);
-        appendCycleEndedBadge(info, t, selected);
-        const editBtn = document.createElement("button");
-        editBtn.type = "button";
-        editBtn.className = "icon-btn";
-        editBtn.textContent = "✎";
-        editBtn.setAttribute("aria-label", "Edit task");
-        editBtn.addEventListener("click", () => openTaskModal({ gameId: selected.id, taskType: "endgame", task: t }));
-        top.appendChild(info);
-        top.appendChild(editBtn);
-        li.appendChild(top);
+        const built = createGamesManagedTaskCard(selected, t, "endgame");
+        const li = built.li;
+        const main = built.main;
+        const key = built.key;
+
         const changerRow = document.createElement("div");
         changerRow.className = "games-changer-row";
         changerRow.innerHTML = "<label>Completed amount:</label>";
@@ -14527,7 +17266,7 @@
           renderActiveTab();
         });
         changerRow.appendChild(changerInput);
-        li.appendChild(changerRow);
+        main.appendChild(changerRow);
 
         const attemptRow = document.createElement("div");
         attemptRow.className = "games-changer-row";
@@ -14539,7 +17278,7 @@
         attemptInput.value = String(getAttemptedAmount(state.endgameAttempted, key));
         attemptInput.addEventListener("change", () => setEndgameAttempted(selected.id, t.id || t.label, attemptInput.value));
         attemptRow.appendChild(attemptInput);
-        li.appendChild(attemptRow);
+        main.appendChild(attemptRow);
 
         const earningsRow = document.createElement("div");
         earningsRow.className = "games-changer-row";
@@ -14549,7 +17288,7 @@
         earningsBtn.textContent = "Completion History";
         earningsBtn.addEventListener("click", () => openEarningsModal(selected.id, t, "endgame"));
         earningsRow.appendChild(earningsBtn);
-        li.appendChild(earningsRow);
+        main.appendChild(earningsRow);
 
         const syncRow = document.createElement("div");
         syncRow.className = "games-changer-row";
@@ -14560,10 +17299,9 @@
         syncBtn.title = "Update Completed/Attempted from calendar history (tally from first complete to today)";
         bindSyncButton(syncBtn, () => syncTaskWithCalendar(selected, "endgame", key));
         syncRow.appendChild(syncBtn);
-        li.appendChild(syncRow);
+        main.appendChild(syncRow);
 
-        appendTaskCycleEndFooter(li, selected, t, "endgame");
-
+        appendGamesTaskBottom(main, selected, t, "endgame", "Potential: " + getEndgamePotential(t));
         ul.appendChild(li);
       });
       content.appendChild(ul);
@@ -14724,17 +17462,31 @@
           const game = getGame(item.gameId);
           if (game) grid.appendChild(buildDailyTaskItem(game, "div"));
         });
+        requestAnimationFrame(() => {
+          syncHomeDailyCardSizes(grid);
+          grid.querySelectorAll("img").forEach((img) => {
+            if (img.complete) return;
+            img.addEventListener("load", () => syncHomeDailyCardSizes(grid), { once: true });
+          });
+        });
+        if (!window.__homeDailyResizeBound) {
+          window.__homeDailyResizeBound = true;
+          let resizeTimer = 0;
+          window.addEventListener("resize", () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+              document.querySelectorAll(".home-dwe-checklist-scroll .task-grid[data-type=\"dailies\"]").forEach((g) => {
+                syncHomeDailyCardSizes(g);
+              });
+            }, 100);
+          });
+        }
       } else if (type === "weeklies") {
         items.forEach((item) => {
           const game = getGame(item.gameId);
           const task = game && (game.weeklies || []).find((t) => (t.id || t.label) === item.taskId);
           if (game && task) {
-            const card = buildWeeklyTaskItem(game, task, "div");
-            const gameLabel = document.createElement("div");
-            gameLabel.className = "task-grid-game-label";
-            gameLabel.textContent = game.name;
-            card.insertBefore(gameLabel, card.firstChild);
-            grid.appendChild(card);
+            grid.appendChild(buildWeeklyTaskItem(game, task, "div", { surface: "home" }));
           }
         });
       } else if (type === "endgame") {
@@ -14742,12 +17494,7 @@
           const game = getGame(item.gameId);
           const task = game && (game.endgame || []).find((t) => (t.id || t.label) === item.taskId);
           if (game && task) {
-            const card = buildEndgameTaskItem(game, task, "div");
-            const gameLabel = document.createElement("div");
-            gameLabel.className = "task-grid-game-label";
-            gameLabel.textContent = game.name;
-            card.insertBefore(gameLabel, card.firstChild);
-            grid.appendChild(card);
+            grid.appendChild(buildEndgameTaskItem(game, task, "div", { surface: "home" }));
           }
         });
       }
@@ -14918,145 +17665,178 @@
     });
   }
 
-  load();
-  if (typeof window.initFirebaseAuth === "function") window.initFirebaseAuth();
-  processResets();
-  if (state.defaultTab && state.defaultTab !== state.tab) {
-    state.tab = state.defaultTab;
-  }
-  setDateLabels();
-  initTabs();
-  initFormatToggles();
-  initTaskModal();
-  initGameModal();
-  initDeleteGameModal();
-  initClearGameDataModal();
-  initCalendarDayModal();
-  initEarningsModal();
-  initEndgameCompleteModal();
-  initExtracurricularCompleteModal();
-  initTimeTrendsDetailModal();
-  initAttendanceSkippedModal();
-  initClearTimeTrendsModal();
-  initSettingsModal();
-  initExtracurricularTaskModal();
-  document.addEventListener("keydown", (e) => {
-    if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== "z") return;
-    if (e.altKey || e.shiftKey) return;
-    const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
-    if (tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable)) return;
-    if (typeof canUndoCompletion !== "function" || !canUndoCompletion()) return;
-    e.preventDefault();
-    const result = undoLastCompletion();
-    if (result && result.ok && typeof updateCompletionUndoUI === "function") updateCompletionUndoUI();
-  });
-  window.addEventListener("beforeunload", () => {
-    if (typeof window.flushPendingSave === "function") window.flushPendingSave();
-  });
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && typeof window.flushPendingSave === "function") {
-      window.flushPendingSave();
+  function startApp() {
+    if (typeof window.initFirebaseAuth === "function") window.initFirebaseAuth();
+    processResets();
+    if (state.defaultTab && state.defaultTab !== state.tab) {
+      state.tab = state.defaultTab;
     }
-  });
-  setInterval(() => {
-    const changed = processResets();
-    updateTaskRemainingTexts();
-    if (changed) renderActiveTab();
-  }, 60000);
-  setInterval(updateSidebarTime, 1000);
-  renderAll();
+    setDateLabels();
+    initTabs();
+    initTaskModal();
+    initGameModal();
+    initGameIdentityModal();
+    initDeleteGameModal();
+    initClearGameDataModal();
+    initCalendarDayModal();
+    initEarningsModal();
+    initEndgameCompleteModal();
+    initExtracurricularCompleteModal();
+    initTimeTrendsDetailModal();
+    initAttendanceSkippedModal();
+    initClearTimeTrendsModal();
+    initSettingsModal();
+    initExtracurricularTaskModal();
+    document.addEventListener("keydown", (e) => {
+      if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== "z") return;
+      if (e.altKey || e.shiftKey) return;
+      const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
+      if (tag === "input" || tag === "textarea" || tag === "select" || (e.target && e.target.isContentEditable)) return;
+      if (typeof canUndoCompletion !== "function" || !canUndoCompletion()) return;
+      e.preventDefault();
+      const result = undoLastCompletion();
+      if (result && result.ok && typeof updateCompletionUndoUI === "function") updateCompletionUndoUI();
+    });
+    window.addEventListener("beforeunload", () => {
+      if (typeof window.flushPendingSave === "function") window.flushPendingSave();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden" && typeof window.flushPendingSave === "function") {
+        window.flushPendingSave();
+      }
+    });
+    setInterval(() => {
+      const changed = processResets();
+      updateTaskRemainingTexts();
+      if (changed) renderActiveTab();
+    }, 60000);
+    setInterval(updateSidebarTime, 1000);
 
-  // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
-  if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {
-    window.__gachaLiveProbe = {
-      ready: true,
-      getStateSnapshot() {
-        return JSON.parse(
-          JSON.stringify({
-            games: state.games,
-            completionByDate: state.completionByDate,
-            completionTimestamps: state.completionTimestamps,
-            dailiesCompleted: state.dailiesCompleted,
-            weekliesCompleted: state.weekliesCompleted,
-            endgameCompleted: state.endgameCompleted,
-            dailiesAttempted: state.dailiesAttempted,
-            weekliesAttempted: state.weekliesAttempted,
-            endgameAttempted: state.endgameAttempted,
-            lastProcessedResets: state.lastProcessedResets,
-            endgameCurrencyEarned: state.endgameCurrencyEarned,
-            endgameCurrencyPotential: state.endgameCurrencyPotential,
-            endgameCompletionDates: state.endgameCompletionDates,
-            simulatedDateOffset: state.simulatedDateOffset || 0,
-            simulatedHourOffset: state.simulatedHourOffset || 0,
-            tab: state.tab,
-          })
-        );
-      },
-      loadStateSnapshot(snap) {
-        if (!snap || typeof snap !== "object") return false;
-        [
-          "games",
-          "completionByDate",
-          "completionTimestamps",
-          "dailiesCompleted",
-          "weekliesCompleted",
-          "endgameCompleted",
-          "dailiesAttempted",
-          "weekliesAttempted",
-          "endgameAttempted",
-          "lastProcessedResets",
-          "endgameCurrencyEarned",
-          "endgameCurrencyPotential",
-          "endgameCompletionDates",
-        ].forEach((k) => {
-          if (snap[k] !== undefined) state[k] = snap[k];
-        });
-        state.simulatedDateOffset = snap.simulatedDateOffset || 0;
-        state.simulatedHourOffset = snap.simulatedHourOffset || 0;
-        if (!state.lastProcessedResets || typeof state.lastProcessedResets !== "object") {
-          state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
-        } else {
-          if (!state.lastProcessedResets.dailies) state.lastProcessedResets.dailies = {};
-          if (!state.lastProcessedResets.weeklies) state.lastProcessedResets.weeklies = {};
-          if (!state.lastProcessedResets.endgame) state.lastProcessedResets.endgame = {};
-        }
-        if (!state.completionByDate) state.completionByDate = {};
-        if (!Array.isArray(state.completionTimestamps)) state.completionTimestamps = [];
-        if (snap.tab) state.tab = snap.tab;
-        if (typeof save === "function") save({ immediate: true });
-        if (typeof renderAll === "function") renderAll();
-        return true;
-      },
-      applyTaskCompletion,
-      removeTaskCompletion,
-      getRemainingDatesInCycleFrom,
-      getCalendarDatesInCycleRange,
-      getWeeklyCycleBoundsForMoment,
-      getEndgameCycleBoundsForMoment,
-      getTaskPeriodDateStr,
-      getTasksAvailableOnDate,
-      isWeeklyAvailableOnDate,
-      isWeeklyAvailableOnCalendarDate,
-      isEndgameAvailableOnCalendarDate,
-      isCompletedInCycleForDate,
-      isWeeklyCompletedInCurrentCycle,
-      isEndgameCompletedInCurrentCycle,
-      getGame,
-      getAllGames,
-      cleanupCycleBoundaryBleedMarks,
-      processResets,
-      scanDataConflicts,
-      getDateStr,
-      getSimulatedNow,
-      getPeriodDateStrForReset,
-      getCycleMembershipMoment,
-      toggleWeekly,
-      toggleEndgame,
-      completeEndgameWithCurrency,
-      recordCompletion,
-      unrecordCompletion,
-    };
+    // Games banners switch home↔games crop at the hamburger breakpoint.
+    try {
+      const gamesBannerMq = window.matchMedia("(max-width: 768px)");
+      const onGamesBannerModeChange = () => {
+        if (state.tab === "games") renderActiveTab();
+      };
+      if (gamesBannerMq.addEventListener) gamesBannerMq.addEventListener("change", onGamesBannerModeChange);
+      else if (gamesBannerMq.addListener) gamesBannerMq.addListener(onGamesBannerModeChange);
+    } catch (_) {}
+
+    renderAll();
+
+    // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
+    if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {
+      window.__gachaLiveProbe = {
+        ready: true,
+        getStateSnapshot() {
+          return JSON.parse(
+            JSON.stringify({
+              games: state.games,
+              completionByDate: state.completionByDate,
+              completionTimestamps: state.completionTimestamps,
+              dailiesCompleted: state.dailiesCompleted,
+              weekliesCompleted: state.weekliesCompleted,
+              endgameCompleted: state.endgameCompleted,
+              dailiesAttempted: state.dailiesAttempted,
+              weekliesAttempted: state.weekliesAttempted,
+              endgameAttempted: state.endgameAttempted,
+              lastProcessedResets: state.lastProcessedResets,
+              endgameCurrencyEarned: state.endgameCurrencyEarned,
+              endgameCurrencyPotential: state.endgameCurrencyPotential,
+              endgameCompletionDates: state.endgameCompletionDates,
+              simulatedDateOffset: state.simulatedDateOffset || 0,
+              simulatedHourOffset: state.simulatedHourOffset || 0,
+              tab: state.tab,
+            })
+          );
+        },
+        loadStateSnapshot(snap) {
+          if (!snap || typeof snap !== "object") return false;
+          [
+            "games",
+            "completionByDate",
+            "completionTimestamps",
+            "dailiesCompleted",
+            "weekliesCompleted",
+            "endgameCompleted",
+            "dailiesAttempted",
+            "weekliesAttempted",
+            "endgameAttempted",
+            "lastProcessedResets",
+            "endgameCurrencyEarned",
+            "endgameCurrencyPotential",
+            "endgameCompletionDates",
+          ].forEach((k) => {
+            if (snap[k] !== undefined) state[k] = snap[k];
+          });
+          state.simulatedDateOffset = snap.simulatedDateOffset || 0;
+          state.simulatedHourOffset = snap.simulatedHourOffset || 0;
+          if (!state.lastProcessedResets || typeof state.lastProcessedResets !== "object") {
+            state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
+          } else {
+            if (!state.lastProcessedResets.dailies) state.lastProcessedResets.dailies = {};
+            if (!state.lastProcessedResets.weeklies) state.lastProcessedResets.weeklies = {};
+            if (!state.lastProcessedResets.endgame) state.lastProcessedResets.endgame = {};
+          }
+          if (!state.completionByDate) state.completionByDate = {};
+          if (!Array.isArray(state.completionTimestamps)) state.completionTimestamps = [];
+          if (snap.tab) state.tab = snap.tab;
+          if (typeof save === "function") save({ immediate: true });
+          if (typeof renderAll === "function") renderAll();
+          return true;
+        },
+        applyTaskCompletion,
+        removeTaskCompletion,
+        getRemainingDatesInCycleFrom,
+        getCalendarDatesInCycleRange,
+        getWeeklyCycleBoundsForMoment,
+        getEndgameCycleBoundsForMoment,
+        getTaskPeriodDateStr,
+        getTasksAvailableOnDate,
+        isWeeklyAvailableOnDate,
+        isWeeklyAvailableOnCalendarDate,
+        isEndgameAvailableOnCalendarDate,
+        isCompletedInCycleForDate,
+        isWeeklyCompletedInCurrentCycle,
+        isEndgameCompletedInCurrentCycle,
+        getGame,
+        getAllGames,
+        cleanupCycleBoundaryBleedMarks,
+        processResets,
+        scanDataConflicts,
+        getDateStr,
+        getSimulatedNow,
+        getPeriodDateStrForReset,
+        getCycleMembershipMoment,
+        toggleWeekly,
+        toggleEndgame,
+        completeEndgameWithCurrency,
+        recordCompletion,
+        unrecordCompletion,
+      };
+    }
   }
+
+  function bootApp() {
+    const finish = () => {
+      try {
+        startApp();
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    if (typeof initPersistentStorage === "function") {
+      initPersistentStorage().then(finish).catch(() => {
+        try { load(); } catch (_) {}
+        finish();
+      });
+    } else {
+      load();
+      finish();
+    }
+  }
+
+  bootApp();
 })();
 
 /**

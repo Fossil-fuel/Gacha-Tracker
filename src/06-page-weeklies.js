@@ -1,4 +1,4 @@
-  function buildWeeklyTaskItem(game, task, tagName) {
+  function buildWeeklyTaskItem(game, task, tagName, opts) {
     const key = game.id + "." + (task.id || task.label);
     const now = getSimulatedNow();
     const ended = isTaskCycleEnded(task, now, game);
@@ -7,17 +7,30 @@
     const el = document.createElement(tagName || "li");
     el.className = "task-item" + (doneToday ? " done" : "") + (ended ? " task-item-ended" : "") + (locked ? " task-item-locked" : "");
 
+    appendTaskCardMedia(el, task, game, opts);
+    const body = appendTaskCardBody(el);
+
     const top = document.createElement("div");
-    top.className = "task-top";
+    top.className = "task-top task-card-title-row";
+    const titleCol = document.createElement("div");
+    titleCol.className = "task-game-heading-text";
     const span = document.createElement("span");
     span.className = "task-label";
     span.textContent = task.label || "Weekly";
     const potSpan = document.createElement("span");
     potSpan.className = "task-potential";
     potSpan.textContent = "Potential: " + getWeeklyPotential(task);
-    top.appendChild(span);
-    top.appendChild(potSpan);
-    el.appendChild(top);
+    titleCol.appendChild(span);
+    titleCol.appendChild(potSpan);
+    top.appendChild(titleCol);
+    body.appendChild(top);
+
+    const remainingText = ended ? "Ended" : getWeeklyTimeRemainingText(task, now, game);
+    const statusText = ended ? "Ended" : (doneToday ? "Complete" : (locked ? "Locked" : "Incomplete"));
+    const snippet = document.createElement("p");
+    snippet.className = "task-card-snippet";
+    snippet.textContent = statusText + " · " + remainingText;
+    body.appendChild(snippet);
 
     const sub = document.createElement("div");
     sub.className = "task-subrows";
@@ -40,7 +53,7 @@
     check.addEventListener("click", () => toggleWeekly(game.id, task.id || task.label));
     const label1 = document.createElement("span");
     label1.id = statusId;
-    label1.innerHTML = "<strong>Completion Status:</strong> " + (ended ? "Ended" : (doneToday ? "Complete" : (locked ? ("Locked — " + unlockHint) : "Incomplete")));
+    label1.innerHTML = "<strong>Status:</strong> " + (ended ? "Ended" : (doneToday ? "Complete" : (locked ? ("Locked — " + unlockHint) : "Incomplete")));
     if (!ended && !locked) span.addEventListener("click", () => toggleWeekly(game.id, task.id || task.label));
     left1.appendChild(check);
     left1.appendChild(label1);
@@ -60,28 +73,33 @@
     remainingVal.dataset.type = "weekly";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
-    remainingVal.textContent = ended ? "Ended" : getWeeklyTimeRemainingText(task, now, game);
+    remainingVal.textContent = remainingText;
     remainingRow.appendChild(remainingVal);
     sub.appendChild(remainingRow);
 
-    el.appendChild(sub);
+    body.appendChild(sub);
     return el;
   }
 
-  function appendWeeklyTasksForGame(container, game, tagName, endedOnly) {
+  function collectWeeklyBoardEntries() {
     const now = getSimulatedNow();
-    const tasks = (game.weeklies || []).filter((task) => isTaskCycleEnded(task, now, game) === !!endedOnly);
-    tasks.forEach((task) => {
-      const item = buildWeeklyTaskItem(game, task, tagName);
-      if (tagName === "div") {
-        const gameLabel = document.createElement("div");
-        gameLabel.className = "task-grid-game-label";
-        gameLabel.textContent = game.name;
-        item.insertBefore(gameLabel, item.firstChild);
-      }
-      container.appendChild(item);
+    const todayStr = getDateStr();
+    const entries = [];
+    getAllGames().forEach((game, gameIdx) => {
+      (game.weeklies || []).forEach((task, taskIdx) => {
+        if (isTaskCycleEnded(task, now, game)) return;
+        const key = game.id + "." + (task.id || task.label);
+        entries.push({
+          game,
+          task,
+          completed: isWeeklyCompletedInCurrentCycle(key, todayStr),
+          dueMs: now.getTime() + getWeeklyTimeRemainingMs(task, now, game),
+          gameOrder: gameIdx,
+          taskOrder: taskIdx,
+        });
+      });
     });
-    return tasks.length;
+    return sortBoardTaskEntries(entries);
   }
 
   function renderWeeklies() {
@@ -89,7 +107,7 @@
     if (!content) return;
     content.innerHTML = "";
     const games = getAllGames();
-    const isGrid = state.weekliesView === "grid";
+    const entries = collectWeeklyBoardEntries();
 
     if (games.length === 0) {
       const p = document.createElement("p");
@@ -99,83 +117,21 @@
       return;
     }
 
-    if (isGrid) {
-      const list = document.createElement("div");
-      list.id = "list-weeklies";
-      list.className = "task-grid";
-      list.setAttribute("data-type", "weeklies");
-      let hasAny = false;
-      games.forEach((game) => {
-        hasAny = appendWeeklyTasksForGame(list, game, "div", false) > 0 || hasAny;
-      });
-      if (!hasAny) {
-        const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.style.gridColumn = "1 / -1";
-        empty.textContent = "No active weekly tasks. Add tasks in the Games tab.";
-        list.appendChild(empty);
-      }
-      content.appendChild(list);
-      const endedGrid = document.createElement("div");
-      endedGrid.className = "task-grid task-grid-ended";
-      let hasEnded = false;
-      games.forEach((game) => {
-        hasEnded = appendWeeklyTasksForGame(endedGrid, game, "div", true) > 0 || hasEnded;
-      });
-      if (hasEnded) {
-        const endedHeading = document.createElement("h3");
-        endedHeading.className = "games-cycle-ended-section-label";
-        endedHeading.textContent = "Ended";
-        content.appendChild(endedHeading);
-        content.appendChild(endedGrid);
-      }
-    } else {
-      let hasAny = false;
-      const container = document.createElement("div");
-      container.id = "list-weeklies";
-      container.className = "game-sections-container";
-      container.setAttribute("data-type", "weeklies");
-      games.forEach((game) => {
-        const now = getSimulatedNow();
-        const activeTasks = (game.weeklies || []).filter((t) => !isTaskCycleEnded(t, now, game));
-        const endedTasks = (game.weeklies || []).filter((t) => isTaskCycleEnded(t, now, game));
-        if (activeTasks.length === 0 && endedTasks.length === 0) return;
-        hasAny = true;
-        const section = document.createElement("div");
-        section.className = "game-section";
-        const heading = document.createElement("h3");
-        heading.className = "game-section-title";
-        heading.textContent = game.name;
-        section.appendChild(heading);
-        if (activeTasks.length > 0) {
-          const ul = document.createElement("ul");
-          ul.className = "task-list";
-          activeTasks.forEach((task) => {
-            ul.appendChild(buildWeeklyTaskItem(game, task, "li"));
-          });
-          section.appendChild(ul);
-        }
-        if (endedTasks.length > 0) {
-          const endedLabel = document.createElement("p");
-          endedLabel.className = "games-cycle-ended-section-label";
-          endedLabel.textContent = "Ended";
-          section.appendChild(endedLabel);
-          const endedUl = document.createElement("ul");
-          endedUl.className = "task-list task-list-ended";
-          endedTasks.forEach((task) => {
-            endedUl.appendChild(buildWeeklyTaskItem(game, task, "li"));
-          });
-          section.appendChild(endedUl);
-        }
-        container.appendChild(section);
-      });
-      if (!hasAny) {
-        const p = document.createElement("p");
-        p.className = "empty-state";
-        p.textContent = "No tasks yet. Add tasks in the Games tab.";
-        container.appendChild(p);
-      }
-      content.appendChild(container);
+    if (entries.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty-state";
+      p.textContent = "No active weekly tasks. Add tasks in the Games tab.";
+      content.appendChild(p);
+      return;
     }
-  }
 
+    const list = document.createElement("div");
+    list.id = "list-weeklies";
+    list.className = "task-grid task-grid-knot";
+    list.setAttribute("data-type", "weeklies");
+    entries.forEach((entry) => {
+      list.appendChild(buildWeeklyTaskItem(entry.game, entry.task, "div"));
+    });
+    content.appendChild(list);
+    scheduleTaskMasonry(list);
+  }

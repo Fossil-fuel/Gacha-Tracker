@@ -5,9 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Gacha Tracker</title>
   <meta name="description" content="Track completion and currency earned through checklists and manual inputs." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="styles-mobile.css" />
 </head>
@@ -143,16 +140,8 @@
 
         <section id="panel-dailies" class="panel" role="tabpanel" hidden>
           <div class="panel-header">
-            <div class="panel-header-row">
-              <div>
-                <h2>Daily Tasks</h2>
-                <p class="panel-desc">Just your daily homework assignment. Be careful, we take attendance here, and its GRADED!</p>
-              </div>
-              <div class="panel-format-toggle" id="format-toggle-dailies" role="group" aria-label="View format">
-                <button type="button" class="format-btn format-btn-list active" data-panel="dailies" data-format="list" aria-label="List view" title="List"></button>
-                <button type="button" class="format-btn format-btn-grid" data-panel="dailies" data-format="grid" aria-label="Grid view" title="Grid"></button>
-              </div>
-            </div>
+            <h2>Daily Tasks</h2>
+            <p class="panel-desc">Just your daily homework assignment. Be careful, we take attendance here, and its GRADED!</p>
             <div class="panel-separator"></div>
           </div>
           <div id="dailies-content"></div>
@@ -160,16 +149,8 @@
 
         <section id="panel-weeklies" class="panel" role="tabpanel" hidden>
           <div class="panel-header">
-            <div class="panel-header-row">
-              <div>
-                <h2>Weekly Tasks</h2>
-                <p class="panel-desc">Once a week is not too bleak. This also counts for attendance, so keep up to prevent a week (weak) grade.</p>
-              </div>
-              <div class="panel-format-toggle" id="format-toggle-weeklies" role="group" aria-label="View format">
-                <button type="button" class="format-btn format-btn-list active" data-panel="weeklies" data-format="list" aria-label="List view" title="List"></button>
-                <button type="button" class="format-btn format-btn-grid" data-panel="weeklies" data-format="grid" aria-label="Grid view" title="Grid"></button>
-              </div>
-            </div>
+            <h2>Weekly Tasks</h2>
+            <p class="panel-desc">Once a week is not too bleak. This also counts for attendance, so keep up to prevent a week (weak) grade.</p>
             <div class="panel-separator"></div>
           </div>
           <div id="weeklies-content"></div>
@@ -177,16 +158,8 @@
 
         <section id="panel-endgame" class="panel" role="tabpanel" hidden>
           <div class="panel-header">
-            <div class="panel-header-row">
-              <div>
-                <h2>Endgame Content</h2>
-                <p class="panel-desc">A large burst of currency is from these tasks. Don't worry if you're not able to complete them, it's not the END, we take partial credit!</p>
-              </div>
-              <div class="panel-format-toggle" id="format-toggle-endgame" role="group" aria-label="View format">
-                <button type="button" class="format-btn format-btn-list active" data-panel="endgame" data-format="list" aria-label="List view" title="List"></button>
-                <button type="button" class="format-btn format-btn-grid" data-panel="endgame" data-format="grid" aria-label="Grid view" title="Grid"></button>
-              </div>
-            </div>
+            <h2>Endgame Content</h2>
+            <p class="panel-desc">A large burst of currency is from these tasks. Don't worry if you're not able to complete them, it's not the END, we take partial credit!</p>
             <div class="panel-separator"></div>
           </div>
           <div id="endgame-content"></div>
@@ -202,11 +175,7 @@
         </section>
 
         <section id="panel-extracurricular" class="panel" role="tabpanel" hidden>
-          <div class="panel-header panel-header-extracurricular">
-            <div class="panel-format-toggle panel-format-toggle-float" id="format-toggle-extracurricular" role="group" aria-label="View format">
-              <button type="button" class="format-btn format-btn-list active" data-panel="extracurricular" data-format="list" aria-label="List view" title="List"></button>
-              <button type="button" class="format-btn format-btn-grid" data-panel="extracurricular" data-format="grid" aria-label="Grid view" title="Grid"></button>
-            </div>
+          <div class="panel-header">
             <h2>Extracurricular</h2>
             <p class="panel-desc">So all the homework wasn't enough, huh? Here is more work for you! Nothing in this page is automatic, you can enter it all yourself! Its mainly here for manual tracking of Events, Story, and other remainders you want to keep track off.</p>
             <div class="panel-separator"></div>
@@ -273,6 +242,67 @@
             <input id="taskNameInput" type="text" placeholder="Task Name" autocomplete="off" />
           </div>
 
+          <div class="task-menu-cell span-7 task-banner-cell">
+            <label class="task-banner-label">Card banners</label>
+            <div class="task-banner-targets" role="tablist" aria-label="Banner surfaces">
+              <button type="button" class="task-banner-target-btn active" data-banner-target="home" aria-pressed="true">
+                <span class="task-banner-target-card" aria-hidden="true">
+                  <span class="task-banner-target-media task-banner-target-media-home"></span>
+                  <span class="task-banner-target-body">
+                    <span class="task-banner-target-line"></span>
+                    <span class="task-banner-target-line task-banner-target-line-short"></span>
+                  </span>
+                </span>
+                <span class="task-banner-target-label">Home</span>
+              </button>
+              <button type="button" class="task-banner-target-btn" data-banner-target="games" aria-pressed="false">
+                <span class="task-banner-target-card task-banner-target-card-games" aria-hidden="true">
+                  <span class="task-banner-target-media task-banner-target-media-games"></span>
+                  <span class="task-banner-target-body">
+                    <span class="task-banner-target-line"></span>
+                    <span class="task-banner-target-line task-banner-target-line-short"></span>
+                    <span class="task-banner-target-line task-banner-target-line-short"></span>
+                  </span>
+                </span>
+                <span class="task-banner-target-label">Games</span>
+              </button>
+              <button type="button" class="task-banner-target-btn" data-banner-target="board" aria-pressed="false">
+                <span class="task-banner-target-card task-banner-target-card-board" aria-hidden="true">
+                  <span class="task-banner-target-media task-banner-target-media-board"></span>
+                  <span class="task-banner-target-body">
+                    <span class="task-banner-target-line"></span>
+                    <span class="task-banner-target-line task-banner-target-line-short"></span>
+                  </span>
+                </span>
+                <span class="task-banner-target-label">Board</span>
+              </button>
+            </div>
+            <div class="task-banner-crop-toolbar">
+              <button type="button" class="btn btn-ghost btn-sm" id="taskBannerChooseBtn">Choose image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="taskBannerClearBtn" hidden>Clear</button>
+              <input type="file" id="taskBannerFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
+            </div>
+            <div id="taskBannerCropWrap" class="task-banner-crop-wrap" aria-label="Banner image editor">
+              <canvas id="taskBannerCropCanvas" class="task-banner-crop-canvas" width="640" height="360"></canvas>
+              <div id="taskBannerImageFrame" class="task-banner-image-frame" hidden aria-hidden="true">
+                <span class="task-banner-crop-handle" data-handle="nw" data-frame="img"></span>
+                <span class="task-banner-crop-handle" data-handle="ne" data-frame="img"></span>
+                <span class="task-banner-crop-handle" data-handle="sw" data-frame="img"></span>
+                <span class="task-banner-crop-handle" data-handle="se" data-frame="img"></span>
+              </div>
+              <div id="taskBannerCropFrame" class="task-banner-crop-frame" hidden aria-hidden="true">
+                <span class="task-banner-crop-handle" data-handle="nw" data-frame="crop"></span>
+                <span class="task-banner-crop-handle" data-handle="ne" data-frame="crop"></span>
+                <span class="task-banner-crop-handle" data-handle="sw" data-frame="crop"></span>
+                <span class="task-banner-crop-handle" data-handle="se" data-frame="crop"></span>
+              </div>
+            </div>
+            <div id="taskBannerPreviewWrap" class="task-banner-preview-wrap" hidden>
+              <span class="task-banner-preview-label">Preview</span>
+              <div id="taskBannerCardPreview" class="task-banner-card-preview"></div>
+            </div>
+          </div>
+
           <!-- Row 2: Sun-Sat -->
           <div class="task-menu-cell day-cell" data-day="0">Sun</div>
           <div class="task-menu-cell day-cell" data-day="1">Mon</div>
@@ -293,10 +323,10 @@
           <div class="task-menu-cell span-2 task-menu-label">Cycle end time</div>
           <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-desc">
             <input id="taskCycleEndTime" type="time" step="60" aria-label="Cycle end time" />
-            <label class="task-menu-checkbox-label" for="taskCycleEndTimeSameAsBegin">
-              <input id="taskCycleEndTimeSameAsBegin" type="checkbox" checked />
-              <span>Same as cycle begin (reset) time</span>
-            </label>
+            <div class="form-row-toggle task-menu-toggle-row">
+              <label class="settings-label" for="taskCycleEndTimeSameAsBegin">Same as cycle begin (reset) time</label>
+              <input type="checkbox" id="taskCycleEndTimeSameAsBegin" class="settings-toggle" checked aria-label="Same as cycle begin (reset) time" />
+            </div>
           </div>
 
           <!-- Row 3b: DST toggle -->
@@ -495,6 +525,74 @@
           <label for="extracurricularTaskCurrency">Currency (optional, for Data tab)</label>
           <input id="extracurricularTaskCurrency" type="number" min="0" placeholder="0" />
         </div>
+        <div class="form-row extracurricular-banner-row">
+          <div class="task-banner-cell extracurricular-banner-cell">
+            <label class="task-banner-label">Card banners</label>
+            <div class="task-banner-targets" role="tablist" aria-label="Banner surfaces">
+              <button type="button" class="task-banner-target-btn active" data-banner-target="home" aria-pressed="true">
+                <span class="task-banner-target-card" aria-hidden="true">
+                  <span class="task-banner-target-media task-banner-target-media-home"></span>
+                  <span class="task-banner-target-body">
+                    <span class="task-banner-target-line"></span>
+                    <span class="task-banner-target-line task-banner-target-line-short"></span>
+                  </span>
+                </span>
+                <span class="task-banner-target-label">Home</span>
+              </button>
+              <button type="button" class="task-banner-target-btn" data-banner-target="games" aria-pressed="false">
+                <span class="task-banner-target-card task-banner-target-card-games" aria-hidden="true">
+                  <span class="task-banner-target-media task-banner-target-media-games"></span>
+                  <span class="task-banner-target-body">
+                    <span class="task-banner-target-line"></span>
+                    <span class="task-banner-target-line task-banner-target-line-short"></span>
+                    <span class="task-banner-target-line task-banner-target-line-short"></span>
+                  </span>
+                </span>
+                <span class="task-banner-target-label">Games</span>
+              </button>
+              <button type="button" class="task-banner-target-btn" data-banner-target="board" aria-pressed="false">
+                <span class="task-banner-target-card task-banner-target-card-board" aria-hidden="true">
+                  <span class="task-banner-target-media task-banner-target-media-board"></span>
+                  <span class="task-banner-target-body">
+                    <span class="task-banner-target-line"></span>
+                    <span class="task-banner-target-line task-banner-target-line-short"></span>
+                  </span>
+                </span>
+                <span class="task-banner-target-label">Board</span>
+              </button>
+            </div>
+            <div class="task-banner-crop-toolbar">
+              <button type="button" class="btn btn-ghost btn-sm" id="extraBannerChooseBtn">Choose image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="extraBannerClearBtn" hidden>Clear</button>
+              <input type="file" id="extraBannerFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
+            </div>
+            <div id="extraBannerCropWrap" class="task-banner-crop-wrap" aria-label="Banner image editor">
+              <canvas id="extraBannerCropCanvas" class="task-banner-crop-canvas" width="640" height="360"></canvas>
+              <div id="extraBannerImageFrame" class="task-banner-image-frame" hidden aria-hidden="true">
+                <span class="task-banner-crop-handle" data-handle="nw" data-frame="img"></span>
+                <span class="task-banner-crop-handle" data-handle="ne" data-frame="img"></span>
+                <span class="task-banner-crop-handle" data-handle="sw" data-frame="img"></span>
+                <span class="task-banner-crop-handle" data-handle="se" data-frame="img"></span>
+              </div>
+              <div id="extraBannerCropFrame" class="task-banner-crop-frame" hidden aria-hidden="true">
+                <span class="task-banner-crop-handle" data-handle="nw" data-frame="crop"></span>
+                <span class="task-banner-crop-handle" data-handle="ne" data-frame="crop"></span>
+                <span class="task-banner-crop-handle" data-handle="sw" data-frame="crop"></span>
+                <span class="task-banner-crop-handle" data-handle="se" data-frame="crop"></span>
+              </div>
+            </div>
+            <div id="extraBannerPreviewWrap" class="task-banner-preview-wrap" hidden>
+              <span class="task-banner-preview-label">Preview</span>
+              <div id="extraBannerCardPreview" class="task-banner-card-preview"></div>
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label class="task-menu-checkbox-label">
+            <input type="checkbox" id="extracurricularTaskExcludeFromData" />
+            <span>Exclude from Data page</span>
+          </label>
+        </div>
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="extracurricularTaskModalCancel">Cancel</button>
@@ -564,6 +662,59 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="gameModalCancel">Cancel</button>
           <button type="submit" class="btn btn-add" id="gameModalCreate">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Game identity (icon / name / subtitle) edit modal -->
+  <div id="gameIdentityModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="gameIdentityModalTitle">
+      <div class="modal-header">
+        <h3 id="gameIdentityModalTitle" class="modal-title">Edit game banner</h3>
+        <button type="button" class="icon-btn" id="gameIdentityModalClose" aria-label="Close">×</button>
+      </div>
+      <form id="gameIdentityForm" class="modal-form">
+        <div class="modal-body">
+          <div class="form-row">
+            <label for="gameIdentityName">Game name</label>
+            <input id="gameIdentityName" type="text" placeholder="Game name" autocomplete="off" required />
+          </div>
+          <div class="form-row">
+            <label for="gameIdentitySubtitle">Subtitle</label>
+            <input id="gameIdentitySubtitle" type="text" placeholder="e.g. HoYoverse" autocomplete="off" />
+            <span class="settings-hint">Shown under the name on Games and list headers.</span>
+          </div>
+          <div class="form-row">
+            <label>Icon image</label>
+            <div class="game-icon-crop-toolbar">
+              <button type="button" class="btn btn-ghost btn-sm" id="gameIdentityChooseIconBtn">Choose image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="gameIdentityClearIconBtn">Clear</button>
+              <input type="file" id="gameIdentityIconFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
+            </div>
+            <div id="gameIdentityCropWrap" class="game-icon-crop-wrap" aria-label="Crop icon">
+              <canvas id="gameIdentityCropCanvas" class="game-icon-crop-canvas" width="280" height="280"></canvas>
+              <div id="gameIdentityCropFrame" class="game-icon-crop-frame" aria-hidden="true"></div>
+              <p id="gameIdentityCropEmpty" class="game-icon-crop-empty">Choose an image, then drag to reposition and use zoom to frame the icon.</p>
+            </div>
+            <div class="game-icon-crop-controls">
+              <label class="game-icon-zoom-label" for="gameIdentityZoom">Zoom
+                <input id="gameIdentityZoom" type="range" min="1" max="3" step="0.02" value="1" />
+              </label>
+              <div class="game-icon-shape-row" role="group" aria-label="Icon border shape">
+                <span class="game-icon-shape-label">Border</span>
+                <button type="button" class="btn btn-ghost btn-sm game-icon-shape-btn" data-shape="rounded" aria-pressed="true">Rounded</button>
+                <button type="button" class="btn btn-ghost btn-sm game-icon-shape-btn" data-shape="circle" aria-pressed="false">Circle</button>
+                <button type="button" class="btn btn-ghost btn-sm game-icon-shape-btn" data-shape="square" aria-pressed="false">Square</button>
+              </div>
+            </div>
+            <div id="gameIdentityLivePreview" class="game-identity-live-preview" aria-live="polite"></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="gameIdentityModalCancel">Cancel</button>
+          <button type="submit" class="btn btn-add" id="gameIdentityModalSave">Save</button>
         </div>
       </form>
     </div>
@@ -652,6 +803,21 @@
       </div>
       <div class="settings-body">
         <nav class="settings-sidebar" aria-label="Settings sections">
+          <div class="settings-section-dropdown" id="settingsSectionDropdown">
+            <button type="button" class="settings-section-dropdown-trigger" id="settingsSectionTrigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="settingsSectionMenu">
+              <span id="settingsSectionTriggerLabel">Appearance</span>
+              <span class="settings-section-dropdown-chevron" aria-hidden="true"></span>
+            </button>
+            <ul class="settings-section-dropdown-menu" id="settingsSectionMenu" role="listbox" aria-label="Settings section" hidden>
+              <li role="option" tabindex="-1" data-settings-section="account" aria-selected="false">Account</li>
+              <li role="option" tabindex="-1" data-settings-section="appearance" aria-selected="true">Appearance</li>
+              <li role="option" tabindex="-1" data-settings-section="time" aria-selected="false">Time</li>
+              <li role="option" tabindex="-1" data-settings-section="data" aria-selected="false">Data</li>
+              <li role="option" tabindex="-1" data-settings-section="debug" aria-selected="false">Debug</li>
+              <li role="option" tabindex="-1" data-settings-section="display" aria-selected="false">Display</li>
+              <li role="option" tabindex="-1" data-settings-section="behavior" aria-selected="false">Behavior</li>
+            </ul>
+          </div>
           <button type="button" class="settings-nav-item" data-settings-section="account">Account</button>
           <button type="button" class="settings-nav-item active" data-settings-section="appearance" aria-current="page">Appearance</button>
           <button type="button" class="settings-nav-item" data-settings-section="time">Time</button>

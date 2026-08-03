@@ -8,6 +8,15 @@
     state.dataExcludeInProgress[gameId] = value;
   }
 
+  function getDataHideDates(gameId) {
+    return !!(state.dataHideDates && state.dataHideDates[gameId]);
+  }
+
+  function setDataHideDates(gameId, value) {
+    if (!state.dataHideDates) state.dataHideDates = {};
+    state.dataHideDates[gameId] = !!value;
+  }
+
   function getDataPieInclude(gameId, category) {
     const g = state.dataPieInclude && state.dataPieInclude[gameId];
     return g && g[category] !== undefined ? g[category] : true;
@@ -30,6 +39,7 @@
       state.dateFormat,
       JSON.stringify(state.dataPieInclude[game.id] || {}),
       getDataExcludeInProgress(game.id) ? "1" : "0",
+      getDataHideDates(game.id) ? "1" : "0",
     ].join("|");
   }
 
@@ -70,6 +80,30 @@
     exclToggle.appendChild(exclText);
     exclToggleWrap.appendChild(exclToggle);
     container.appendChild(exclToggleWrap);
+
+    const hideDatesWrap = document.createElement("div");
+    hideDatesWrap.className = "data-excl-toggle-wrap";
+    const hideDatesToggle = document.createElement("label");
+    hideDatesToggle.className = "data-excl-toggle";
+    const hideDatesCheck = document.createElement("input");
+    hideDatesCheck.type = "checkbox";
+    hideDatesCheck.checked = getDataHideDates(game.id);
+    hideDatesCheck.setAttribute("aria-label", "Hide dates");
+    hideDatesCheck.addEventListener("change", () => {
+      setDataHideDates(game.id, hideDatesCheck.checked);
+      save();
+      renderActiveTab();
+    });
+    hideDatesToggle.appendChild(hideDatesCheck);
+    const hideDatesText = document.createElement("span");
+    hideDatesText.className = "data-excl-text";
+    hideDatesText.textContent = "Hide dates";
+    hideDatesToggle.appendChild(hideDatesText);
+    hideDatesWrap.appendChild(hideDatesToggle);
+    container.appendChild(hideDatesWrap);
+
+    const hideDates = getDataHideDates(game.id);
+    const sinceLabel = (type, key) => (hideDates ? null : formatCountingSinceLabel(game, type, key));
 
     const ep = getGameEarnedAndPotential(game);
     const cpp = Math.max(0, Number(game.currencyPerPull) || 0);
@@ -205,7 +239,7 @@
     const dCompleted = dCa.completed;
     const dAttempted = dCa.attempted;
     const dTotal = game.dailies ? (dAttempted > 0 ? dAttempted : Math.max(dCompleted, 1)) : 0;
-    const weeklies = game.weeklies || [];
+    const weeklies = (game.weeklies || []).filter((t) => !isTaskHiddenInData(t));
     let wCompleted = 0, wAttempted = 0;
     weeklies.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
@@ -214,7 +248,7 @@
       wAttempted += ca.attempted;
     });
     const wTotal = wAttempted > 0 ? wAttempted : Math.max(wCompleted, weeklies.length || 1);
-    const endgame = game.endgame || [];
+    const endgame = (game.endgame || []).filter((t) => !isTaskHiddenInData(t));
     let eCompleted = 0, eAttempted = 0;
     endgame.forEach((t) => {
       const key = game.id + "." + (t.id || t.label);
@@ -234,7 +268,7 @@
       dCompleted,
       dTotal,
       false,
-      game.dailies ? formatCountingSinceLabel(game, "dailies", game.id) : null
+      game.dailies ? sinceLabel("dailies", game.id) : null
     ));
     overallPies.appendChild(createCompletionPieBox("Weeklies", wCompleted, wTotal, false));
     overallPies.appendChild(createCompletionPieBox("Endgame", eCompleted, eTotal, true));
@@ -255,7 +289,7 @@
         const ca = getCalendarCompletedAttempted(game, "weeklies", key, includeInProgress);
         const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
         const taskLabel = (task.label || "Weekly") + (isTaskCycleEnded(task, getSimulatedNow(), game) ? " (Ended)" : "");
-        wPies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, false, formatCountingSinceLabel(game, "weeklies", key)));
+        wPies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, false, sinceLabel("weeklies", key)));
       });
       weekliesSection.appendChild(wPies);
       container.appendChild(weekliesSection);
@@ -275,7 +309,7 @@
         const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
         const total = ca.attempted > 0 ? ca.attempted : Math.max(ca.completed, 1);
         const taskLabel = (task.label || "Endgame") + (isTaskCycleEnded(task, getSimulatedNow(), game) ? " (Ended)" : "");
-        ePies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, true, formatCountingSinceLabel(game, "endgame", key)));
+        ePies.appendChild(createCompletionPieBox(taskLabel, ca.completed, total, true, sinceLabel("endgame", key)));
       });
       endgameSection.appendChild(ePies);
       container.appendChild(endgameSection);
@@ -293,14 +327,25 @@
         const ca = getCalendarCompletedAttempted(game, "endgame", key, includeInProgress);
         const earned = getEndgameEarnedCompletedCyclesOnly(game.id, task.id || task.label, ca.completed);
         const potential = getEndgamePotentialSum(game.id, task.id || task.label, task, ca.attempted);
-        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, potential, formatCountingSinceLabel(game, "endgame", key)));
+        currencyPies.appendChild(createEndgameCurrencyPieBox(task, earned, potential, sinceLabel("endgame", key)));
       });
       currencySection.appendChild(currencyPies);
       container.appendChild(currencySection);
     }
 
-    const exTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === game.id);
-    if (exTasks.length > 0) {
+    const exTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === game.id && !isTaskHiddenInData(t));
+    const exPieTasks = [];
+    exTasks.forEach((task) => {
+      const pot = Math.max(0, Number(task.currency) || 0);
+      let earned = 0;
+      if (state.extracurricularCompleted[task.id]) {
+        const rec = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[task.id];
+        earned = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
+      }
+      if (earned <= 0) return;
+      exPieTasks.push({ task, earned, pot });
+    });
+    if (exPieTasks.length > 0) {
       const exSection = document.createElement("div");
       exSection.className = "data-pie-section";
       const exh = document.createElement("h4");
@@ -309,14 +354,8 @@
       exSection.appendChild(exh);
       const exPies = document.createElement("div");
       exPies.className = "pie-row";
-      exTasks.forEach((task) => {
-        const pot = Math.max(0, Number(task.currency) || 0);
-        let earned = 0;
-        if (state.extracurricularCompleted[task.id]) {
-          const rec = state.extracurricularCurrencyEarned && state.extracurricularCurrencyEarned[task.id];
-          earned = rec !== undefined && rec !== null ? Math.max(0, Number(rec) || 0) : pot;
-        }
-        exPies.appendChild(createExtracurricularCurrencyPieBox(task, earned, pot));
+      exPieTasks.forEach(({ task, earned, pot }) => {
+        exPies.appendChild(createExtracurricularCurrencyPieBox(task, earned, pot, { hideDates }));
       });
       exSection.appendChild(exPies);
       container.appendChild(exSection);
