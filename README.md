@@ -3,7 +3,7 @@ A manual tracker for gacha games, built to help you manage daily, weekly, and en
 
 **Website:** [Gacha Tracker](https://fossil-fuel.github.io/Gacha-Tracker/)
 
-See [docs/TASK_FLOW.md](docs/TASK_FLOW.md) for how task attempts and completions work (attempts at cycle start, fill-remaining, unlock windows, Time Trends, repairs).
+See [docs/CORE_LOGIC.md](docs/CORE_LOGIC.md) for the product/logic contract (what the site is for and which core functions must stay correct). See [docs/TASK_FLOW.md](docs/TASK_FLOW.md) for attempt/completion flow details.
 
 **Dev:** `npm run dev` (http://localhost:4000), `node build.js` to rebuild `app.js` from `src/` + `presets/`, `npm test` for regression suites.
 

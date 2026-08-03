@@ -39,6 +39,13 @@ module.exports = {
 
     const core = read("src/01-core.js");
     [
+      "function getPeriodDateStrForReset",
+      "function getCycleMembershipMoment",
+      "function getTaskPeriodDateStr",
+      "function getCalendarDatesInCycleRange",
+      "function findCompletionDateInBounds",
+      "function cleanupCycleBoundaryBleedMarks",
+      "function getDailyPeriodDateStr",
       "function recordCompletion",
       "function unrecordCompletion",
       "function applyTaskCompletion",

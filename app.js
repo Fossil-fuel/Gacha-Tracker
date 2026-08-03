@@ -1360,12 +1360,8 @@
     return startA <= endB && startB <= endA;
   }
 
-  function endgamePeriodHasCalendarMark(key, periodStart, periodEnd) {
-    for (const dateStr of getCalendarDatesInCycleRange(periodStart, periodEnd)) {
-      const dayData = state.completionByDate[dateStr] || { endgame: [] };
-      if ((dayData.endgame || []).includes(key)) return true;
-    }
-    return false;
+  function endgamePeriodHasCalendarMark(key, periodStart, periodEnd, nextCycleStart) {
+    return periodHasCalendarMarkInRange(key, "endgame", periodStart, periodEnd, nextCycleStart) != null;
   }
 
   function getEndgameCompletionDates(gameId, taskId) {
@@ -1375,7 +1371,7 @@
 
   /** Date range for one completed endgame cycle from calendar marks (matches tally/history). */
   function getEndgamePeriodDateRangeFromCalendar(task, key, period, game) {
-    const refDate = periodHasCalendarMarkInRange(key, "endgame", period.periodStart, period.periodEnd);
+    const refDate = periodHasCalendarMarkInRange(key, "endgame", period.periodStart, period.periodEnd, period.nextCycleStart);
     if (refDate) return getEndgameCycleDatesForDate(task, refDate, game);
     return { start: getDateStr(period.periodStart), end: getDateStr(period.periodEnd) };
   }
@@ -1392,7 +1388,7 @@
     const seen = new Set();
     const result = [];
     history.forEach((period) => {
-      const refDate = periodHasCalendarMarkInRange(key, "endgame", period.periodStart, period.periodEnd);
+      const refDate = periodHasCalendarMarkInRange(key, "endgame", period.periodStart, period.periodEnd, period.nextCycleStart);
       if (!refDate) return;
       const range = getEndgameCycleDatesForDate(task, refDate, game);
       const rangeKey = range.start + "|" + range.end;
@@ -1447,24 +1443,89 @@
     renderActiveTab();
   }
 
+  /**
+   * Core: map wall-clock time to the game-day calendar date for a non-midnight reset.
+   * Before today's reset hour, the calendar day still belongs to the previous game day
+   * (e.g. Aug 3 03:59 with 4am reset → "2026-08-02"). After reset → today's dateStr.
+   * Used by dailies and weeklies/endgame when choosing which dateStr to record.
+   */
+  function getPeriodDateStrForReset(now, hour, minute, tz, offsetRefDate) {
+    const n = now instanceof Date ? now : new Date();
+    const parts = getDatePartsInTimezone(n, tz);
+    const h = Number.isFinite(hour) ? hour : getDefaultResetHour();
+    const m = Number.isFinite(minute) ? minute : 0;
+    const todayReset = createDateInTimezone(parts.year, parts.month, parts.day, h, m, tz, offsetRefDate);
+    if (n < todayReset) {
+      const todayStart = createDateInTimezone(parts.year, parts.month, parts.day, 0, 0, tz, offsetRefDate);
+      const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
+      const prevParts = getDatePartsInTimezone(yesterdayStart, tz);
+      return prevParts.year + "-" + String(prevParts.month + 1).padStart(2, "0") + "-" + String(prevParts.day).padStart(2, "0");
+    }
+    return parts.year + "-" + String(parts.month + 1).padStart(2, "0") + "-" + String(parts.day).padStart(2, "0");
+  }
+
+  /** Reset clock (tz/hour/minute) for a task or game. */
+  function getTaskResetClock(task, game, now) {
+    const n = now instanceof Date ? now : getSimulatedNow();
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const subject = task || game;
+    const tz = getTimezoneForTaskDst(subject, baseTz);
+    const hour = getResetHour(
+      task,
+      "weekStartHour",
+      getResetHour(task, "resetHour", getResetHour(game, "resetHour", getDefaultResetHour(), game, n), game, n),
+      game,
+      n
+    );
+    const minute = Number.isFinite(task && task.weekStartMinute)
+      ? task.weekStartMinute
+      : Number.isFinite(task && task.resetMinute)
+        ? task.resetMinute
+        : Number.isFinite(game && game.resetMinute)
+          ? game.resetMinute
+          : 0;
+    const offsetRef = getOffsetRefDateForTask(subject, tz);
+    return { now: n, tz, hour, minute, offsetRef };
+  }
+
+  /**
+   * Core: instant used to pick which weekly/endgame cycle "now" belongs to.
+   * Before reset on a calendar day, membership is still the prior cycle
+   * (same rule as getPeriodDateStrForReset, expressed as a Date).
+   */
+  function getCycleMembershipMoment(task, game, now) {
+    const clock = getTaskResetClock(task, game, now);
+    const parts = getDatePartsInTimezone(clock.now, clock.tz);
+    const todayReset = createDateInTimezone(
+      parts.year,
+      parts.month,
+      parts.day,
+      clock.hour,
+      clock.minute,
+      clock.tz,
+      clock.offsetRef
+    );
+    return clock.now < todayReset ? new Date(todayReset.getTime() - 1) : clock.now;
+  }
+
+  /** Game-day dateStr for dailies / weeklies / endgame at `now`. */
+  function getTaskPeriodDateStr(type, task, game, now) {
+    const n = now instanceof Date ? now : getSimulatedNow();
+    if (type === "dailies") return getDailyPeriodDateStr(game, n);
+    const clock = getTaskResetClock(task, game, n);
+    return getPeriodDateStrForReset(n, clock.hour, clock.minute, clock.tz, clock.offsetRef);
+  }
+
   /** Returns the dateStr for the daily period that contains `now`. The reset time marks the start of that day:
    * e.g. reset 3am → 2:59am March 8 is still March 7's task; 3:00am March 8 starts March 8's task. */
   function getDailyPeriodDateStr(game, now) {
     const n = now || new Date();
     const baseTz = getResetTimezoneForGame(game);
     const tz = getTimezoneForTaskDst(game, baseTz);
-    const parts = getDatePartsInTimezone(n, tz);
     const hour = getResetHour(game, "resetHour", getDefaultResetHour(), game, n);
     const minute = Number.isFinite(game && game.resetMinute) ? game.resetMinute : 0;
     const offsetRef = getOffsetRefDateForTask(game, tz);
-    const todayReset = createDateInTimezone(parts.year, parts.month, parts.day, hour, minute, tz, offsetRef);
-    if (n < todayReset) {
-      const todayStart = createDateInTimezone(parts.year, parts.month, parts.day, 0, 0, tz, offsetRef);
-      const yesterdayStart = new Date(todayStart.getTime() - 24 * 60 * 60 * 1000);
-      const prevParts = getDatePartsInTimezone(yesterdayStart, tz);
-      return prevParts.year + "-" + String(prevParts.month + 1).padStart(2, "0") + "-" + String(prevParts.day).padStart(2, "0");
-    }
-    return getDateStr(n);
+    return getPeriodDateStrForReset(n, hour, minute, tz, offsetRef);
   }
 
   function getDailyTimeRemainingMs(game, now) {
@@ -1521,10 +1582,32 @@
     return dates;
   }
 
-  function getCalendarDatesInCycleRange(cycleStart, cycleEnd) {
+  /**
+   * Calendar dates belonging to a cycle period [cycleStart, cycleEnd).
+   * Core boundary rule: when nextCycleStart equals cycleEnd (adjacent full periods), the shared
+   * boundary calendar day is assigned to the next cycle only — otherwise leftover "fill remaining
+   * days" marks on reset day make the new weekly/endgame look already complete.
+   */
+  function getCalendarDatesInCycleRange(cycleStart, cycleEnd, nextCycleStart) {
     const dates = [];
-    for (let day = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate()); day < cycleEnd; day.setDate(day.getDate() + 1)) {
-      dates.push(getDateStr(day));
+    if (!(cycleStart instanceof Date) || !(cycleEnd instanceof Date) || isNaN(cycleStart.getTime()) || isNaN(cycleEnd.getTime())) {
+      return dates;
+    }
+    const startDay = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate());
+    const endDay = new Date(cycleEnd.getFullYear(), cycleEnd.getMonth(), cycleEnd.getDate());
+    const nextMs = nextCycleStart instanceof Date ? nextCycleStart.getTime() : (Number.isFinite(nextCycleStart) ? nextCycleStart : null);
+    const shareBoundaryWithNext = nextMs != null && nextMs === cycleEnd.getTime();
+    const boundaryDateStr = shareBoundaryWithNext ? getDateStr(cycleEnd) : null;
+
+    for (let day = new Date(startDay); day <= endDay; day.setDate(day.getDate() + 1)) {
+      const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+      const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+      const overlapStart = Math.max(dayStart.getTime(), cycleStart.getTime());
+      const overlapEnd = Math.min(dayEnd.getTime(), cycleEnd.getTime());
+      if (overlapStart >= overlapEnd) continue;
+      const ds = getDateStr(day);
+      if (boundaryDateStr && ds === boundaryDateStr) continue;
+      dates.push(ds);
     }
     return dates;
   }
@@ -1541,6 +1624,7 @@
     return {
       cycleStart: new Date(cycleStartMs),
       cycleEnd: new Date(cycleStartMs + timeLimitMs),
+      nextCycleStart: new Date(cycleStartMs + intervalMs),
     };
   }
 
@@ -1557,14 +1641,57 @@
     return {
       cycleStart: new Date(cycleStartMs),
       cycleEnd: new Date(cycleStartMs + timeLimitMs),
+      nextCycleStart: new Date(cycleStartMs + intervalMs),
     };
   }
 
   function getRemainingDatesInCycleFrom(bounds, fromDateStr) {
     if (!bounds) return [fromDateStr];
-    const all = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+    const all = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
     const filtered = all.filter((ds) => ds >= fromDateStr);
     return filtered.length ? filtered : [fromDateStr];
+  }
+
+  function getCalendarDatesForBounds(bounds) {
+    if (!bounds) return [];
+    return getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+  }
+
+  /**
+   * Completion date inside a cycle. Timestamps in [cycleStart, cycleEnd) win.
+   * For adjacent full periods, a bare calendar mark on the shared reset day is ignored
+   * (leftover fill from the prior cycle) unless a timestamp proves this-cycle completion.
+   */
+  function findCompletionDateInBounds(key, type, bounds) {
+    if (!bounds) return null;
+    const dates = getCalendarDatesForBounds(bounds);
+    if (!dates.length) return null;
+    const dot = key.indexOf(".");
+    const gameId = dot > 0 ? key.slice(0, dot) : key;
+    const taskId = dot > 0 ? key.slice(dot + 1) : "";
+    const startMs = bounds.cycleStart.getTime();
+    const endMs = bounds.cycleEnd.getTime();
+    const adjacent = bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === endMs;
+    const startDateStr = getDateStr(bounds.cycleStart);
+
+    for (const t of state.completionTimestamps || []) {
+      if (t.taskType !== type || t.gameId !== gameId) continue;
+      if (type !== "dailies" && t.taskId !== taskId) continue;
+      if (!isValidDateStr(t.dateStr)) continue;
+      const h = Number.isFinite(t.hour) ? t.hour : 12;
+      const m = Number.isFinite(t.minute) ? t.minute : 0;
+      const ms = new Date(
+        t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+      ).getTime();
+      if (!Number.isFinite(ms)) continue;
+      if (ms >= startMs && ms < endMs) return t.dateStr;
+    }
+
+    for (const ds of dates) {
+      if (adjacent && ds === startDateStr) continue;
+      if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) return ds;
+    }
+    return null;
   }
 
   function getCompletionDateInCycle(key, type, refDateStr) {
@@ -1581,31 +1708,24 @@
     const bounds = type === "weeklies"
       ? getWeeklyCycleBoundsForMoment(task, refMoment, game)
       : getEndgameCycleBoundsForMoment(task, refMoment, game);
-    if (!bounds) return null;
-    for (const ds of getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd)) {
-      const dayData = state.completionByDate[ds] || {};
-      const arr = dayData[type] || [];
-      if (arr.includes(key)) return ds;
-    }
-    return null;
+    return findCompletionDateInBounds(key, type, bounds);
   }
 
   function isCompletedInCycleForDate(key, type, refDateStr) {
     return getCompletionDateInCycle(key, type, refDateStr) != null;
   }
 
-  /** Whether a cycle has any calendar completion mark within this period's calendar date range. */
-  function periodHasCalendarMarkInRange(key, type, cycleStart, cycleEnd) {
-    for (const ds of getCalendarDatesInCycleRange(cycleStart, cycleEnd)) {
-      const dayData = state.completionByDate[ds] || { dailies: [], weeklies: [], endgame: [] };
-      const arr = dayData[type] || [];
-      if (arr.includes(key)) return ds;
-    }
-    return null;
+  /** Whether a cycle has any valid completion mark within this period's calendar date range. */
+  function periodHasCalendarMarkInRange(key, type, cycleStart, cycleEnd, nextCycleStart) {
+    return findCompletionDateInBounds(key, type, {
+      cycleStart,
+      cycleEnd,
+      nextCycleStart: nextCycleStart instanceof Date ? nextCycleStart : null,
+    });
   }
 
-  function isPeriodCompletedFromCalendar(key, type, cycleStart, cycleEnd) {
-    return periodHasCalendarMarkInRange(key, type, cycleStart, cycleEnd) != null;
+  function isPeriodCompletedFromCalendar(key, type, cycleStart, cycleEnd, nextCycleStart) {
+    return periodHasCalendarMarkInRange(key, type, cycleStart, cycleEnd, nextCycleStart) != null;
   }
 
   /** Get date strings from dateStr (inclusive) to end of period for weeklies/endgame. Used when marking complete. */
@@ -1643,14 +1763,14 @@
       const task = (game.weeklies || []).find((t) => (t.id || t.label) === taskId);
       if (!task) return [dateStr];
       const bounds = getWeeklyCycleBoundsForMoment(task, new Date(dateStr + "T12:00:00"), game);
-      const all = bounds ? getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd) : [];
+      const all = getCalendarDatesForBounds(bounds);
       return all.length ? all : [dateStr];
     }
     if (type === "endgame") {
       const task = (game.endgame || []).find((t) => (t.id || t.label) === taskId);
       if (!task) return [dateStr];
       const bounds = getEndgameCycleBoundsForMoment(task, new Date(dateStr + "T12:00:00"), game);
-      const all = bounds ? getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd) : [];
+      const all = getCalendarDatesForBounds(bounds);
       return all.length ? all : [dateStr];
     }
     return [dateStr];
@@ -1726,7 +1846,7 @@
     const moment = isValidDateStr(refDateStr) ? new Date(refDateStr + "T12:00:00") : getSimulatedNow();
     const bounds = getCycleBoundsForTaskType(type, task, moment, game);
     if (!bounds) return refDateStr;
-    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
     if (!dates.length) return refDateStr;
     return addDaysToDateStr(dates[0], getTaskEarliestCompleteDays(task));
   }
@@ -1736,7 +1856,7 @@
     const m = moment instanceof Date ? moment : getSimulatedNow();
     const bounds = getCycleBoundsForTaskType(type, task, m, game);
     if (!bounds) return null;
-    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
     if (!dates.length) return null;
     const unlockDateStr = addDaysToDateStr(dates[0], getTaskEarliestCompleteDays(task));
     const { hour, minute } = getTaskEarliestCompleteTimeParts(task, game);
@@ -1779,30 +1899,10 @@
       const dayData = state.completionByDate[refDateStr] || {};
       return (dayData.dailies || []).includes(key) ? refDateStr : null;
     }
-    const { gameId, taskId, game, task } = resolveTaskFromKey(type, key);
+    const { game, task } = resolveTaskFromKey(type, key);
     if (!game || !task) return null;
     const bounds = getCycleBoundsForTaskType(type, task, new Date(refDateStr + "T12:00:00"), game);
-    if (!bounds) return null;
-    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
-    if (!dates.length) return null;
-    const end = dates[dates.length - 1];
-    const ts = (state.completionTimestamps || [])
-      .filter(
-        (t) =>
-          t.taskType === type &&
-          t.gameId === gameId &&
-          t.taskId === taskId &&
-          isValidDateStr(t.dateStr) &&
-          t.dateStr >= dates[0] &&
-          t.dateStr <= end
-      )
-      .map((t) => t.dateStr)
-      .sort();
-    if (ts.length) return ts[0];
-    for (const ds of dates) {
-      if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) return ds;
-    }
-    return null;
+    return findCompletionDateInBounds(key, type, bounds);
   }
 
   /** True when dateStr is marked complete only because of fill-remaining after an earlier finish. */
@@ -2987,13 +3087,15 @@
 
   function applyTaskCompletion(type, key, opts) {
     const o = opts || {};
-    let dateStr = isValidDateStr(o.dateStr) ? o.dateStr : (type === "dailies" ? null : getDateStr());
+    let dateStr = isValidDateStr(o.dateStr) ? o.dateStr : null;
     const { gameId, taskId, game, task } = resolveTaskFromKey(type, key);
     if (type === "dailies") {
       if (!game) return { ok: false, reason: "Game not found" };
-      if (!dateStr) dateStr = getDailyPeriodDateStr(game, getSimulatedNow());
+      if (!dateStr) dateStr = getTaskPeriodDateStr("dailies", null, game, getSimulatedNow());
     } else if (!game || !task) {
       return { ok: false, reason: "Task not found" };
+    } else if (!dateStr) {
+      dateStr = getTaskPeriodDateStr(type, task, game, getSimulatedNow());
     }
 
     if (type === "weeklies" || type === "endgame") {
@@ -3085,7 +3187,9 @@
 
     if (type === "dailies") {
       if (!game) return { ok: false, reason: "Game not found" };
-      if (!isValidDateStr(o.dateStr)) dateStr = getDailyPeriodDateStr(game, getSimulatedNow());
+      if (!isValidDateStr(o.dateStr)) dateStr = getTaskPeriodDateStr("dailies", null, game, getSimulatedNow());
+    } else if ((type === "weeklies" || type === "endgame") && game && task && !isValidDateStr(o.dateStr)) {
+      dateStr = getTaskPeriodDateStr(type, task, game, getSimulatedNow());
     }
 
     let completionDate = dateStr;
@@ -3335,7 +3439,7 @@
           stamps.forEach((t) => {
             const bounds = getCycleBoundsForTaskType(type, task, new Date(t.dateStr + "T12:00:00"), game);
             if (!bounds) return;
-            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
             if (!dates.length) return;
             const start = dates[0];
             if (!cycleMap.has(start)) cycleMap.set(start, []);
@@ -3423,7 +3527,7 @@
           if (!isValidDateStr(t.dateStr)) return false;
           const bounds = getCycleBoundsForTaskType(choice.type, task, new Date(t.dateStr + "T12:00:00"), game);
           if (!bounds) return false;
-          const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+          const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
           return dates.length && dates[0] === cycleStart;
         });
       }
@@ -3461,7 +3565,7 @@
     if (!game || !task) return null;
     const bounds = getCycleBoundsForTaskType(type, task, new Date(refDateStr + "T12:00:00"), game);
     if (!bounds) return null;
-    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
     let earliest = null;
     for (const ds of dates) {
       if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) {
@@ -3606,7 +3710,7 @@
             const earliest = getCalendarEarliestMarkInCycle(type, key, ds);
             if (!earliest) return;
             seenCycle.add(cycleKey);
-            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
             required.push({
               type,
               key,
@@ -4033,7 +4137,7 @@
           const ensureCycle = (ds) => {
             const bounds = getCycleBoundsForTaskType(type, task, new Date(ds + "T12:00:00"), game);
             if (!bounds) return null;
-            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
             if (!dates.length) return null;
             const start = dates[0];
             if (!cycleMap.has(start)) cycleMap.set(start, { calEarliest: null, tsEarliest: null, stamps: [], dates });
@@ -4291,21 +4395,21 @@
             if (!((state.completionByDate[ds][type] || []).includes(key))) return;
             const bounds = getCycleBoundsForTaskType(type, task, new Date(ds + "T12:00:00"), game);
             if (!bounds) return;
-            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
             if (dates.length) cycleStarts.add(dates[0]);
           });
           (state.completionTimestamps || []).forEach((t) => {
             if (t.taskType !== type || t.gameId !== game.id || t.taskId !== taskId || !isValidDateStr(t.dateStr)) return;
             const bounds = getCycleBoundsForTaskType(type, task, new Date(t.dateStr + "T12:00:00"), game);
             if (!bounds) return;
-            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+            const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
             if (dates.length) cycleStarts.add(dates[0]);
           });
 
           [...cycleStarts].sort().forEach((startStr) => {
             const bounds = getCycleBoundsForTaskType(type, task, new Date(startStr + "T12:00:00"), game);
             if (!bounds) return;
-            const cycleDates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd);
+            const cycleDates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
             if (cycleDates.length === 0) return;
             const cycleEndStr = cycleDates[cycleDates.length - 1];
             const minCompletion = addDaysToDateStr(cycleDates[0], getTaskEarliestCompleteDays(task));
@@ -4400,7 +4504,7 @@
       const history = getTaskTallyHistory(game, type, key);
       history.forEach((period) => {
         if (!period.completed) return;
-        const dates = getCalendarDatesInCycleRange(period.periodStart, period.periodEnd);
+        const dates = getCalendarDatesInCycleRange(period.periodStart, period.periodEnd, period.nextCycleStart);
         if (dates.length === 0) return;
         const cycleEndStr = dates[dates.length - 1];
         let firstMarked = null;
@@ -4487,10 +4591,38 @@
     });
   }
 
+  /**
+   * Remove leftover fill marks on the shared reset calendar day when the new cycle
+   * is not actually complete (weeklies and endgame with adjacent full periods).
+   */
+  function cleanupCycleBoundaryBleedMarks() {
+    let changed = false;
+    const now = getSimulatedNow();
+    getAllGames().forEach((game) => {
+      ["weeklies", "endgame"].forEach((type) => {
+        (game[type] || []).forEach((task) => {
+          const key = game.id + "." + (task.id || task.label);
+          const bounds = getCycleBoundsForTaskType(type, task, now, game);
+          if (!bounds || !(bounds.nextCycleStart instanceof Date)) return;
+          if (bounds.nextCycleStart.getTime() !== bounds.cycleEnd.getTime()) return;
+          if (findCompletionDateInBounds(key, type, bounds) != null) return;
+          const startDateStr = getDateStr(bounds.cycleStart);
+          const dayData = state.completionByDate[startDateStr];
+          if (!dayData || !dayData[type]) return;
+          const idx = dayData[type].indexOf(key);
+          if (idx < 0) return;
+          dayData[type].splice(idx, 1);
+          changed = true;
+        });
+      });
+    });
+    return changed;
+  }
+
   function processResets() {
     const now = getSimulatedNow();
     const todayStr = getDateStr();
-    let didChange = false;
+    let didChange = cleanupCycleBoundaryBleedMarks();
 
     getAllGames().forEach((game) => {
       if (game.dailies) {
@@ -4557,16 +4689,12 @@
           didChange = true;
           state.weekliesAttempted[key] = getAttemptedAmount(state.weekliesAttempted, key) + 1;
           if (cycleStartMs + timeLimitMs <= nowMs) {
-            const cycleEndMs = cycleStartMs + timeLimitMs;
             const cycleStart = new Date(cycleStartMs);
-            const cycleEnd = new Date(cycleEndMs);
-            let completed = false;
-            for (let d = new Date(cycleStart); d < cycleEnd; d.setDate(d.getDate() + 1)) {
-              const dateStr = getDateStr(d);
-              const dayData = state.completionByDate[dateStr] || { weeklies: [] };
-              if ((dayData.weeklies || []).includes(key)) { completed = true; break; }
+            const cycleEnd = new Date(cycleStartMs + timeLimitMs);
+            const nextCycleStart = new Date(cycleStartMs + intervalMs);
+            if (isPeriodCompletedFromCalendar(key, "weeklies", cycleStart, cycleEnd, nextCycleStart)) {
+              state.weekliesCompleted[key] = getCompletedAmount(state.weekliesCompleted, key) + 1;
             }
-            if (completed) state.weekliesCompleted[key] = getCompletedAmount(state.weekliesCompleted, key) + 1;
           }
           cycleStartMs += intervalMs;
         }
@@ -4603,16 +4731,12 @@
           state.endgameAttempted[key] = attemptIdx + 1;
           snapshotEndgamePotentialAt(game.id, task.id || task.label, attemptIdx, getEndgamePotential(task));
           if (cycleStartMs + timeLimitMs <= nowMs) {
-            const cycleEndMs = cycleStartMs + timeLimitMs;
             const cycleStart = new Date(cycleStartMs);
-            const cycleEnd = new Date(cycleEndMs);
-            let completed = false;
-            for (let d = new Date(cycleStart); d < cycleEnd; d.setDate(d.getDate() + 1)) {
-              const dateStr = getDateStr(d);
-              const dayData = state.completionByDate[dateStr] || { endgame: [] };
-              if ((dayData.endgame || []).includes(key)) { completed = true; break; }
+            const cycleEnd = new Date(cycleStartMs + timeLimitMs);
+            const nextCycleStart = new Date(cycleStartMs + intervalMs);
+            if (isPeriodCompletedFromCalendar(key, "endgame", cycleStart, cycleEnd, nextCycleStart)) {
+              state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
             }
-            if (completed) state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
           }
           cycleStartMs += intervalMs;
         }
@@ -4734,22 +4858,8 @@
     const game = getGame(gameId);
     const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const now = getSimulatedNow();
-    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
-    const tz = getTimezoneForTaskDst(task, baseTz);
-    const parts = getDatePartsInTimezone(now, tz);
-    const hour = getResetHour(task, "weekStartHour", getResetHour(task, "resetHour", 4), game, now);
-    const minute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : (Number.isFinite(task && task.resetMinute) ? task.resetMinute : 0);
-    const offsetRef = getOffsetRefDateForTask(task, tz);
-    const todayReset = createDateInTimezone(parts.year, parts.month, parts.day, hour, minute, tz, offsetRef);
-    const d = now < todayReset ? new Date(todayReset.getTime() - 1) : now;
-    const bounds = getWeeklyCycleBoundsForMoment(task, d, game);
-    if (!bounds) return null;
-    for (const dateStr of getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd)) {
-      const dayData = state.completionByDate[dateStr] || { weeklies: [] };
-      if ((dayData.weeklies || []).includes(key)) return dateStr;
-    }
-    return null;
+    const bounds = getWeeklyCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
+    return findCompletionDateInBounds(key, "weeklies", bounds);
   }
 
   /** Whether this endgame task was completed on any day within its current cycle.
@@ -4770,22 +4880,8 @@
     const game = getGame(gameId);
     const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const now = getSimulatedNow();
-    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
-    const tz = getTimezoneForTaskDst(task, baseTz);
-    const parts = getDatePartsInTimezone(now, tz);
-    const hour = getResetHour(task, "weekStartHour", getResetHour(task, "resetHour", 4), game, now);
-    const minute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : (Number.isFinite(task && task.resetMinute) ? task.resetMinute : 0);
-    const offsetRef = getOffsetRefDateForTask(task, tz);
-    const todayReset = createDateInTimezone(parts.year, parts.month, parts.day, hour, minute, tz, offsetRef);
-    const d = now < todayReset ? new Date(todayReset.getTime() - 1) : now;
-    const bounds = getEndgameCycleBoundsForMoment(task, d, game);
-    if (!bounds) return null;
-    for (const dateStr of getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd)) {
-      const dayData = state.completionByDate[dateStr] || { endgame: [] };
-      if ((dayData.endgame || []).includes(key)) return dateStr;
-    }
-    return null;
+    const bounds = getEndgameCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
+    return findCompletionDateInBounds(key, "endgame", bounds);
   }
 
   function toggleCalendarCompletion(dateStr, type, key, checked) {
@@ -4934,8 +5030,9 @@
         if (lastBounds && cycleStartMs > lastBounds.startMs) break;
         const cycleStart = new Date(cycleStartMs);
         const cycleEnd = new Date(cycleStartMs + timeLimitMs);
-        const completed = isPeriodCompletedFromCalendar(key, "weeklies", cycleStart, cycleEnd) ? 1 : 0;
-        result.push({ periodStart: cycleStart, periodEnd: cycleEnd, completed });
+        const nextCycleStart = new Date(cycleStartMs + intervalMs);
+        const completed = isPeriodCompletedFromCalendar(key, "weeklies", cycleStart, cycleEnd, nextCycleStart) ? 1 : 0;
+        result.push({ periodStart: cycleStart, periodEnd: cycleEnd, nextCycleStart, completed });
         cycleStartMs += intervalMs;
       }
     } else if (type === "endgame") {
@@ -4958,8 +5055,9 @@
         if (lastBounds && cycleStartMs > lastBounds.startMs) break;
         const cycleStart = new Date(cycleStartMs);
         const cycleEnd = new Date(cycleStartMs + timeLimitMs);
-        const completed = isPeriodCompletedFromCalendar(key, "endgame", cycleStart, cycleEnd) ? 1 : 0;
-        result.push({ periodStart: cycleStart, periodEnd: cycleEnd, completed });
+        const nextCycleStart = new Date(cycleStartMs + intervalMs);
+        const completed = isPeriodCompletedFromCalendar(key, "endgame", cycleStart, cycleEnd, nextCycleStart) ? 1 : 0;
+        result.push({ periodStart: cycleStart, periodEnd: cycleEnd, nextCycleStart, completed });
         cycleStartMs += intervalMs;
       }
     }
@@ -5023,7 +5121,7 @@
     const result = [];
     history.forEach((p) => {
       if (p.periodEnd.getTime() > now.getTime()) return;
-      if (periodHasCalendarMarkInRange(key, "endgame", p.periodStart, p.periodEnd)) return;
+      if (periodHasCalendarMarkInRange(key, "endgame", p.periodStart, p.periodEnd, p.nextCycleStart)) return;
       const range = { start: getDateStr(p.periodStart), end: getDateStr(p.periodEnd) };
       const rangeKey = range.start + "|" + range.end;
       if (completedRangeKeys.has(rangeKey) || seen.has(rangeKey)) return;

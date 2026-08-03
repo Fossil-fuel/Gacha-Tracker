@@ -26,6 +26,7 @@ function createFixture(opts) {
         id: "weekly_a",
         label: "Weekly A",
         weekStartDay: 1,
+        weekStartHour: 4,
         dateStarted: "2026-07-06",
         frequencyEvery: 1,
         frequencyUnit: "week",
@@ -39,6 +40,7 @@ function createFixture(opts) {
         id: "endgame_a",
         label: "Endgame A",
         weekStartDay: 1,
+        weekStartHour: 4,
         dateStarted: "2026-06-29",
         frequencyEvery: 2,
         frequencyUnit: "week",
@@ -50,6 +52,7 @@ function createFixture(opts) {
         id: "pain_cage",
         label: "Pain Cage",
         weekStartDay: 1,
+        weekStartHour: 4,
         dateStarted: "2026-07-06",
         frequencyEvery: 1,
         frequencyUnit: "week",
@@ -57,6 +60,18 @@ function createFixture(opts) {
         timeLimitUnit: "week",
         currency: 50,
         earliestCompleteDays: 2,
+      },
+      {
+        id: "pure_fiction",
+        label: "Pure Fiction",
+        weekStartDay: 1,
+        weekStartHour: 4,
+        dateStarted: "2026-02-16",
+        frequencyEvery: 6,
+        frequencyUnit: "week",
+        timeLimitEvery: 6,
+        timeLimitUnit: "week",
+        currency: 800,
       },
     ],
   };
@@ -150,6 +165,121 @@ function markComplete(state, type, key, dateStr, hour, minute) {
   }
   pushUndo(state, "Complete " + key, before);
   return completion;
+}
+
+/**
+ * Legacy pre-fix complete: fill remaining days AND force-mark the shared reset calendar day
+ * (the Aug 3 without-time bug). Timestamp stays on the real finish day only.
+ */
+function markCompleteWithLegacyBoundaryBleed(state, type, key, dateStr, hour, minute) {
+  const completion = markComplete(state, type, key, dateStr, hour, minute);
+  const game = getGame(state);
+  const task = findTask(game, type, key);
+  const bounds = math.getCycleBoundsForMoment(task, new Date(completion + "T12:00:00"));
+  if (!bounds) return completion;
+  const boundaryStr =
+    bounds.cycleEnd.getFullYear() +
+    "-" +
+    String(bounds.cycleEnd.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(bounds.cycleEnd.getDate()).padStart(2, "0");
+  const correct = math.getRemainingDatesFrom(task, completion);
+  if (!correct.includes(boundaryStr)) {
+    const day = ensureDay(state, boundaryStr);
+    if (!day[type].includes(key)) day[type].push(key);
+  }
+  return completion;
+}
+
+function marksByDateForKey(state, type, key) {
+  const out = {};
+  Object.keys(state.completionByDate || {}).forEach((ds) => {
+    if ((state.completionByDate[ds][type] || []).includes(key)) out[ds] = [key];
+  });
+  return out;
+}
+
+function timestampsForKey(state, type, key) {
+  const gameId = key.slice(0, key.indexOf("."));
+  const taskId = key.slice(key.indexOf(".") + 1);
+  return (state.completionTimestamps || []).filter(
+    (t) => t.taskType === type && t.gameId === gameId && t.taskId === taskId
+  );
+}
+
+/** Current-cycle complete using shared-day-aware math (mirror of app). */
+function isCompletedInCurrentCycle(state, type, key, now) {
+  const game = getGame(state);
+  const task = findTask(game, type, key);
+  if (!task) return false;
+  const hour = Number.isFinite(task.weekStartHour) ? task.weekStartHour : 4;
+  const membership = math.getCycleMembershipMoment(now, hour, 0);
+  const bounds = math.getCycleBoundsForMoment(task, membership);
+  const marks = marksByDateForKey(state, type, key);
+  const stamps = timestampsForKey(state, type, key);
+  if (!bounds) return false;
+  const startMs = bounds.cycleStart.getTime();
+  const endMs = bounds.cycleEnd.getTime();
+  const hasTs = stamps.some((t) => {
+    const h = Number.isFinite(t.hour) ? t.hour : 12;
+    const m = Number.isFinite(t.minute) ? t.minute : 0;
+    const ms = new Date(
+      t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+    ).getTime();
+    return ms >= startMs && ms < endMs;
+  });
+  if (hasTs) return true;
+  return math.findCalendarCompletionInBounds(marks, key, bounds) != null;
+}
+
+function diagnoseTaskResetDay(state, type, key, now) {
+  const game = getGame(state);
+  const task = findTask(game, type, key);
+  if (!task) return { ok: false, issues: [{ kind: "missing-task" }] };
+  return math.diagnoseSharedResetDay(
+    task,
+    marksByDateForKey(state, type, key),
+    timestampsForKey(state, type, key),
+    key,
+    now
+  );
+}
+
+/** Strip shared-day bleed marks for all weeklies/endgame (mirror cleanupCycleBoundaryBleedMarks). */
+function cleanupCycleBoundaryBleedMarks(state, now) {
+  let changed = false;
+  const game = getGame(state);
+  ["weeklies", "endgame"].forEach((type) => {
+    (game[type] || []).forEach((task) => {
+      const key = taskKey(game, task);
+      const diag = diagnoseTaskResetDay(state, type, key, now);
+      if (!diag.hadBleedMark) return;
+      const day = state.completionByDate[diag.startDateStr];
+      if (!day || !day[type]) return;
+      const idx = day[type].indexOf(key);
+      if (idx < 0) return;
+      day[type].splice(idx, 1);
+      changed = true;
+    });
+  });
+  return changed;
+}
+
+function diagnoseAllResetDays(state, now) {
+  const game = getGame(state);
+  const results = [];
+  ["weeklies", "endgame"].forEach((type) => {
+    (game[type] || []).forEach((task) => {
+      const key = taskKey(game, task);
+      const diag = diagnoseTaskResetDay(state, type, key, now);
+      results.push({ type, key, label: task.label || task.id, ...diag });
+    });
+  });
+  return {
+    ok: results.every((r) => r.ok),
+    results,
+    bleedCount: results.filter((r) => r.hadBleedMark).length,
+  };
 }
 
 function markIncomplete(state, type, key, dateStr) {
@@ -864,7 +994,12 @@ module.exports = {
   getGame,
   taskKey,
   markComplete,
+  markCompleteWithLegacyBoundaryBleed,
   markIncomplete,
+  isCompletedInCurrentCycle,
+  diagnoseTaskResetDay,
+  diagnoseAllResetDays,
+  cleanupCycleBoundaryBleedMarks,
   historyMarksInMonth,
   historyCompletionDayInCycle,
   historyIsCarried,
