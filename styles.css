@@ -4111,7 +4111,11 @@ input[type="date"] {
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.5rem 0.75rem;
+}
+
+.task-menu-control-with-desc .task-menu-checkbox-label {
+  flex: 1 1 12rem;
 }
 
 .task-menu-note,
@@ -4161,6 +4165,11 @@ input[type="date"] {
 
 .task-menu-control input[type="time"] {
   width: 9.5rem;
+}
+
+.task-menu-control input[type="time"]:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .task-menu-checkbox-label {

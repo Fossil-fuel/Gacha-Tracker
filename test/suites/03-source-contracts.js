@@ -42,6 +42,7 @@ module.exports = {
       "function getPeriodDateStrForReset",
       "function getCycleMembershipMoment",
       "function getTaskPeriodDateStr",
+      "function getCycleEndDate",
       "function getCalendarDatesInCycleRange",
       "function findCompletionDateInBounds",
       "function cleanupCycleBoundaryBleedMarks",

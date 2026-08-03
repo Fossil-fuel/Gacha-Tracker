@@ -61,9 +61,25 @@ Manual repair tools live under **Settings → Data** and **Settings → Debug** 
 When you complete a **weekly** or **endgame** task:
 
 - The completion day and remaining days in that cycle are marked in `completionByDate` (History shows them as complete).
+- Fill-remaining **does not** claim the next cycle’s shared reset calendar day (that date belongs to the new cycle).
 - A single completion timestamp records the finish day/hour.
 - **Time Trends** counts that finish (one event per cycle), not every fill-remaining day.
 - History tooltips label later cycle days as “(carried)” when they are fill-only.
+- Marking complete again in an already-complete cycle does not add another completion tally.
+
+Home toggles for weeklies/endgame use the same **game-day** date as period membership (pre-reset still writes to the previous period), matching dailies.
+
+---
+
+## Calendar history edits
+
+Editing a past day in the calendar day modal applies to the **cycle that contains that date**, not only “today’s” cycle. You can clear an older week even if a newer week is already marked done. For tasks that have stopped repeating (`cycleEndEnabled`), you can still restore/clear marks inside their former cycles; you cannot complete cycles after the final end.
+
+---
+
+## Cycle end time
+
+In the task create/edit modal, cycle end defaults to the same clock as cycle begin (reset). You can turn off “Same as cycle begin (reset) time” and set a different end hour/minute. That end instant bounds availability and remaining-time displays.
 
 ---
 

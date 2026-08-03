@@ -168,10 +168,29 @@ function getDatesInCycle(task, dateStr) {
   return dates;
 }
 
+function getRemainingDatesInCycleFrom(bounds, fromDateStr) {
+  if (!bounds) return isValidDateStr(fromDateStr) ? [fromDateStr] : [];
+  const all = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+  const filtered = all.filter((ds) => ds >= fromDateStr);
+  if (filtered.length) return filtered;
+  if (all.length) {
+    const last = all[all.length - 1];
+    return last >= fromDateStr ? [last] : [];
+  }
+  return [];
+}
+
 function getRemainingDatesFrom(task, fromDateStr) {
+  const bounds = getCycleBoundsForMoment(task, new Date(fromDateStr + "T12:00:00"));
+  if (bounds) return getRemainingDatesInCycleFrom(bounds, fromDateStr);
   const all = getDatesInCycle(task, fromDateStr);
   const filtered = all.filter((ds) => ds >= fromDateStr);
-  return filtered.length ? filtered : [fromDateStr];
+  if (filtered.length) return filtered;
+  if (all.length) {
+    const last = all[all.length - 1];
+    return last >= fromDateStr ? [last] : [];
+  }
+  return [];
 }
 
 /**
@@ -328,6 +347,7 @@ module.exports = {
   getCycleStartDateStr,
   getDatesInCycle,
   getRemainingDatesFrom,
+  getRemainingDatesInCycleFrom,
   getEarliestCompleteDateStr,
   clampCompletionToUnlock,
   isPainCageLike,

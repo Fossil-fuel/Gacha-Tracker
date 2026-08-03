@@ -16,10 +16,12 @@ The app logic is split into separate files for easier reading and editing. Run `
 | **06-page-weeklies.js** | Weeklies page: buildWeeklyTaskItem, renderWeeklies |
 | **07-page-endgame.js** | Endgame page: buildEndgameTaskItem, renderEndgame, updateTaskRemainingTexts |
 | **08-page-attendance.js** | Attendance page: renderAttendance, escapeHtml, pie chart helpers |
+| **08b-page-extracurricular.js** | Extracurricular page |
 | **09-page-data.js** | Data page: renderData, renderSidebarDataList, renderSidebarGamesList |
 | **10-page-games.js** | Games page: renderGames |
 | **11-page-home.js** | Home page: renderHome |
-| **12-main.js** | renderAll, initTabs, initialization and intervals |
+| **12-main.js** | renderAll, initTabs, initialization and intervals; optional `?liveProbe=1` exposes `__gachaLiveProbe` for localhost regression |
+| **mobile-integration.js** | Mobile / Capacitor hooks |
 
 ## Build
 
@@ -30,3 +32,5 @@ node build.js
 ```
 
 This concatenates all source files in order into `app.js`.
+
+Logic contracts and regression expectations: [docs/CORE_LOGIC.md](../docs/CORE_LOGIC.md).

@@ -282,11 +282,21 @@
           <div class="task-menu-cell day-cell" data-day="5">Fri</div>
           <div class="task-menu-cell day-cell" data-day="6">Sat</div>
 
-          <!-- Row 3: Time of Reset -->
+          <!-- Row 3: Time of Reset (cycle begin) -->
           <div class="task-menu-cell span-2 task-menu-label">Time of Reset</div>
           <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-note">
             <input id="taskResetTime" type="time" step="60" />
             <span class="task-menu-note">Reset timers do not account for DST.</span>
+          </div>
+
+          <!-- Row 3a: Cycle end time -->
+          <div class="task-menu-cell span-2 task-menu-label">Cycle end time</div>
+          <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-desc">
+            <input id="taskCycleEndTime" type="time" step="60" aria-label="Cycle end time" />
+            <label class="task-menu-checkbox-label" for="taskCycleEndTimeSameAsBegin">
+              <input id="taskCycleEndTimeSameAsBegin" type="checkbox" checked />
+              <span>Same as cycle begin (reset) time</span>
+            </label>
           </div>
 
           <!-- Row 3b: DST toggle -->

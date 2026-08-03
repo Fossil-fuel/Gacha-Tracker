@@ -1261,6 +1261,21 @@
     });
   }
 
+  function readCycleEndTimeFieldsFromModal(beginHour, beginMinute) {
+    const sameToggle = qs("taskCycleEndTimeSameAsBegin");
+    const endInput = qs("taskCycleEndTime");
+    const sameAsBegin = !sameToggle || sameToggle.checked;
+    if (sameAsBegin) {
+      return { cycleEndTimeSameAsBegin: true };
+    }
+    const parts = parseTimeStr(endInput && endInput.value ? endInput.value : timeToStr(beginHour, beginMinute));
+    return {
+      cycleEndTimeSameAsBegin: false,
+      cycleEndHour: parts.hour,
+      cycleEndMinute: parts.minute,
+    };
+  }
+
   function updateTaskTimeRemainingDisplay() {
     if (!taskModal.open || (taskModal.taskType !== "weeklies" && taskModal.taskType !== "endgame")) return;
     const el = qs("taskTimeRemainingInput");
@@ -1275,16 +1290,20 @@
     const frequencyEvery = Math.max(1, Number(freqEvery && freqEvery.value) || 1);
     const timeLimitEvery = Math.max(1, Number(limEvery && limEvery.value) || 1);
     const adjustForDST = dstToggle ? dstToggle.checked : true;
-    const tempTask = {
-      dateStarted,
-      weekStartDay: taskModal.selectedDay,
-      weekStartHour: hour,
-      weekStartMinute: minute,
-      frequencyEvery,
-      frequencyUnit: taskModal.frequencyUnit || "week",
-      timeLimitEvery,
-      timeLimitUnit: taskModal.timeLimitUnit || "week",
-    };
+    const tempTask = Object.assign(
+      {
+        dateStarted,
+        weekStartDay: taskModal.selectedDay,
+        weekStartHour: hour,
+        weekStartMinute: minute,
+        frequencyEvery,
+        frequencyUnit: taskModal.frequencyUnit || "week",
+        timeLimitEvery,
+        timeLimitUnit: taskModal.timeLimitUnit || "week",
+        adjustForDST,
+      },
+      readCycleEndTimeFieldsFromModal(hour, minute)
+    );
     const game = taskModal.gameId ? getGame(taskModal.gameId) : null;
     const ms = taskModal.taskType === "weeklies"
       ? getWeeklyTimeRemainingMs(tempTask, null, game)
@@ -1316,6 +1335,7 @@
     const timeStr = timeToStr(parts.hour, parts.minute);
     dateInput.value = dateStr;
     resetTime.value = timeStr;
+    if (typeof syncTaskCycleEndTimeUI === "function") syncTaskCycleEndTimeUI();
     input.value = formatRemainingMs(remainingMs);
     const dayOfWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday);
     if (dayOfWeek >= 0) updateDaySelection(dayOfWeek);
@@ -1329,19 +1349,22 @@
     const dstToggle = qs("taskAdjustForDST");
     const { hour, minute } = parseTimeStr(resetTime && resetTime.value ? resetTime.value : getDefaultTimeStr());
     const dateStarted = isValidDateStr(dateInput && dateInput.value) ? dateInput.value : getDateStr();
-    return {
-      dateStarted,
-      weekStartDay: taskModal.selectedDay,
-      weekStartHour: hour,
-      weekStartMinute: minute,
-      frequencyEvery: Math.max(1, Number(freqEvery && freqEvery.value) || 1),
-      frequencyUnit: taskModal.frequencyUnit || "week",
-      timeLimitEvery: Math.max(1, Number(limEvery && limEvery.value) || 1),
-      timeLimitUnit: taskModal.timeLimitUnit || "week",
-      adjustForDST: dstToggle ? dstToggle.checked : true,
-      cycleEndEnabled: !!(qs("taskCycleEndEnabled") && qs("taskCycleEndEnabled").checked),
-      cycleEndDate: qs("taskCycleEndDate") && qs("taskCycleEndDate").value ? qs("taskCycleEndDate").value : null,
-    };
+    return Object.assign(
+      {
+        dateStarted,
+        weekStartDay: taskModal.selectedDay,
+        weekStartHour: hour,
+        weekStartMinute: minute,
+        frequencyEvery: Math.max(1, Number(freqEvery && freqEvery.value) || 1),
+        frequencyUnit: taskModal.frequencyUnit || "week",
+        timeLimitEvery: Math.max(1, Number(limEvery && limEvery.value) || 1),
+        timeLimitUnit: taskModal.timeLimitUnit || "week",
+        adjustForDST: dstToggle ? dstToggle.checked : true,
+        cycleEndEnabled: !!(qs("taskCycleEndEnabled") && qs("taskCycleEndEnabled").checked),
+        cycleEndDate: qs("taskCycleEndDate") && qs("taskCycleEndDate").value ? qs("taskCycleEndDate").value : null,
+      },
+      readCycleEndTimeFieldsFromModal(hour, minute)
+    );
   }
 
   function updateTaskCycleEndPreview() {
@@ -1578,6 +1601,17 @@
     }
   }
 
+  function syncTaskCycleEndTimeUI() {
+    const sameToggle = qs("taskCycleEndTimeSameAsBegin");
+    const endTime = qs("taskCycleEndTime");
+    const beginTime = qs("taskResetTime");
+    if (!endTime) return;
+    const same = !sameToggle || sameToggle.checked;
+    endTime.disabled = same;
+    endTime.setAttribute("aria-disabled", same ? "true" : "false");
+    if (same && beginTime && beginTime.value) endTime.value = beginTime.value;
+  }
+
   function openTaskModal(opts) {
     const { gameId, taskType, task } = opts || {};
     const title = qs("taskModalTitle");
@@ -1611,6 +1645,22 @@
       tStr = timeToStr(h, m);
     }
     if (resetTime) resetTime.value = tStr;
+
+    const sameEndToggle = qs("taskCycleEndTimeSameAsBegin");
+    const cycleEndTime = qs("taskCycleEndTime");
+    const sameAsBegin = !task || task.cycleEndTimeSameAsBegin !== false;
+    if (sameEndToggle) sameEndToggle.checked = sameAsBegin;
+    if (cycleEndTime) {
+      if (sameAsBegin) {
+        cycleEndTime.value = tStr;
+      } else {
+        cycleEndTime.value = timeToStr(
+          Number.isFinite(task && task.cycleEndHour) ? task.cycleEndHour : undefined,
+          Number.isFinite(task && task.cycleEndMinute) ? task.cycleEndMinute : undefined
+        );
+      }
+    }
+    syncTaskCycleEndTimeUI();
 
     const dstToggle = qs("taskAdjustForDST");
     if (dstToggle) dstToggle.checked = task && task.adjustForDST !== false;
@@ -3457,3 +3507,32 @@
     });
     if (closeBtn) closeBtn.addEventListener("click", closeTaskModal);
     if (cancelBtn) cancelBtn.addEventListener("click", closeTaskModal);
+
+    const resetTime = qs("taskResetTime");
+    const sameEndToggle = qs("taskCycleEndTimeSameAsBegin");
+    const cycleEndTime = qs("taskCycleEndTime");
+    if (resetTime) {
+      resetTime.addEventListener("input", () => {
+        syncTaskCycleEndTimeUI();
+        if (typeof updateTaskCycleEndPreview === "function") updateTaskCycleEndPreview();
+        if (typeof updateTaskTimeRemainingDisplay === "function") updateTaskTimeRemainingDisplay();
+      });
+      resetTime.addEventListener("change", () => {
+        syncTaskCycleEndTimeUI();
+        if (typeof updateTaskCycleEndPreview === "function") updateTaskCycleEndPreview();
+        if (typeof updateTaskTimeRemainingDisplay === "function") updateTaskTimeRemainingDisplay();
+      });
+    }
+    if (sameEndToggle) {
+      sameEndToggle.addEventListener("change", () => {
+        syncTaskCycleEndTimeUI();
+        if (typeof updateTaskCycleEndPreview === "function") updateTaskCycleEndPreview();
+        if (typeof updateTaskTimeRemainingDisplay === "function") updateTaskTimeRemainingDisplay();
+      });
+    }
+    if (cycleEndTime) {
+      cycleEndTime.addEventListener("change", () => {
+        if (typeof updateTaskCycleEndPreview === "function") updateTaskCycleEndPreview();
+        if (typeof updateTaskTimeRemainingDisplay === "function") updateTaskTimeRemainingDisplay();
+      });
+    }

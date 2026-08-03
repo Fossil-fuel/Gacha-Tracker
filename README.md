@@ -7,6 +7,8 @@ See [docs/CORE_LOGIC.md](docs/CORE_LOGIC.md) for the product/logic contract (wha
 
 **Dev:** `npm run dev` (http://localhost:4000), `node build.js` to rebuild `app.js` from `src/` + `presets/`, `npm test` for regression suites.
 
+**Tests:** `npm test` runs build, cycle math, smoke (when the dev server is up), simulated History/Trends/Data, integrity repair, end-to-end and adversarial diagnostics, reset-day bleed, system probe, and live served-bundle probes. Start `npm run dev` first if you want live smoke + `15-live-system-probe`. Optional in-browser probes: `http://localhost:4000/?liveProbe=1` with `test/live/browser-probe-runner.js`.
+
 **Presets:** Game definitions live in [`presets/`](presets/README.md) as JSON. Edit those files (or add a new one + `index.json` entry), then run `node build.js`.
 
 Current Presets Available (These are the games I play, if you want to help add more games or have any advice current presets, please contact me through discord)

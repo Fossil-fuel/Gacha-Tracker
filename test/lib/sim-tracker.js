@@ -76,6 +76,34 @@ function createFixture(opts) {
     ],
   };
 
+  // HSR-like 2-week weeklies (Divergent / Currency Wars offset by one week)
+  game.weeklies.push(
+    {
+      id: "divergent",
+      label: "Divergent Universe",
+      weekStartDay: 1,
+      weekStartHour: 4,
+      dateStarted: "2026-03-09",
+      frequencyEvery: 2,
+      frequencyUnit: "week",
+      timeLimitEvery: 2,
+      timeLimitUnit: "week",
+      currency: 225,
+    },
+    {
+      id: "currency",
+      label: "Currency Wars",
+      weekStartDay: 1,
+      weekStartHour: 4,
+      dateStarted: "2026-03-02",
+      frequencyEvery: 2,
+      frequencyUnit: "week",
+      timeLimitEvery: 2,
+      timeLimitUnit: "week",
+      currency: 225,
+    }
+  );
+
   return {
     today,
     games: [game],
@@ -116,6 +144,14 @@ function markComplete(state, type, key, dateStr, hour, minute) {
   const before = captureUndoSlice(state, type, key);
   const game = getGame(state);
   let completion = dateStr;
+
+  // Match applyTaskCompletion: no tally bump if already complete in this cycle (or day for dailies).
+  if (type === "dailies") {
+    const day = ensureDay(state, dateStr);
+    if (day.dailies.includes(key)) return completion;
+  } else if (isCompletedInCycleForDate(state, type, key, dateStr)) {
+    return completion;
+  }
 
   if (type === "dailies") {
     const day = ensureDay(state, dateStr);
@@ -205,6 +241,50 @@ function timestampsForKey(state, type, key) {
   return (state.completionTimestamps || []).filter(
     (t) => t.taskType === type && t.gameId === gameId && t.taskId === taskId
   );
+}
+
+/** Whether the cycle containing refDateStr is complete (mirror getCompletionDateInCycle). */
+function isCompletedInCycleForDate(state, type, key, refDateStr) {
+  if (type === "dailies") {
+    return !!(state.completionByDate[refDateStr] && (state.completionByDate[refDateStr].dailies || []).includes(key));
+  }
+  const game = getGame(state);
+  const task = findTask(game, type, key);
+  if (!task) return false;
+  const bounds = math.getCycleBoundsForMoment(task, new Date(refDateStr + "T12:00:00"));
+  if (!bounds) return false;
+  const marks = marksByDateForKey(state, type, key);
+  const stamps = timestampsForKey(state, type, key);
+  const startMs = bounds.cycleStart.getTime();
+  const endMs = bounds.cycleEnd.getTime();
+  const hasTs = stamps.some((t) => {
+    const h = Number.isFinite(t.hour) ? t.hour : 12;
+    const m = Number.isFinite(t.minute) ? t.minute : 0;
+    const ms = new Date(
+      t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+    ).getTime();
+    return ms >= startMs && ms < endMs;
+  });
+  if (hasTs) return true;
+  return math.findCalendarCompletionInBounds(marks, key, bounds) != null;
+}
+
+/**
+ * Mirror calendar-day uncheck save path.
+ * oldBug: refuse unless *current* cycle (at `now`) looks complete — the pre-fix failure mode.
+ * fixed: allow when the cycle containing dateStr is complete.
+ */
+function simulateCalendarDayUncheck(state, type, key, dateStr, now, opts) {
+  const o = opts || {};
+  const useOldBug = !!o.oldBug;
+  const canEdit = useOldBug
+    ? isCompletedInCurrentCycle(state, type, key, now)
+    : isCompletedInCycleForDate(state, type, key, dateStr);
+  if (!canEdit) {
+    return { ok: false, blocked: true, reason: useOldBug ? "current-cycle-gate" : "cycle-not-complete" };
+  }
+  markIncomplete(state, type, key, dateStr);
+  return { ok: true, blocked: false };
 }
 
 /** Current-cycle complete using shared-day-aware math (mirror of app). */
@@ -997,6 +1077,8 @@ module.exports = {
   markCompleteWithLegacyBoundaryBleed,
   markIncomplete,
   isCompletedInCurrentCycle,
+  isCompletedInCycleForDate,
+  simulateCalendarDayUncheck,
   diagnoseTaskResetDay,
   diagnoseAllResetDays,
   cleanupCycleBoundaryBleedMarks,

@@ -176,4 +176,96 @@
   }, 60000);
   setInterval(updateSidebarTime, 1000);
   renderAll();
+
+  // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
+  if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {
+    window.__gachaLiveProbe = {
+      ready: true,
+      getStateSnapshot() {
+        return JSON.parse(
+          JSON.stringify({
+            games: state.games,
+            completionByDate: state.completionByDate,
+            completionTimestamps: state.completionTimestamps,
+            dailiesCompleted: state.dailiesCompleted,
+            weekliesCompleted: state.weekliesCompleted,
+            endgameCompleted: state.endgameCompleted,
+            dailiesAttempted: state.dailiesAttempted,
+            weekliesAttempted: state.weekliesAttempted,
+            endgameAttempted: state.endgameAttempted,
+            lastProcessedResets: state.lastProcessedResets,
+            endgameCurrencyEarned: state.endgameCurrencyEarned,
+            endgameCurrencyPotential: state.endgameCurrencyPotential,
+            endgameCompletionDates: state.endgameCompletionDates,
+            simulatedDateOffset: state.simulatedDateOffset || 0,
+            simulatedHourOffset: state.simulatedHourOffset || 0,
+            tab: state.tab,
+          })
+        );
+      },
+      loadStateSnapshot(snap) {
+        if (!snap || typeof snap !== "object") return false;
+        [
+          "games",
+          "completionByDate",
+          "completionTimestamps",
+          "dailiesCompleted",
+          "weekliesCompleted",
+          "endgameCompleted",
+          "dailiesAttempted",
+          "weekliesAttempted",
+          "endgameAttempted",
+          "lastProcessedResets",
+          "endgameCurrencyEarned",
+          "endgameCurrencyPotential",
+          "endgameCompletionDates",
+        ].forEach((k) => {
+          if (snap[k] !== undefined) state[k] = snap[k];
+        });
+        state.simulatedDateOffset = snap.simulatedDateOffset || 0;
+        state.simulatedHourOffset = snap.simulatedHourOffset || 0;
+        if (!state.lastProcessedResets || typeof state.lastProcessedResets !== "object") {
+          state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
+        } else {
+          if (!state.lastProcessedResets.dailies) state.lastProcessedResets.dailies = {};
+          if (!state.lastProcessedResets.weeklies) state.lastProcessedResets.weeklies = {};
+          if (!state.lastProcessedResets.endgame) state.lastProcessedResets.endgame = {};
+        }
+        if (!state.completionByDate) state.completionByDate = {};
+        if (!Array.isArray(state.completionTimestamps)) state.completionTimestamps = [];
+        if (snap.tab) state.tab = snap.tab;
+        if (typeof save === "function") save({ immediate: true });
+        if (typeof renderAll === "function") renderAll();
+        return true;
+      },
+      applyTaskCompletion,
+      removeTaskCompletion,
+      getRemainingDatesInCycleFrom,
+      getCalendarDatesInCycleRange,
+      getWeeklyCycleBoundsForMoment,
+      getEndgameCycleBoundsForMoment,
+      getTaskPeriodDateStr,
+      getTasksAvailableOnDate,
+      isWeeklyAvailableOnDate,
+      isWeeklyAvailableOnCalendarDate,
+      isEndgameAvailableOnCalendarDate,
+      isCompletedInCycleForDate,
+      isWeeklyCompletedInCurrentCycle,
+      isEndgameCompletedInCurrentCycle,
+      getGame,
+      getAllGames,
+      cleanupCycleBoundaryBleedMarks,
+      processResets,
+      scanDataConflicts,
+      getDateStr,
+      getSimulatedNow,
+      getPeriodDateStrForReset,
+      getCycleMembershipMoment,
+      toggleWeekly,
+      toggleEndgame,
+      completeEndgameWithCurrency,
+      recordCompletion,
+      unrecordCompletion,
+    };
+  }
 })();

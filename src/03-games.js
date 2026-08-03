@@ -43,6 +43,18 @@
       }
 
       const { hour, minute } = parseTimeStr(resetTime && resetTime.value ? resetTime.value : getDefaultTimeStr());
+      const sameEndToggle = qs("taskCycleEndTimeSameAsBegin");
+      const cycleEndTimeInput = qs("taskCycleEndTime");
+      const cycleEndTimeSameAsBegin = !sameEndToggle || sameEndToggle.checked;
+      let cycleEndHour;
+      let cycleEndMinute;
+      if (!cycleEndTimeSameAsBegin) {
+        const endParts = parseTimeStr(
+          cycleEndTimeInput && cycleEndTimeInput.value ? cycleEndTimeInput.value : timeToStr(hour, minute)
+        );
+        cycleEndHour = endParts.hour;
+        cycleEndMinute = endParts.minute;
+      }
       const frequencyEvery = Math.max(1, Number(freqEvery && freqEvery.value) || 1);
       const timeLimitEvery = Math.max(1, Number(limEvery && limEvery.value) || 1);
       const currency = Math.max(0, Number(currencyInput && currencyInput.value) || 0);
@@ -88,6 +100,9 @@
           weekStartDay: taskModal.selectedDay,
           weekStartHour: hour,
           weekStartMinute: minute,
+          cycleEndTimeSameAsBegin: cycleEndTimeSameAsBegin ? undefined : false,
+          cycleEndHour: cycleEndTimeSameAsBegin ? undefined : cycleEndHour,
+          cycleEndMinute: cycleEndTimeSameAsBegin ? undefined : cycleEndMinute,
           currency,
           dateStarted,
           frequencyEvery,
@@ -114,6 +129,11 @@
             delete merged.earliestCompleteHour;
             delete merged.earliestCompleteMinute;
           }
+          if (cycleEndTimeSameAsBegin) {
+            delete merged.cycleEndTimeSameAsBegin;
+            delete merged.cycleEndHour;
+            delete merged.cycleEndMinute;
+          }
           game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
       } else if (taskModal.taskType === "endgame") {
@@ -128,6 +148,9 @@
           weekStartDay: taskModal.selectedDay,
           weekStartHour: hour,
           weekStartMinute: minute,
+          cycleEndTimeSameAsBegin: cycleEndTimeSameAsBegin ? undefined : false,
+          cycleEndHour: cycleEndTimeSameAsBegin ? undefined : cycleEndHour,
+          cycleEndMinute: cycleEndTimeSameAsBegin ? undefined : cycleEndMinute,
           dateStarted,
           frequencyEvery,
           frequencyUnit: taskModal.frequencyUnit,
@@ -162,6 +185,11 @@
           if (!hasUnlockTime) {
             delete merged.earliestCompleteHour;
             delete merged.earliestCompleteMinute;
+          }
+          if (cycleEndTimeSameAsBegin) {
+            delete merged.cycleEndTimeSameAsBegin;
+            delete merged.cycleEndHour;
+            delete merged.cycleEndMinute;
           }
           game.endgame[existingIdx] = merged;
         } else {
@@ -394,7 +422,7 @@
     const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
     if (task && isTaskCycleEnded(task, getSimulatedNow(), game)) return;
     const key = gameId + "." + taskId;
-    const dateStr = getDateStr();
+    const dateStr = getTaskPeriodDateStr("weeklies", task, game, getSimulatedNow());
     const isMarkingComplete = !isWeeklyCompletedInCurrentCycle(key, dateStr);
     if (isMarkingComplete) {
       const result = applyTaskCompletion("weeklies", key, { dateStr });
@@ -409,7 +437,7 @@
     const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
     if (task && isTaskCycleEnded(task, getSimulatedNow(), game)) return;
     const key = gameId + "." + taskId;
-    const dateStr = getDateStr();
+    const dateStr = getTaskPeriodDateStr("endgame", task, game, getSimulatedNow());
     if (isEndgameCompletedInCurrentCycle(key, dateStr)) {
       toggleEndgame(gameId, taskId);
       return;
@@ -422,8 +450,10 @@
   }
 
   function completeEndgameWithCurrency(gameId, taskId, currencyValue) {
+    const game = getGame(gameId);
+    const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
     const key = gameId + "." + taskId;
-    const dateStr = getDateStr();
+    const dateStr = getTaskPeriodDateStr("endgame", task, game, getSimulatedNow());
     const result = applyTaskCompletion("endgame", key, {
       dateStr,
       currencyValue,
@@ -432,8 +462,10 @@
   }
 
   function toggleEndgame(gameId, taskId) {
+    const game = getGame(gameId);
+    const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
     const key = gameId + "." + taskId;
-    const dateStr = getDateStr();
+    const dateStr = getTaskPeriodDateStr("endgame", task, game, getSimulatedNow());
     const isMarkingComplete = !isEndgameCompletedInCurrentCycle(key, dateStr);
     if (isMarkingComplete) {
       const result = applyTaskCompletion("endgame", key, { dateStr });
