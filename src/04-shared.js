@@ -280,7 +280,9 @@
         else if (s === "games") aspect = 3 / 4;
         else aspect = getTaskBannerAspect(task);
       }
-      return { image: source, aspect: aspect, view: view, source: source };
+      const display =
+        typeof resolveStockBannerUrl === "function" ? resolveStockBannerUrl(source) : source;
+      return { image: display, aspect: aspect, view: view, source: source };
     }
     // Legacy per-surface images (pre single-source)
     if (s === "home" && task.bannerHomeImage) {

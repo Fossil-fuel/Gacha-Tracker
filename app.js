@@ -182,6 +182,7 @@
     task: {
       root: "taskModal",
       chooseBtn: "taskBannerChooseBtn",
+      stockBtn: "taskBannerStockBtn",
       clearBtn: "taskBannerClearBtn",
       file: "taskBannerFile",
       wrap: "taskBannerCropWrap",
@@ -195,6 +196,7 @@
     extra: {
       root: "extracurricularTaskModal",
       chooseBtn: "extraBannerChooseBtn",
+      stockBtn: "extraBannerStockBtn",
       clearBtn: "extraBannerClearBtn",
       file: "extraBannerFile",
       wrap: "extraBannerCropWrap",
@@ -207,6 +209,35 @@
     },
   };
   let activeBannerUiKey = "task";
+  let stockBannerPickerUiKey = "task";
+
+  /** Bundled stock banners (relative paths; stored as URL strings on tasks). */
+  const STOCK_BANNER_ASSETS = [
+    { id: "story-castorice", path: "assets/stock-banner-story-01.png", kind: "story", label: "Castorice" },
+    { id: "story-acheron", path: "assets/stock-banner-story-acheron.png", kind: "story", label: "Acheron" },
+    { id: "story-aemeath", path: "assets/stock-banner-story-aemeath.png", kind: "story", label: "Aemeath" },
+    { id: "event-acheron", path: "assets/stock-banner-event-acheron.png", kind: "event", label: "Crimson Rain" },
+    { id: "event-acheron-figure", path: "assets/stock-banner-event-acheron-with-figure.png", kind: "event", label: "Crimson Rain (figure)" },
+    { id: "event-hsin", path: "assets/stock-banner-event-hsin.png", kind: "event", label: "Moon Festival" },
+    { id: "event-ye", path: "assets/stock-banner-event-ye.png", kind: "event", label: "Qingming" },
+    { id: "event-endfield-01", path: "assets/stock-banner-event-endfield-01.png", kind: "event", label: "Wuling Blossom" },
+    { id: "event-endfield-02", path: "assets/stock-banner-event-endfield-02.png", kind: "event", label: "Wuling Rain Pillars" },
+  ];
+
+  function getStockBannerAssets() {
+    return STOCK_BANNER_ASSETS.slice();
+  }
+
+  function resolveStockBannerUrl(path) {
+    const raw = String(path || "").trim();
+    if (!raw) return "";
+    if (/^(data:|blob:|https?:|\/\/)/i.test(raw)) return raw;
+    try {
+      return new URL(raw.replace(/^\.\//, ""), document.baseURI || window.location.href).href;
+    } catch (_) {
+      return raw;
+    }
+  }
 
   function setActiveBannerUi(key) {
     if (TASK_BANNER_UI[key]) activeBannerUiKey = key;
@@ -10312,6 +10343,7 @@
       if (target) target.classList.add("active");
       syncSettingsSectionDropdown(section);
       setSettingsSectionDropdownOpen(false);
+      if (section === "stock-assets") fillSettingsStockAssetsGallery();
     }
 
     document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((btn) => {
@@ -11161,7 +11193,11 @@
         if (hasSource && preview) {
           media.style.backgroundImage = "url(\"" + String(preview).replace(/"/g, "%22") + "\")";
         } else if (hasSource) {
-          media.style.backgroundImage = "url(\"" + String(taskModal.bannerSource).replace(/"/g, "%22") + "\")";
+          const src =
+            typeof resolveStockBannerUrl === "function"
+              ? resolveStockBannerUrl(taskModal.bannerSource)
+              : taskModal.bannerSource;
+          media.style.backgroundImage = "url(\"" + String(src).replace(/"/g, "%22") + "\")";
         } else {
           media.style.backgroundImage = "";
         }
@@ -11253,12 +11289,14 @@
 
   function loadTaskBannerSourceFromUrl(url, opts) {
     const resetViews = !(opts && opts.keepViews === true);
+    const storedUrl = String(url || "");
+    const loadUrl = typeof resolveStockBannerUrl === "function" ? resolveStockBannerUrl(storedUrl) : storedUrl;
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         taskBannerCrop.sourceImg = img;
         taskBannerCrop.clear = false;
-        taskModal.bannerSource = url;
+        taskModal.bannerSource = storedUrl;
         if (resetViews) {
           taskModal.bannerViews = emptyTaskBannerViews();
           taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
@@ -11271,7 +11309,7 @@
         resolve();
       };
       img.onerror = () => reject(new Error("Could not load image."));
-      img.src = url;
+      img.src = loadUrl;
     });
   }
 
@@ -11479,6 +11517,115 @@
       await loadTaskBannerSourceFromUrl(dataUrl);
     } catch (err) {
       alert((err && err.message) || "Could not use that image.");
+    }
+  }
+
+  function fillStockBannerPickerGrid(host) {
+    if (!host) return;
+    host.innerHTML = "";
+    const assets = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
+    if (!assets.length) {
+      host.innerHTML = '<p class="settings-hint">No stock banners bundled.</p>';
+      return;
+    }
+    const byKind = { story: [], event: [], other: [] };
+    assets.forEach((a) => {
+      const k = a.kind === "story" || a.kind === "event" ? a.kind : "other";
+      byKind[k].push(a);
+    });
+    [["story", "Story"], ["event", "Event"], ["other", "Other"]].forEach(([kind, title]) => {
+      const list = byKind[kind];
+      if (!list.length) return;
+      const heading = document.createElement("h4");
+      heading.className = "stock-banner-picker-heading";
+      heading.textContent = title;
+      host.appendChild(heading);
+      const row = document.createElement("div");
+      row.className = "stock-banner-picker-row";
+      list.forEach((asset) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "stock-banner-picker-card";
+        btn.setAttribute("data-stock-id", asset.id);
+        btn.setAttribute("aria-label", "Use stock image " + asset.label);
+        const img = document.createElement("img");
+        img.src = resolveStockBannerUrl(asset.path);
+        img.alt = "";
+        img.loading = "lazy";
+        const cap = document.createElement("span");
+        cap.className = "stock-banner-picker-label";
+        cap.textContent = asset.label;
+        btn.appendChild(img);
+        btn.appendChild(cap);
+        btn.addEventListener("click", () => applyStockBannerAsset(asset));
+        row.appendChild(btn);
+      });
+      host.appendChild(row);
+    });
+  }
+
+  function fillSettingsStockAssetsGallery() {
+    const host = qs("settingsStockAssetsList");
+    if (!host) return;
+    host.innerHTML = "";
+    const assets = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
+    if (!assets.length) {
+      host.innerHTML = '<p class="settings-hint">No stock banners found.</p>';
+      return;
+    }
+    assets.forEach((asset) => {
+      const card = document.createElement("figure");
+      card.className = "stock-assets-card";
+      const img = document.createElement("img");
+      img.src = resolveStockBannerUrl(asset.path);
+      img.alt = asset.label;
+      img.loading = "lazy";
+      const fig = document.createElement("figcaption");
+      const kind = asset.kind === "story" ? "Story" : asset.kind === "event" ? "Event" : "Banner";
+      fig.textContent = kind + " · " + asset.label;
+      const path = document.createElement("code");
+      path.className = "stock-assets-path";
+      path.textContent = asset.path;
+      card.appendChild(img);
+      card.appendChild(fig);
+      card.appendChild(path);
+      host.appendChild(card);
+    });
+  }
+
+  function closeStockBannerPicker() {
+    const el = qs("stockBannerPickerModal");
+    if (!el || el.hidden) return;
+    el.hidden = true;
+    el.setAttribute("aria-hidden", "true");
+    if (typeof deactivateModalFocus === "function") deactivateModalFocus(el);
+  }
+
+  function openStockBannerPicker(uiKey) {
+    stockBannerPickerUiKey = TASK_BANNER_UI[uiKey] ? uiKey : "task";
+    const el = qs("stockBannerPickerModal");
+    const grid = qs("stockBannerPickerGrid");
+    if (!el || !grid) return;
+    fillStockBannerPickerGrid(grid);
+    el.hidden = false;
+    el.setAttribute("aria-hidden", "false");
+    if (typeof activateModalFocus === "function") activateModalFocus(el);
+    const closeBtn = qs("stockBannerPickerModalClose");
+    if (closeBtn) closeBtn.focus();
+  }
+
+  async function applyStockBannerAsset(asset) {
+    if (!asset || !asset.path) return;
+    const uiKey = stockBannerPickerUiKey || "task";
+    setActiveBannerUi(uiKey);
+    closeStockBannerPicker();
+    try {
+      await loadTaskBannerSourceFromUrl(asset.path);
+      drawTaskBannerCrop();
+      syncTaskBannerPreview();
+      syncTaskBannerTargetButtons();
+    } catch (err) {
+      alert((err && err.message) || "Could not load that stock image.");
     }
   }
 
@@ -11726,6 +11873,7 @@
       setActiveBannerUi(uiKey);
       const fileInput = bannerEl("file");
       const chooseBtn = bannerEl("chooseBtn");
+      const stockBtn = bannerEl("stockBtn");
       const clearBtn = bannerEl("clearBtn");
       const wrap = bannerEl("wrap");
       const imgFrame = bannerEl("imgFrame");
@@ -11759,6 +11907,13 @@
           e.preventDefault();
           activate();
           fileInput.click();
+        });
+      }
+      if (stockBtn) {
+        stockBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          activate();
+          openStockBannerPicker(uiKey);
         });
       }
       fileInput.addEventListener("change", () => {
@@ -11852,6 +12007,20 @@
     }
 
     Object.keys(TASK_BANNER_UI).forEach(bindOneBannerUi);
+
+    const stockPicker = qs("stockBannerPickerModal");
+    const stockPickerClose = qs("stockBannerPickerModalClose");
+    if (stockPickerClose) {
+      stockPickerClose.addEventListener("click", () => closeStockBannerPicker());
+    }
+    if (stockPicker) {
+      stockPicker.addEventListener("click", (e) => {
+        const t = e.target;
+        if (t && t.getAttribute && t.getAttribute("data-close") === "stockBannerPickerModal") {
+          closeStockBannerPicker();
+        }
+      });
+    }
 
     window.addEventListener("mousemove", (e) => onMove(e.clientX, e.clientY));
     window.addEventListener("mouseup", onUp);
@@ -13053,7 +13222,9 @@
         else if (s === "games") aspect = 3 / 4;
         else aspect = getTaskBannerAspect(task);
       }
-      return { image: source, aspect: aspect, view: view, source: source };
+      const display =
+        typeof resolveStockBannerUrl === "function" ? resolveStockBannerUrl(source) : source;
+      return { image: display, aspect: aspect, view: view, source: source };
     }
     // Legacy per-surface images (pre single-source)
     if (s === "home" && task.bannerHomeImage) {

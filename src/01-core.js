@@ -59,6 +59,7 @@
     task: {
       root: "taskModal",
       chooseBtn: "taskBannerChooseBtn",
+      stockBtn: "taskBannerStockBtn",
       clearBtn: "taskBannerClearBtn",
       file: "taskBannerFile",
       wrap: "taskBannerCropWrap",
@@ -72,6 +73,7 @@
     extra: {
       root: "extracurricularTaskModal",
       chooseBtn: "extraBannerChooseBtn",
+      stockBtn: "extraBannerStockBtn",
       clearBtn: "extraBannerClearBtn",
       file: "extraBannerFile",
       wrap: "extraBannerCropWrap",
@@ -84,6 +86,35 @@
     },
   };
   let activeBannerUiKey = "task";
+  let stockBannerPickerUiKey = "task";
+
+  /** Bundled stock banners (relative paths; stored as URL strings on tasks). */
+  const STOCK_BANNER_ASSETS = [
+    { id: "story-castorice", path: "assets/stock-banner-story-01.png", kind: "story", label: "Castorice" },
+    { id: "story-acheron", path: "assets/stock-banner-story-acheron.png", kind: "story", label: "Acheron" },
+    { id: "story-aemeath", path: "assets/stock-banner-story-aemeath.png", kind: "story", label: "Aemeath" },
+    { id: "event-acheron", path: "assets/stock-banner-event-acheron.png", kind: "event", label: "Crimson Rain" },
+    { id: "event-acheron-figure", path: "assets/stock-banner-event-acheron-with-figure.png", kind: "event", label: "Crimson Rain (figure)" },
+    { id: "event-hsin", path: "assets/stock-banner-event-hsin.png", kind: "event", label: "Moon Festival" },
+    { id: "event-ye", path: "assets/stock-banner-event-ye.png", kind: "event", label: "Qingming" },
+    { id: "event-endfield-01", path: "assets/stock-banner-event-endfield-01.png", kind: "event", label: "Wuling Blossom" },
+    { id: "event-endfield-02", path: "assets/stock-banner-event-endfield-02.png", kind: "event", label: "Wuling Rain Pillars" },
+  ];
+
+  function getStockBannerAssets() {
+    return STOCK_BANNER_ASSETS.slice();
+  }
+
+  function resolveStockBannerUrl(path) {
+    const raw = String(path || "").trim();
+    if (!raw) return "";
+    if (/^(data:|blob:|https?:|\/\/)/i.test(raw)) return raw;
+    try {
+      return new URL(raw.replace(/^\.\//, ""), document.baseURI || window.location.href).href;
+    } catch (_) {
+      return raw;
+    }
+  }
 
   function setActiveBannerUi(key) {
     if (TASK_BANNER_UI[key]) activeBannerUiKey = key;

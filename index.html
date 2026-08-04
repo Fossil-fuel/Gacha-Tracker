@@ -279,6 +279,7 @@
             </div>
             <div class="task-banner-crop-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="taskBannerChooseBtn">Choose image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="taskBannerStockBtn">Stock Image</button>
               <button type="button" class="btn btn-ghost btn-sm" id="taskBannerClearBtn" hidden>Clear</button>
               <input type="file" id="taskBannerFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
             </div>
@@ -552,6 +553,7 @@
             </div>
             <div class="task-banner-crop-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="extraBannerChooseBtn">Choose image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="extraBannerStockBtn">Stock Image</button>
               <button type="button" class="btn btn-ghost btn-sm" id="extraBannerClearBtn" hidden>Clear</button>
               <input type="file" id="extraBannerFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
             </div>
@@ -805,6 +807,7 @@
               <li role="option" tabindex="-1" data-settings-section="debug" aria-selected="false">Debug</li>
               <li role="option" tabindex="-1" data-settings-section="display" aria-selected="false">Display</li>
               <li role="option" tabindex="-1" data-settings-section="behavior" aria-selected="false">Behavior</li>
+              <li role="option" tabindex="-1" data-settings-section="stock-assets" aria-selected="false">Stock Assets</li>
             </ul>
           </div>
           <button type="button" class="settings-nav-item" data-settings-section="account">Account</button>
@@ -814,6 +817,7 @@
           <button type="button" class="settings-nav-item" data-settings-section="debug">Debug</button>
           <button type="button" class="settings-nav-item" data-settings-section="display">Display</button>
           <button type="button" class="settings-nav-item" data-settings-section="behavior">Behavior</button>
+          <button type="button" class="settings-nav-item" data-settings-section="stock-assets">Stock Assets</button>
         </nav>
         <div class="settings-content">
           <section id="settings-section-account" class="settings-section" aria-labelledby="settings-account-heading">
@@ -1112,7 +1116,27 @@
               <input type="checkbox" id="settingsConfirmBeforeDelete" class="settings-toggle" checked />
             </div>
           </section>
+          <section id="settings-section-stock-assets" class="settings-section" aria-labelledby="settings-stock-assets-heading">
+            <h4 id="settings-stock-assets-heading" class="settings-section-title">Stock Assets</h4>
+            <p class="settings-hint">Bundled banner images you can apply from <strong>Stock Image</strong> when editing a task banner. Saved tasks store the asset path (not a copy of the file).</p>
+            <div id="settingsStockAssetsList" class="stock-assets-gallery" aria-live="polite"></div>
+          </section>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stock banner picker (from task / extracurricular banner editor) -->
+  <div id="stockBannerPickerModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="stockBannerPickerModal"></div>
+    <div class="modal-dialog modal-dialog-md" role="dialog" aria-modal="true" aria-labelledby="stockBannerPickerModalTitle">
+      <div class="modal-header">
+        <h3 id="stockBannerPickerModalTitle" class="modal-title">Stock Image</h3>
+        <button type="button" class="icon-btn" id="stockBannerPickerModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="settings-hint">Pick a bundled Story or Event banner. You can still crop after applying.</p>
+        <div id="stockBannerPickerGrid" class="stock-banner-picker-grid"></div>
       </div>
     </div>
   </div>
