@@ -41,7 +41,7 @@ module.exports = {
         assert.ok(appSrc.includes("applyBatchCompletionTimeToSelected"), "batch apply");
         assert.ok(appSrc.includes("debug-dupes") || appSrc.includes("openDebugResolveDuplicateTimes"), "dupe resolve wiring");
         assert.ok(html.includes("completionTimeBatchBar"), "batch bar");
-        assert.ok(html.includes("settingsDebugResolveDuplicateTimesBtn"), "debug resolve button");
+        assert.ok(html.includes("settingsDebugFixTimesDatesBtn"), "debug fix times & dates button");
         assert.ok(appSrc.includes("#completionTimeModal") || appSrc.includes('id="completionTimeModal"') || true, "modal id present in html");
       })
     );

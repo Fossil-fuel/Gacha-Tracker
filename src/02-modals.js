@@ -199,6 +199,7 @@
     state.extracurricularCurrencyEarned = {};
     state.tab = state.defaultTab || "about";
     save();
+    // bulk state change: full refresh
     renderAll();
     closeClearDataModal();
     closeSettingsModal();
@@ -336,18 +337,45 @@
     list.innerHTML = "";
     const def = defaultCompletionTimeValue();
     const isDupes = ctx.mode === "debug-dupes";
-    if (title) title.textContent = isDupes ? "Resolve duplicate times" : ctx.mode === "debug" ? "Fill missing times" : "Completion time";
+    const isUnlockEdit = ctx.mode === "debug-before-unlock";
+    const isTimeDateFix = ctx.mode === "debug-time-date-fix";
+    if (title) {
+      title.textContent = isDupes
+        ? "Resolve duplicate times"
+        : isTimeDateFix
+          ? "Fix times & dates"
+          : isUnlockEdit
+            ? "Edit unlock-error dates"
+            : ctx.mode === "debug"
+              ? "Fill missing times"
+              : "Completion time";
+    }
     if (desc) {
       desc.textContent = isDupes
         ? "These tasks have more than one finish timestamp in the same cycle. Pick which one to keep; the others are removed. Calendar marks and tallies stay unchanged."
-        : ctx.mode === "debug"
-          ? "These calendar marks have no finish time. Enter times individually, or select several and use Batch → Apply to selected."
-          : "When did you finish each newly completed task on " +
-            (typeof formatDate === "function" ? formatDate(ctx.dateStr) : ctx.dateStr) +
-            "? Select several to set the same time in one step.";
+        : isTimeDateFix
+          ? "Update finish date/time, pick which duplicate to keep, or Drop a cycle so it counts as skipped. Tallies rebuild after Save."
+          : isUnlockEdit
+            ? "These finishes are before the task unlock window. Date/time default to unlock. Tallies stay unchanged. If unlock days were set by mistake, clear them on the task in Games instead."
+            : ctx.mode === "debug"
+              ? "These calendar marks have no finish time. Enter times individually, or select several and use Batch → Apply to selected."
+              : "When did you finish each newly completed task on " +
+                (typeof formatDate === "function" ? formatDate(ctx.dateStr) : ctx.dateStr) +
+                "? Select several to set the same time in one step.";
     }
-    if (confirmBtn) confirmBtn.textContent = isDupes ? "Keep selected" : "Save times";
-    if (batchBar) batchBar.hidden = isDupes || !(ctx.rows && ctx.rows.length);
+    if (confirmBtn) {
+      confirmBtn.textContent = isDupes
+        ? "Keep selected"
+        : isTimeDateFix
+          ? "Apply fixes"
+          : isUnlockEdit
+            ? "Save dates"
+            : "Save times";
+    }
+    if (batchBar) {
+      batchBar.hidden = !!(isDupes || isUnlockEdit || isTimeDateFix || !(ctx.rows && ctx.rows.length));
+      if (isTimeDateFix || isDupes || isUnlockEdit) batchBar.setAttribute("hidden", "");
+    }
     if (batchInput) batchInput.value = def;
     if (selectAll) {
       selectAll.checked = false;
@@ -398,6 +426,199 @@
         });
         list.appendChild(block);
         group._radios = radios;
+      });
+      setCompletionTimeModalOpen(true);
+      return;
+    }
+
+    if (isUnlockEdit) {
+      (ctx.rows || []).forEach((row, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "completion-time-row completion-time-row-unlock-edit";
+        const lab = document.createElement("div");
+        lab.className = "completion-time-row-label";
+        lab.textContent = row.label;
+        const meta = document.createElement("div");
+        meta.className = "completion-time-row-meta";
+        meta.textContent =
+          "Cycle " +
+          row.cycleStart +
+          " · unlock " +
+          (row.unlockDate || row.suggestedDateStr || "—") +
+          (row.unlockHour != null
+            ? " " +
+              (typeof timeToStr === "function"
+                ? timeToStr(row.unlockHour, row.unlockMinute || 0)
+                : String(row.unlockHour).padStart(2, "0") +
+                  ":" +
+                  String(row.unlockMinute || 0).padStart(2, "0"))
+            : "") +
+          (row.type ? " · " + row.type : "") +
+          (row.dateStr
+            ? " · was " +
+              row.dateStr +
+              (row.hour != null
+                ? " " +
+                  (typeof timeToStr === "function"
+                    ? timeToStr(row.hour, row.minute || 0)
+                    : String(row.hour).padStart(2, "0") + ":" + String(row.minute || 0).padStart(2, "0"))
+                : "")
+            : "");
+        const dateInput = document.createElement("input");
+        dateInput.type = "date";
+        dateInput.id = "completionUnlockDate_" + idx;
+        dateInput.className = "settings-input";
+        dateInput.value = row.suggestedDateStr || row.unlockDate || row.dateStr || "";
+        dateInput.min = row.cycleStart || "";
+        const timeInput = document.createElement("input");
+        timeInput.type = "time";
+        timeInput.id = "completionUnlockTime_" + idx;
+        timeInput.className = "settings-input";
+        const h = Number.isFinite(Number(row.suggestedHour))
+          ? Number(row.suggestedHour)
+          : Number.isFinite(Number(row.unlockHour))
+            ? Number(row.unlockHour)
+            : Number.isFinite(Number(row.hour))
+              ? Number(row.hour)
+              : Number(def.slice(0, 2)) || 12;
+        const m = Number.isFinite(Number(row.suggestedMinute))
+          ? Number(row.suggestedMinute)
+          : Number.isFinite(Number(row.unlockMinute))
+            ? Number(row.unlockMinute)
+            : Number.isFinite(Number(row.minute))
+              ? Number(row.minute)
+              : Number(def.slice(3, 5)) || 0;
+        timeInput.value = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+        wrap.appendChild(lab);
+        wrap.appendChild(dateInput);
+        wrap.appendChild(timeInput);
+        wrap.appendChild(meta);
+        list.appendChild(wrap);
+        row._dateInput = dateInput;
+        row._input = timeInput;
+      });
+      setCompletionTimeModalOpen(true);
+      return;
+    }
+
+    if (isTimeDateFix) {
+      (ctx.rows || []).forEach((row, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "completion-time-row completion-time-row-unlock-edit";
+        const lab = document.createElement("div");
+        lab.className = "completion-time-row-label";
+        lab.textContent = (row.label || "") + " · " + (row.kind || "");
+        const meta = document.createElement("div");
+        meta.className = "completion-time-row-meta";
+        meta.textContent =
+          (row.message || "") +
+          (row.cycleStart ? " · cycle " + row.cycleStart : "") +
+          (row.type ? " · " + row.type : "");
+
+        const action = document.createElement("select");
+        action.className = "settings-select";
+        action.setAttribute("aria-label", "Action for " + (row.label || "item"));
+        [
+          ["set", "Update finish"],
+          ["drop", "Drop (count as skip)"],
+        ].forEach(([val, text]) => {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = text;
+          action.appendChild(opt);
+        });
+
+        const dateInput = document.createElement("input");
+        dateInput.type = "date";
+        dateInput.className = "settings-input";
+        dateInput.value = row.suggestedDateStr || row.dateStr || row.cycleStart || "";
+
+        const timeInput = document.createElement("input");
+        timeInput.type = "time";
+        timeInput.className = "settings-input";
+        const h = Number.isFinite(Number(row.suggestedHour))
+          ? Number(row.suggestedHour)
+          : Number.isFinite(Number(row.hour))
+            ? Number(row.hour)
+            : Number(def.slice(0, 2)) || 12;
+        const m = Number.isFinite(Number(row.suggestedMinute))
+          ? Number(row.suggestedMinute)
+          : Number.isFinite(Number(row.minute))
+            ? Number(row.minute)
+            : Number(def.slice(3, 5)) || 0;
+        timeInput.value = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+
+        const syncActionUi = () => {
+          const dropping = action.value === "drop";
+          dateInput.disabled = dropping;
+          timeInput.disabled = dropping;
+          if (row._dupeRadios) row._dupeRadios.forEach((r) => { r.disabled = dropping; });
+        };
+        action.addEventListener("change", syncActionUi);
+
+        wrap.appendChild(lab);
+        wrap.appendChild(action);
+        wrap.appendChild(dateInput);
+        wrap.appendChild(timeInput);
+        wrap.appendChild(meta);
+
+        if (row.kind === "duplicate-timestamps" && Array.isArray(row.stamps) && row.stamps.length) {
+          const dupeWrap = document.createElement("div");
+          dupeWrap.className = "completion-time-dupe-group";
+          const hint = document.createElement("div");
+          hint.className = "completion-time-dupe-meta";
+          hint.textContent =
+            "Pick one finish to keep. All other timestamps in this cycle are deleted (no new stamp is added).";
+          dupeWrap.appendChild(hint);
+          const radios = [];
+          row.stamps.forEach((stamp, sIdx) => {
+            const opt = document.createElement("label");
+            opt.className = "completion-time-dupe-option";
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = "fixTimeDupe_" + idx;
+            radio.checked = sIdx === row.stamps.length - 1;
+            radio.dataset.dateStr = stamp.dateStr;
+            radio.dataset.hour = String(Number(stamp.hour) || 0);
+            radio.dataset.minute = String(Number(stamp.minute) || 0);
+            radio.addEventListener("change", () => {
+              if (!radio.checked) return;
+              dateInput.value = stamp.dateStr || dateInput.value;
+              timeInput.value =
+                String(Number(stamp.hour) || 0).padStart(2, "0") +
+                ":" +
+                String(Number(stamp.minute) || 0).padStart(2, "0");
+            });
+            const text = document.createElement("span");
+            const timeLabel =
+              typeof formatTimeOnly === "function"
+                ? formatTimeOnly(Number(stamp.hour) || 0, Number(stamp.minute) || 0)
+                : String(stamp.hour) + ":" + String(stamp.minute || 0).padStart(2, "0");
+            const dateLabel =
+              typeof formatDate === "function" ? formatDate(stamp.dateStr) : stamp.dateStr;
+            text.textContent = "Keep " + dateLabel + " · " + timeLabel;
+            opt.appendChild(radio);
+            opt.appendChild(text);
+            dupeWrap.appendChild(opt);
+            radios.push(radio);
+          });
+          wrap.appendChild(dupeWrap);
+          row._dupeRadios = radios;
+          const last = row.stamps[row.stamps.length - 1];
+          if (last) {
+            dateInput.value = last.dateStr || dateInput.value;
+            timeInput.value =
+              String(Number(last.hour) || 0).padStart(2, "0") +
+              ":" +
+              String(Number(last.minute) || 0).padStart(2, "0");
+          }
+        }
+
+        list.appendChild(wrap);
+        row._actionSelect = action;
+        row._dateInput = dateInput;
+        row._input = timeInput;
+        syncActionUi();
       });
       setCompletionTimeModalOpen(true);
       return;
@@ -478,6 +699,91 @@
         lines.push("Resolve duplicate times");
         lines.push("Groups resolved: " + (result.resolved || 0));
         lines.push("Timestamps removed: " + (result.removed || 0));
+        lines.push("");
+        if (result.after && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(result.after));
+        } else if (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(scanDataConflicts()));
+        }
+        report.textContent = lines.join("\n");
+      }
+      if (typeof syncSettingsUI === "function") syncSettingsUI();
+      return;
+    }
+    if (ctx.mode === "debug-before-unlock") {
+      const edits = (ctx.rows || []).map((row) => {
+        const parsed = parseTimeInputValue(row._input && row._input.value);
+        const newDateStr = (row._dateInput && row._dateInput.value) || row.suggestedDateStr || row.dateStr;
+        return {
+          type: row.type,
+          gameId: row.gameId,
+          taskId: row.taskId,
+          cycleStart: row.cycleStart,
+          newDateStr,
+          hour: parsed.hour,
+          minute: parsed.minute,
+        };
+      });
+      closeCompletionTimeModal();
+      const result =
+        typeof applyDebugBeforeUnlockEdits === "function"
+          ? applyDebugBeforeUnlockEdits(edits)
+          : { ok: false, updated: 0 };
+      const report = qs("settingsDebugReport");
+      if (report) {
+        const lines = [];
+        lines.push("Edit unlock-error dates");
+        lines.push("Cycles updated: " + (result.updated || 0));
+        lines.push("");
+        if (result.after && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(result.after));
+        } else if (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(scanDataConflicts()));
+        }
+        report.textContent = lines.join("\n");
+      }
+      if (typeof syncSettingsUI === "function") syncSettingsUI();
+      return;
+    }
+    if (ctx.mode === "debug-time-date-fix") {
+      const edits = (ctx.rows || []).map((row) => {
+        const action = (row._actionSelect && row._actionSelect.value) || "set";
+        const parsed = parseTimeInputValue(row._input && row._input.value);
+        const newDateStr = (row._dateInput && row._dateInput.value) || row.suggestedDateStr || row.dateStr;
+        let keep = null;
+        if (row.kind === "duplicate-timestamps" && row._dupeRadios) {
+          const picked = row._dupeRadios.find((r) => r.checked) || row._dupeRadios[row._dupeRadios.length - 1];
+          if (picked) {
+            keep = {
+              dateStr: picked.dataset.dateStr,
+              hour: Number(picked.dataset.hour) || 0,
+              minute: Number(picked.dataset.minute) || 0,
+            };
+          }
+        }
+        return {
+          kind: row.kind,
+          type: row.type,
+          gameId: row.gameId,
+          taskId: row.taskId,
+          cycleStart: row.cycleStart,
+          action,
+          newDateStr: keep ? keep.dateStr : newDateStr,
+          hour: keep ? keep.hour : parsed.hour,
+          minute: keep ? keep.minute : parsed.minute,
+          keep,
+        };
+      });
+      closeCompletionTimeModal();
+      const result =
+        typeof applyDebugTimeDateFixes === "function"
+          ? applyDebugTimeDateFixes(edits)
+          : { ok: false, updated: 0, dropped: 0 };
+      const report = qs("settingsDebugReport");
+      if (report) {
+        const lines = [];
+        lines.push("Fix times & dates");
+        lines.push("Updated: " + (result.updated || 0) + "  ·  Dropped: " + (result.dropped || 0));
         lines.push("");
         if (result.after && typeof formatConflictScanReport === "function") {
           lines.push(formatConflictScanReport(result.after));
@@ -2334,6 +2640,48 @@
     });
   }
 
+  function openDebugFixTimesDates() {
+    if (typeof listTimeDateFixQueue !== "function") {
+      alert("Fix times & dates is unavailable.");
+      return;
+    }
+    const queue = listTimeDateFixQueue();
+    const report = qs("settingsDebugReport");
+    if (!queue.length) {
+      if (report) {
+        report.textContent =
+          "Fix times & dates\n\nNo time/date conflicts to fix." +
+          (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function"
+            ? "\n\n" + formatConflictScanReport(scanDataConflicts())
+            : "");
+      }
+      return;
+    }
+    openCompletionTimeModal({
+      mode: "debug-time-date-fix",
+      rows: queue.map((c) => ({
+        kind: c.kind,
+        type: c.type,
+        key: c.key,
+        gameId: c.gameId,
+        taskId: c.taskId,
+        label: (c.game || "") + " — " + (c.task || c.taskId || ""),
+        cycleStart: c.cycleStart,
+        message: c.message,
+        dateStr: c.dateStr,
+        hour: c.hour,
+        minute: c.minute,
+        unlockDate: c.unlockDate,
+        unlockHour: c.unlockHour,
+        unlockMinute: c.unlockMinute,
+        stamps: c.stamps,
+        suggestedDateStr: c.suggestedDateStr,
+        suggestedHour: c.suggestedHour,
+        suggestedMinute: c.suggestedMinute,
+      })),
+    });
+  }
+
   let settingsModalOpen = false;
 
   const PRESET_NAMES = {
@@ -3118,13 +3466,15 @@
       freezeTalliesOnTimezoneChange();
       save();
       updateSidebarTime();
-      renderAll();
+      // display-only: active tab + chrome
+      renderActiveTab();
     });
     const dateFormatEl = qs("settingsDateFormat");
     if (dateFormatEl) dateFormatEl.addEventListener("change", () => {
       state.dateFormat = dateFormatEl.value || "mdy";
       save();
-      renderAll();
+      // display-only: active tab + chrome
+      renderActiveTab();
     });
     const timeFormatEl = qs("settingsTimeFormat");
     if (timeFormatEl) timeFormatEl.addEventListener("change", () => {
@@ -3141,19 +3491,22 @@
       freezeTalliesOnTimezoneChange();
       save();
       updateSidebarTime();
-      renderAll();
+      // display-only: active tab + chrome
+      renderActiveTab();
     });
     const firstDayEl = qs("settingsFirstDayOfWeek");
     if (firstDayEl) firstDayEl.addEventListener("change", () => {
       state.firstDayOfWeek = parseInt(firstDayEl.value, 10) || 0;
       save();
-      renderAll();
+      // display-only: active tab + chrome
+      renderActiveTab();
     });
     const compactEl = qs("settingsCompactMode");
     if (compactEl) compactEl.addEventListener("change", () => {
       state.compactMode = compactEl.checked;
       applyCompactMode();
       save();
+      // display-only: active tab + chrome
       renderActiveTab();
     });
     const defaultTabEl = qs("settingsDefaultTab");
@@ -3309,6 +3662,7 @@
           // Must flush before load(), or load() reloads the previous localStorage and undoes the import.
           save({ immediate: true });
           load();
+          // bulk state change: full refresh
           renderAll();
           const report = qs("settingsDebugReport");
           if (report && typeof formatConflictScanReport === "function" && typeof scanDataConflicts === "function") {
@@ -3387,8 +3741,8 @@
     });
     const debugFillTimesBtn = qs("settingsDebugFillMissingTimesBtn");
     if (debugFillTimesBtn) debugFillTimesBtn.addEventListener("click", () => openDebugFillMissingTimes());
-    const debugResolveDupesBtn = qs("settingsDebugResolveDuplicateTimesBtn");
-    if (debugResolveDupesBtn) debugResolveDupesBtn.addEventListener("click", () => openDebugResolveDuplicateTimes());
+    const debugFixTimesDatesBtn = qs("settingsDebugFixTimesDatesBtn");
+    if (debugFixTimesDatesBtn) debugFixTimesDatesBtn.addEventListener("click", () => openDebugFixTimesDates());
 
     function getSelectedCompactMonths() {
       const sel = qs("settingsCompactMonths");

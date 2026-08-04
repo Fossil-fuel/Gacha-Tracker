@@ -1044,11 +1044,11 @@
                 </div>
               </div>
               <div class="settings-row settings-tip-wrap">
-                <button type="button" class="btn btn-ghost" id="settingsDebugResolveDuplicateTimesBtn" aria-describedby="settingsDebugResolveDuplicateTimesTip">
-                  Resolve duplicate times
+                <button type="button" class="btn btn-ghost" id="settingsDebugFixTimesDatesBtn" aria-describedby="settingsDebugFixTimesDatesTip">
+                  Fix times &amp; dates…
                 </button>
-                <div id="settingsDebugResolveDuplicateTimesTip" class="settings-hover-tooltip" role="tooltip">
-                  When a cycle has two (or more) finish timestamps, pick which one to keep and remove the others. Does not change calendar marks or tallies.
+                <div id="settingsDebugFixTimesDatesTip" class="settings-hover-tooltip" role="tooltip">
+                  One place for unlock errors, early calendar vs timestamp, duplicates, and orphan timestamps. Per item: <strong>Update</strong> finish date/time, or <strong>Drop</strong> so that cycle counts as skipped. Rebuilds tallies after apply.
                 </div>
               </div>
 
@@ -1299,10 +1299,52 @@
     </div>
   </div>
 
-  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+  <!-- firebase-config first so we can skip CDN when placeholders are set. -->
   <script src="firebase-config.js"></script>
-  <script src="app.js"></script>
+  <script>
+    (function () {
+      function isFirebaseConfigured() {
+        var cfg = window.FIREBASE_CONFIG;
+        return !!(
+          cfg &&
+          cfg.apiKey &&
+          cfg.apiKey !== "YOUR_API_KEY" &&
+          cfg.projectId &&
+          cfg.projectId !== "YOUR_PROJECT_ID"
+        );
+      }
+
+      function loadScript(src) {
+        return new Promise(function (resolve, reject) {
+          var s = document.createElement("script");
+          s.src = src;
+          s.async = false;
+          s.onload = function () { resolve(); };
+          s.onerror = function () { reject(new Error("Failed to load " + src)); };
+          document.body.appendChild(s);
+        });
+      }
+
+      function loadApp() {
+        return loadScript("app.js");
+      }
+
+      // Phase 2: only pull Firebase SDK when a real project config is present.
+      if (!isFirebaseConfigured()) {
+        loadApp();
+        return;
+      }
+
+      var base = "https://www.gstatic.com/firebasejs/10.7.0/";
+      loadScript(base + "firebase-app-compat.js")
+        .then(function () { return loadScript(base + "firebase-auth-compat.js"); })
+        .then(function () { return loadScript(base + "firebase-firestore-compat.js"); })
+        .then(loadApp)
+        .catch(function () {
+          // CDN failure should not brick the tracker; boot local-only.
+          loadApp();
+        });
+    })();
+  </script>
 </body>
 </html>

@@ -168,13 +168,21 @@
       if (document.visibilityState === "hidden" && typeof window.flushPendingSave === "function") {
         window.flushPendingSave();
       }
+      // Phase 5: catch up sidebar clock as soon as the tab is focused again.
+      if (document.visibilityState === "visible" && typeof updateSidebarTime === "function") {
+        updateSidebarTime();
+      }
     });
     setInterval(() => {
       const changed = processResets();
       updateTaskRemainingTexts();
       if (changed) renderActiveTab();
     }, 60000);
-    setInterval(updateSidebarTime, 1000);
+    // Pause sidebar clock while the page is in a background tab (saves work; resets timer unchanged).
+    setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      updateSidebarTime();
+    }, 1000);
 
     // Games banners switch home↔games crop at the hamburger breakpoint.
     try {
@@ -186,7 +194,8 @@
       else if (gamesBannerMq.addListener) gamesBannerMq.addListener(onGamesBannerModeChange);
     } catch (_) {}
 
-    renderAll();
+    // Cold start: active tab + chrome only. Full renderAll stays for import/repair/cloud/dev skips.
+    renderActiveTab();
 
     // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
     if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {
@@ -268,6 +277,10 @@
         cleanupCycleBoundaryBleedMarks,
         processResets,
         scanDataConflicts,
+        listBeforeUnlockConflicts,
+        applyDebugBeforeUnlockEdits,
+        listTimeDateFixQueue,
+        applyDebugTimeDateFixes,
         getDateStr,
         getSimulatedNow,
         getPeriodDateStrForReset,

@@ -114,14 +114,24 @@ function scanDataConflicts(state) {
             }
           }
           const early = cyc.tsEarliest || cyc.calEarliest;
-          if (early && early < unlockDate) {
+          const hasUnlockWindow =
+            unlockDays > 0 ||
+            Number.isFinite(task.earliestCompleteHour) ||
+            Number.isFinite(task.earliestCompleteMinute);
+          if (hasUnlockWindow && early && early < unlockDate) {
             push({
               severity: "error",
               kind: "before-unlock",
               game: game.name,
+              gameId: game.id,
               task: task.label || taskId,
+              taskId,
               type,
+              key,
               cycleStart: start,
+              dateStr: early,
+              unlockDate,
+              suggestedDateStr: unlockDate,
               message: "Completion " + early + " is before unlock day " + unlockDate,
             });
           }

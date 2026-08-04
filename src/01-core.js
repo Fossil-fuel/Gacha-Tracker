@@ -843,6 +843,16 @@
   const SAVE_DEBOUNCE_MS = 200;
   let saveTimer = null;
   let pendingSaveJson = null;
+  /**
+   * Persistence mode — swap later without rewriting call sites:
+   * - "localPrimary": IndexedDB is source of truth; cloud (__cloudSave) is optional mirror when signed in.
+   * - "cloudPrimary" (future): Firestore is source of truth; IndexedDB (+ slim localStorage) is offline backup.
+   *
+   * Hooks used by both modes:
+   * - persistLocalFull(jsonStr) / initPersistentStorage()
+   * - window.__cloudSave(jsonStr) / window.__applyCloudData(jsonStr)
+   */
+  const PERSISTENCE_MODE = "localPrimary";
   let storageBackend = "local"; // "local" until IDB is ready, then "idb"
   let idbOpenPromise = null;
 
@@ -932,9 +942,9 @@
     }
   }
 
-  function writeSavePayload(jsonStr) {
+  function persistLocalFull(jsonStr) {
     if (storageBackend === "idb") {
-      idbPutFullJson(jsonStr)
+      return idbPutFullJson(jsonStr)
         .then(() => {
           lastSavedAtMs = Date.now();
           updateLastSavedIndicator(false);
@@ -943,11 +953,38 @@
         .catch(() => {
           updateLastSavedIndicator(true);
         });
-      if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY, jsonStr);
+      lastSavedAtMs = Date.now();
+      updateLastSavedIndicator(false);
+    } catch (_) {
+      updateLastSavedIndicator(true);
+    }
+    return Promise.resolve();
+  }
+
+  function persistCloudMirror(jsonStr) {
+    try {
+      if (typeof window.__cloudSave === "function") {
+        const ret = window.__cloudSave(jsonStr);
+        return ret && typeof ret.then === "function" ? ret : Promise.resolve();
+      }
+    } catch (_) {}
+    return Promise.resolve();
+  }
+
+  function writeSavePayload(jsonStr) {
+    // localPrimary today: write local first, then best-effort cloud mirror.
+    // cloudPrimary later: reverse order (cloud first) and treat IndexedDB as backup in persistLocalFull.
+    if (PERSISTENCE_MODE === "cloudPrimary") {
+      persistCloudMirror(jsonStr).finally(function () {
+        persistLocalFull(jsonStr);
+      });
       return;
     }
-    localStorage.setItem(STORAGE_KEY, jsonStr);
-    if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
+    persistLocalFull(jsonStr);
+    persistCloudMirror(jsonStr);
   }
 
   async function initPersistentStorage() {
@@ -4353,9 +4390,13 @@
                 severity: "warn",
                 kind: "timestamp-without-calendar",
                 game: game.name,
+                gameId: game.id,
                 task: task.label || taskId,
+                taskId,
                 type,
+                key,
                 cycleStart: start,
+                dateStr: cyc.tsEarliest,
                 message: "Timestamp on " + cyc.tsEarliest + " but no calendar mark in cycle starting " + start,
               });
             }
@@ -4364,21 +4405,63 @@
                 severity: "info",
                 kind: "calendar-without-timestamp",
                 game: game.name,
+                gameId: game.id,
                 task: task.label || taskId,
+                taskId,
                 type,
+                key,
                 cycleStart: start,
+                dateStr: cyc.calEarliest,
                 message: "Calendar mark from " + cyc.calEarliest + " with no timestamp (cycle " + start + ")",
               });
             }
             if (cyc.calEarliest && cyc.tsEarliest && cyc.calEarliest < cyc.tsEarliest) {
+              let earlyStamp = null;
+              (cyc.stamps || []).forEach((s) => {
+                if (!s || !isValidDateStr(s.dateStr)) return;
+                if (!earlyStamp || completionStampSortKey(s) < completionStampSortKey(earlyStamp)) earlyStamp = s;
+              });
               push({
                 severity: "warn",
                 kind: "calendar-before-timestamp",
                 game: game.name,
+                gameId: game.id,
                 task: task.label || taskId,
+                taskId,
                 type,
+                key,
                 cycleStart: start,
-                message: "Calendar starts " + cyc.calEarliest + " but timestamp is " + cyc.tsEarliest + " (cycle " + start + ")",
+                dateStr: earlyStamp ? earlyStamp.dateStr : cyc.tsEarliest,
+                hour: earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.hour))
+                    ? Number(earlyStamp.hour)
+                    : 12
+                  : null,
+                minute: earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.minute))
+                    ? Number(earlyStamp.minute)
+                    : 0
+                  : null,
+                calEarliest: cyc.calEarliest,
+                suggestedDateStr: cyc.tsEarliest,
+                suggestedHour: earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.hour))
+                    ? Number(earlyStamp.hour)
+                    : 12
+                  : 12,
+                suggestedMinute: earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.minute))
+                    ? Number(earlyStamp.minute)
+                    : 0
+                  : 0,
+                message:
+                  "Calendar starts " +
+                  cyc.calEarliest +
+                  " but timestamp is " +
+                  cyc.tsEarliest +
+                  " (cycle " +
+                  start +
+                  ")",
               });
             }
             if (cyc.stamps.length > 1) {
@@ -4388,24 +4471,126 @@
                   severity: "warn",
                   kind: "duplicate-timestamps",
                   game: game.name,
+                  gameId: game.id,
                   task: task.label || taskId,
+                  taskId,
                   type,
+                  key,
                   cycleStart: start,
+                  stamps: (cyc.stamps || []).map((s) => ({
+                    dateStr: s.dateStr,
+                    hour: Number.isFinite(Number(s.hour)) ? Number(s.hour) : 12,
+                    minute: Number.isFinite(Number(s.minute)) ? Number(s.minute) : 0,
+                  })),
                   message: cyc.stamps.length + " timestamps in cycle " + start + " (" + [...uniq].join(", ") + ")",
                 });
               }
             }
-            const early = cyc.tsEarliest || cyc.calEarliest;
-            if (early && early < unlockDate) {
-              push({
-                severity: "error",
-                kind: "before-unlock",
-                game: game.name,
-                task: task.label || taskId,
-                type,
-                cycleStart: start,
-                message: "Completion " + early + " is before unlock day " + unlockDate + " (cycle " + start + ")",
+            // Only flag unlock windows the task actually defines (days > 0 or custom unlock time).
+            const hasUnlockWindow =
+              unlockDays > 0 ||
+              Number.isFinite(task.earliestCompleteHour) ||
+              Number.isFinite(task.earliestCompleteMinute);
+            if (hasUnlockWindow) {
+              let earlyStamp = null;
+              (cyc.stamps || []).forEach((s) => {
+                if (!s || !isValidDateStr(s.dateStr)) return;
+                if (!earlyStamp) {
+                  earlyStamp = s;
+                  return;
+                }
+                const a = completionStampSortKey(s);
+                const b = completionStampSortKey(earlyStamp);
+                if (a < b) earlyStamp = s;
               });
+              const earlyDate = earlyStamp ? earlyStamp.dateStr : cyc.calEarliest;
+              if (earlyDate) {
+                let violates = false;
+                let completionLabel = earlyDate;
+                const hour = earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.hour))
+                    ? Number(earlyStamp.hour)
+                    : 12
+                  : null;
+                const minute = earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.minute))
+                    ? Number(earlyStamp.minute)
+                    : 0
+                  : null;
+                if (earlyStamp) {
+                  const y = parseInt(earlyDate.slice(0, 4), 10);
+                  const mo = parseInt(earlyDate.slice(5, 7), 10) - 1;
+                  const d = parseInt(earlyDate.slice(8, 10), 10);
+                  const baseTz = getResetTimezoneForGame(game);
+                  const tz = getTimezoneForTaskDst(task, baseTz);
+                  const offsetRef = getOffsetRefDateForTask(task, tz);
+                  const completionMoment = createDateInTimezone(y, mo, d, hour, minute, tz, offsetRef);
+                  const unlockMoment = getTaskUnlockMoment(type, task, game, completionMoment);
+                  completionLabel =
+                    earlyDate +
+                    " " +
+                    (typeof timeToStr === "function" ? timeToStr(hour, minute) : hour + ":" + String(minute).padStart(2, "0"));
+                  if (unlockMoment && completionMoment.getTime() < unlockMoment.getTime()) violates = true;
+                } else if (earlyDate < unlockDate) {
+                  violates = true;
+                }
+                if (violates) {
+                  const unlockParts = getTaskEarliestCompleteTimeParts(task, game);
+                  const unlockTimeLabel =
+                    typeof timeToStr === "function"
+                      ? timeToStr(unlockParts.hour, unlockParts.minute)
+                      : unlockParts.hour + ":" + String(unlockParts.minute).padStart(2, "0");
+                  const sameDay = earlyDate === unlockDate;
+                  const msg = earlyStamp
+                    ? sameDay
+                      ? "Completion " +
+                        completionLabel +
+                        " is before unlock time " +
+                        unlockDate +
+                        " " +
+                        unlockTimeLabel +
+                        " (cycle " +
+                        start +
+                        ")"
+                      : "Completion " +
+                        completionLabel +
+                        " is before unlock " +
+                        unlockDate +
+                        " " +
+                        unlockTimeLabel +
+                        " (cycle " +
+                        start +
+                        ")"
+                    : "Completion " +
+                      earlyDate +
+                      " is before unlock day " +
+                      unlockDate +
+                      " (cycle " +
+                      start +
+                      ")";
+                  push({
+                    severity: "error",
+                    kind: "before-unlock",
+                    game: game.name,
+                    gameId: game.id,
+                    task: task.label || taskId,
+                    taskId,
+                    type,
+                    key,
+                    cycleStart: start,
+                    dateStr: earlyDate,
+                    hour,
+                    minute,
+                    unlockDate,
+                    unlockHour: unlockParts.hour,
+                    unlockMinute: unlockParts.minute,
+                    suggestedDateStr: unlockDate,
+                    suggestedHour: unlockParts.hour,
+                    suggestedMinute: unlockParts.minute,
+                    message: msg,
+                  });
+                }
+              }
             }
           });
 
@@ -4480,12 +4665,355 @@
     }
     lines.push("");
     lines.push("Note: [info] calendar-without-timestamp is normal for older marks and is not auto-fixed.");
+    lines.push("Fix hints:");
+    lines.push("  • calendar-before-timestamp / before-unlock / duplicates → Fix times & dates…");
+    lines.push("  • tally-mismatch → Rebuild tallies only");
+    lines.push("  • timestamp-without-calendar → Fix times & dates… or Repair (safe)");
+    lines.push("  • (dropped in Fix times & dates) cycle becomes a skip after tallies rebuild");
     lines.push("");
     scan.conflicts.slice(0, 80).forEach((c, i) => {
       lines.push((i + 1) + ". [" + c.severity + "] " + (c.game || "") + " / " + (c.task || "") + " — " + c.message);
     });
     if (scan.conflicts.length > 80) lines.push("…and " + (scan.conflicts.length - 80) + " more");
     return lines.join("\n");
+  }
+
+  /** before-unlock errors from the latest scan (for Debug edit modal). */
+  function listBeforeUnlockConflicts() {
+    const scan = scanDataConflicts();
+    return (scan.conflicts || []).filter((c) => c && c.kind === "before-unlock");
+  }
+
+  /**
+   * Debug: move finish date/time for before-unlock cycles.
+   * edits: [{ type, gameId, taskId, cycleStart, newDateStr, hour, minute }]
+   * Rewrites timestamps + calendar marks in that cycle; tallies unchanged.
+   */
+  function applyDebugBeforeUnlockEdits(edits, opts) {
+    const o = opts || {};
+    const list = Array.isArray(edits) ? edits : [];
+    let updated = 0;
+    list.forEach((edit) => {
+      if (!edit || !edit.type || !edit.gameId || !edit.taskId || !isValidDateStr(edit.newDateStr)) return;
+      if (!isValidDateStr(edit.cycleStart)) return;
+      const type = edit.type;
+      if (type !== "weeklies" && type !== "endgame") return;
+      const game = getGame(edit.gameId);
+      if (!game) return;
+      const taskList = type === "weeklies" ? game.weeklies : game.endgame;
+      const task = (taskList || []).find((t) => (t.id || t.label) === edit.taskId);
+      if (!task) return;
+      const key = edit.gameId + "." + edit.taskId;
+      const bounds = getCycleBoundsForTaskType(type, task, new Date(edit.cycleStart + "T12:00:00"), game);
+      if (!bounds) return;
+      const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+      if (!dates.length || dates[0] !== edit.cycleStart) return;
+      if (edit.newDateStr < dates[0] || edit.newDateStr > dates[dates.length - 1]) return;
+
+      const hourRaw = Number(edit.hour);
+      const minuteRaw = Number(edit.minute);
+      const safeHour = Number.isFinite(hourRaw) ? Math.max(0, Math.min(23, hourRaw)) : 12;
+      const safeMinute = Number.isFinite(minuteRaw) ? Math.max(0, Math.min(59, minuteRaw)) : 0;
+
+      dates.forEach((ds) => {
+        const day = state.completionByDate[ds];
+        if (!day || !Array.isArray(day[type])) return;
+        day[type] = day[type].filter((k) => k !== key);
+        if (
+          !(day.dailies && day.dailies.length) &&
+          !(day.weeklies && day.weeklies.length) &&
+          !(day.endgame && day.endgame.length)
+        ) {
+          delete state.completionByDate[ds];
+        }
+      });
+
+      state.completionTimestamps = (state.completionTimestamps || []).filter((t) => {
+        if (!t || t.taskType !== type || t.gameId !== edit.gameId || t.taskId !== edit.taskId) return true;
+        if (!isValidDateStr(t.dateStr)) return true;
+        return dates.indexOf(t.dateStr) < 0;
+      });
+      state.completionTimestamps.push({
+        taskType: type,
+        gameId: edit.gameId,
+        taskId: edit.taskId,
+        dateStr: edit.newDateStr,
+        hour: safeHour,
+        minute: safeMinute,
+      });
+
+      const fillDates =
+        typeof getRemainingDatesInPeriod === "function"
+          ? getRemainingDatesInPeriod(type, key, edit.newDateStr)
+          : [edit.newDateStr];
+      (fillDates || []).forEach((ds) => {
+        if (!isValidDateStr(ds)) return;
+        if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+        if (!state.completionByDate[ds][type].includes(key)) state.completionByDate[ds][type].push(key);
+      });
+      updated++;
+    });
+
+    if (updated) {
+      bumpDataVersion();
+      if (!o.skipSave) save(o.saveOptions || { immediate: true });
+      if (!o.skipRender) renderActiveTab();
+    }
+    const after = typeof scanDataConflicts === "function" ? scanDataConflicts() : null;
+    return { ok: true, updated, after };
+  }
+
+  /**
+   * Queue for Debug → Fix times & dates.
+   * Includes before-unlock, calendar-before-timestamp, duplicate-timestamps, timestamp-without-calendar.
+   */
+  function listTimeDateFixQueue() {
+    const scan = scanDataConflicts();
+    const kinds = new Set([
+      "before-unlock",
+      "calendar-before-timestamp",
+      "duplicate-timestamps",
+      "timestamp-without-calendar",
+    ]);
+    const rows = (scan.conflicts || [])
+      .filter((c) => c && kinds.has(c.kind))
+      .map((c) => {
+        const suggestedDate =
+          c.suggestedDateStr ||
+          (c.kind === "before-unlock" ? c.unlockDate : null) ||
+          c.dateStr ||
+          c.cycleStart;
+        const stamps = Array.isArray(c.stamps) ? c.stamps : null;
+        let uniqueStamps = stamps;
+        if (stamps && stamps.length) {
+          const seen = new Set();
+          uniqueStamps = [];
+          stamps.forEach((s) => {
+            const key =
+              String(s.dateStr || "") +
+              "|" +
+              String(Number(s.hour) || 0) +
+              "|" +
+              String(Number(s.minute) || 0);
+            if (seen.has(key)) return;
+            seen.add(key);
+            uniqueStamps.push(s);
+          });
+        }
+        return {
+          kind: c.kind,
+          severity: c.severity,
+          game: c.game,
+          gameId: c.gameId,
+          task: c.task,
+          taskId: c.taskId,
+          type: c.type,
+          key: c.key || (c.gameId && c.taskId ? c.gameId + "." + c.taskId : null),
+          cycleStart: c.cycleStart,
+          message: c.message,
+          dateStr: c.dateStr,
+          hour: c.hour,
+          minute: c.minute,
+          unlockDate: c.unlockDate,
+          unlockHour: c.unlockHour,
+          unlockMinute: c.unlockMinute,
+          calEarliest: c.calEarliest,
+          stamps: uniqueStamps,
+          stampCount: stamps ? stamps.length : 0,
+          suggestedDateStr: suggestedDate,
+          suggestedHour:
+            c.suggestedHour != null
+              ? c.suggestedHour
+              : c.unlockHour != null
+                ? c.unlockHour
+                : c.hour != null
+                  ? c.hour
+                  : 12,
+          suggestedMinute:
+            c.suggestedMinute != null
+              ? c.suggestedMinute
+              : c.unlockMinute != null
+                ? c.unlockMinute
+                : c.minute != null
+                  ? c.minute
+                  : 0,
+        };
+      });
+    // One row per cycle (prefer duplicate-timestamps over calendar-before for same cycle).
+    const rank = { "duplicate-timestamps": 0, "before-unlock": 1, "calendar-before-timestamp": 2, "timestamp-without-calendar": 3 };
+    const best = new Map();
+    rows.forEach((row) => {
+      const k = [row.type, row.gameId, row.taskId, row.cycleStart].join("|");
+      const prev = best.get(k);
+      if (!prev || (rank[row.kind] ?? 9) < (rank[prev.kind] ?? 9)) best.set(k, row);
+    });
+    return [...best.values()];
+  }
+
+  function getOwnedCycleDatesForTask(type, game, task, cycleStart) {
+    if (!game || !task || !isValidDateStr(cycleStart)) return [];
+    const bounds = getCycleBoundsForTaskType(type, task, new Date(cycleStart + "T12:00:00"), game);
+    if (!bounds) return [];
+    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+    if (!dates.length || dates[0] !== cycleStart) return [];
+    return dates;
+  }
+
+  /** Same cycle membership as scanDataConflicts (noon on the stamp dateStr). */
+  function stampBelongsToScanCycle(type, task, game, stamp, cycleStart) {
+    if (!stamp || !task || !game || !isValidDateStr(stamp.dateStr) || !isValidDateStr(cycleStart)) return false;
+    const bounds = getCycleBoundsForTaskType(type, task, new Date(stamp.dateStr + "T12:00:00"), game);
+    if (!bounds) return false;
+    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+    return !!(dates.length && dates[0] === cycleStart);
+  }
+
+  function removeStampsForTaskScanCycle(type, gameId, taskId, cycleStart) {
+    const game = getGame(gameId);
+    if (!game) return [];
+    const list = type === "weeklies" ? game.weeklies : game.endgame;
+    const task = (list || []).find((t) => (t.id || t.label) === taskId);
+    if (!task) return [];
+    const removedDates = [];
+    state.completionTimestamps = (state.completionTimestamps || []).filter((t) => {
+      if (!t || t.taskType !== type || t.gameId !== gameId || t.taskId !== taskId) return true;
+      if (!stampBelongsToScanCycle(type, task, game, t, cycleStart)) return true;
+      if (isValidDateStr(t.dateStr)) removedDates.push(t.dateStr);
+      return false;
+    });
+    return removedDates;
+  }
+
+  function clearTaskCycleCalendarMarks(type, gameId, taskId, cycleStart, extraDateStrs) {
+    const game = getGame(gameId);
+    if (!game) return false;
+    const list = type === "weeklies" ? game.weeklies : game.endgame;
+    const task = (list || []).find((t) => (t.id || t.label) === taskId);
+    if (!task) return false;
+    const key = gameId + "." + taskId;
+    const markDays = new Set(getOwnedCycleDatesForTask(type, game, task, cycleStart));
+    (extraDateStrs || []).forEach((ds) => {
+      if (isValidDateStr(ds)) markDays.add(ds);
+    });
+    markDays.forEach((ds) => {
+      const day = state.completionByDate[ds];
+      if (!day || !Array.isArray(day[type])) return;
+      day[type] = day[type].filter((k) => k !== key);
+      if (
+        !(day.dailies && day.dailies.length) &&
+        !(day.weeklies && day.weeklies.length) &&
+        !(day.endgame && day.endgame.length)
+      ) {
+        delete state.completionByDate[ds];
+      }
+    });
+    return markDays.size > 0;
+  }
+
+  function clearTaskCycleMarksAndStamps(type, gameId, taskId, cycleStart) {
+    const removedDates = removeStampsForTaskScanCycle(type, gameId, taskId, cycleStart);
+    clearTaskCycleCalendarMarks(type, gameId, taskId, cycleStart, removedDates);
+    return true;
+  }
+
+  /**
+   * Apply Fix times & dates queue.
+   * edits: [{ kind, type, gameId, taskId, cycleStart, action: 'set'|'drop', newDateStr?, hour?, minute?, keep? }]
+   */
+  function applyDebugTimeDateFixes(edits, opts) {
+    const o = opts || {};
+    const list = Array.isArray(edits) ? edits : [];
+    let updated = 0;
+    let dropped = 0;
+    list.forEach((edit) => {
+      if (!edit || !edit.type || !edit.gameId || !edit.taskId || !isValidDateStr(edit.cycleStart)) return;
+      const action = edit.action === "drop" ? "drop" : "set";
+      if (action === "drop") {
+        const removedDates = removeStampsForTaskScanCycle(edit.type, edit.gameId, edit.taskId, edit.cycleStart);
+        clearTaskCycleCalendarMarks(edit.type, edit.gameId, edit.taskId, edit.cycleStart, removedDates);
+        dropped++;
+        return;
+      }
+
+      // Duplicate: delete every stamp scan puts in this cycle, then keep exactly one.
+      if (edit.kind === "duplicate-timestamps") {
+        const keepDate =
+          edit.keep && isValidDateStr(edit.keep.dateStr)
+            ? edit.keep.dateStr
+            : isValidDateStr(edit.newDateStr)
+              ? edit.newDateStr
+              : null;
+        if (!keepDate) return;
+        const keepHour = edit.keep
+          ? Number(edit.keep.hour) || 0
+          : Number.isFinite(Number(edit.hour))
+            ? Number(edit.hour)
+            : 12;
+        const keepMinute = edit.keep
+          ? Number(edit.keep.minute) || 0
+          : Number.isFinite(Number(edit.minute))
+            ? Number(edit.minute)
+            : 0;
+        const removedDates = removeStampsForTaskScanCycle(edit.type, edit.gameId, edit.taskId, edit.cycleStart);
+        clearTaskCycleCalendarMarks(edit.type, edit.gameId, edit.taskId, edit.cycleStart, removedDates);
+        const key = edit.gameId + "." + edit.taskId;
+        state.completionTimestamps.push({
+          taskType: edit.type,
+          gameId: edit.gameId,
+          taskId: edit.taskId,
+          dateStr: keepDate,
+          hour: keepHour,
+          minute: keepMinute,
+        });
+        const fillDates =
+          typeof getRemainingDatesInPeriod === "function"
+            ? getRemainingDatesInPeriod(edit.type, key, keepDate)
+            : [keepDate];
+        (fillDates || []).forEach((ds) => {
+          if (!isValidDateStr(ds)) return;
+          if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+          if (!state.completionByDate[ds][edit.type].includes(key)) state.completionByDate[ds][edit.type].push(key);
+        });
+        updated++;
+        return;
+      }
+
+      if (!isValidDateStr(edit.newDateStr)) return;
+      const removedDates = removeStampsForTaskScanCycle(edit.type, edit.gameId, edit.taskId, edit.cycleStart);
+      clearTaskCycleCalendarMarks(edit.type, edit.gameId, edit.taskId, edit.cycleStart, removedDates);
+      const hourRaw = Number(edit.hour);
+      const minuteRaw = Number(edit.minute);
+      const safeHour = Number.isFinite(hourRaw) ? Math.max(0, Math.min(23, hourRaw)) : 12;
+      const safeMinute = Number.isFinite(minuteRaw) ? Math.max(0, Math.min(59, minuteRaw)) : 0;
+      const key = edit.gameId + "." + edit.taskId;
+      state.completionTimestamps.push({
+        taskType: edit.type,
+        gameId: edit.gameId,
+        taskId: edit.taskId,
+        dateStr: edit.newDateStr,
+        hour: safeHour,
+        minute: safeMinute,
+      });
+      const fillDates =
+        typeof getRemainingDatesInPeriod === "function"
+          ? getRemainingDatesInPeriod(edit.type, key, edit.newDateStr)
+          : [edit.newDateStr];
+      (fillDates || []).forEach((ds) => {
+        if (!isValidDateStr(ds)) return;
+        if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+        if (!state.completionByDate[ds][edit.type].includes(key)) state.completionByDate[ds][edit.type].push(key);
+      });
+      updated++;
+    });
+
+    if (updated || dropped) {
+      syncAllTalliesFromCalendar({ skipSave: true, skipRender: true });
+      bumpDataVersion();
+      if (!o.skipSave) save(o.saveOptions || { immediate: true });
+      if (!o.skipRender) renderActiveTab();
+    }
+    const after = typeof scanDataConflicts === "function" ? scanDataConflicts() : null;
+    return { ok: true, updated, dropped, after };
   }
 
   /**
@@ -4605,16 +5133,36 @@
             const minCompletion = addDaysToDateStr(cycleDates[0], getTaskEarliestCompleteDays(task));
 
             const tsInCycle = (state.completionTimestamps || [])
-              .filter(
-                (t) =>
-                  t.taskType === type &&
-                  t.gameId === game.id &&
-                  t.taskId === taskId &&
-                  isValidDateStr(t.dateStr) &&
-                  t.dateStr >= cycleDates[0] &&
-                  t.dateStr <= cycleEndStr
-              )
-              .sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+              .filter((t) => {
+                if (
+                  t.taskType !== type ||
+                  t.gameId !== game.id ||
+                  t.taskId !== taskId ||
+                  !isValidDateStr(t.dateStr)
+                ) {
+                  return false;
+                }
+                // Match scan membership (not owned-date string range) so evening resets /
+                // short timeLimit windows still see stamps on the shared next-cycle calendar day.
+                const stampHour = Number.isFinite(Number(t.hour)) ? Number(t.hour) : 12;
+                const stampMinute = Number.isFinite(Number(t.minute)) ? Number(t.minute) : 0;
+                const y = parseInt(t.dateStr.slice(0, 4), 10);
+                const mo = parseInt(t.dateStr.slice(5, 7), 10) - 1;
+                const d = parseInt(t.dateStr.slice(8, 10), 10);
+                const baseTz = getResetTimezoneForGame(game);
+                const tz = getTimezoneForTaskDst(task, baseTz);
+                const offsetRef = getOffsetRefDateForTask(task, tz);
+                const moment = createDateInTimezone(y, mo, d, stampHour, stampMinute, tz, offsetRef);
+                const stampBounds = getCycleBoundsForTaskType(type, task, moment, game);
+                if (!stampBounds) return false;
+                const stampDates = getCalendarDatesInCycleRange(
+                  stampBounds.cycleStart,
+                  stampBounds.cycleEnd,
+                  stampBounds.nextCycleStart
+                );
+                return stampDates[0] === startStr;
+              })
+              .sort((a, b) => completionStampSortKey(a).localeCompare(completionStampSortKey(b)));
 
             let calEarliest = null;
             for (const ds of cycleDates) {
@@ -4627,14 +5175,18 @@
             let completion = tsInCycle.length ? tsInCycle[0].dateStr : calEarliest;
             if (!completion) return;
             if (completion < minCompletion) completion = minCompletion;
-            if (completion > cycleEndStr) completion = cycleEndStr;
+            // Keep stamp dates that fall on the next-cycle calendar day (limbo before reset hour).
+            // Only clamp calendar fill to owned cycle days below — do not rewrite the stamp earlier.
+            const stampCompletion = completion;
+            const calCompletion = completion > cycleEndStr ? cycleEndStr : completion;
+            if (calCompletion < minCompletion) return;
 
             // Collapse timestamps in this cycle onto the corrected completion day.
             let keptOne = false;
             tsInCycle.forEach((t) => {
               if (!keptOne) {
-                if (t.dateStr !== completion) {
-                  t.dateStr = completion;
+                if (t.dateStr !== stampCompletion) {
+                  t.dateStr = stampCompletion;
                   changed = true;
                 }
                 keptOne = true;
@@ -4652,12 +5204,12 @@
               if (!arr) return;
               const idx = arr.indexOf(key);
               if (idx < 0) return;
-              if (ds < completion) {
+              if (ds < calCompletion) {
                 arr.splice(idx, 1);
                 changed = true;
               }
             });
-            getRemainingDatesInPeriod(type, key, completion).forEach((ds) => {
+            getRemainingDatesInPeriod(type, key, calCompletion).forEach((ds) => {
               if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
               const arr = state.completionByDate[ds][type];
               if (!arr.includes(key)) {

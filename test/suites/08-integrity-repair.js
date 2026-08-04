@@ -117,6 +117,11 @@ module.exports = {
         assert.ok(appSrc.includes('runIntegrityRepair("safe")'), "UI safe");
         assert.ok(appSrc.includes('runIntegrityRepair("prefer-timestamps")'), "UI prefer");
         assert.ok(appSrc.includes('runIntegrityRepair("tallies-only")'), "UI tallies");
+        assert.ok(appSrc.includes("function listBeforeUnlockConflicts"), "list before-unlock");
+        assert.ok(appSrc.includes("function applyDebugBeforeUnlockEdits"), "apply unlock-date edits");
+        assert.ok(appSrc.includes("function listTimeDateFixQueue"), "list time/date fix queue");
+        assert.ok(appSrc.includes("function applyDebugTimeDateFixes"), "apply time/date fixes");
+        assert.ok(appSrc.includes("settingsDebugFixTimesDatesBtn"), "fix times & dates button wired");
       })
     );
 
@@ -329,6 +334,48 @@ module.exports = {
         integrity.runIntegrityRepair(state, "tallies-only");
         assert.equal(JSON.stringify(state.completionByDate), cal, "calendar stable");
         assert.equal(integrity.countKind(rescan(state), "tally-mismatch"), 0, "still matched");
+      })
+    );
+
+    checks.push(
+      check("before-unlock: no unlock window → cycle-start finish is not an error", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const task = game.weeklies[0];
+        delete task.earliestCompleteDays;
+        delete task.earliestCompleteHour;
+        delete task.earliestCompleteMinute;
+        const key = sim.taskKey(game, task);
+        integrity.ensureDay(state, "2026-07-20").weeklies.push(key);
+        state.completionTimestamps.push({
+          taskType: "weeklies",
+          gameId: game.id,
+          taskId: task.id || task.label,
+          dateStr: "2026-07-20",
+          hour: 14,
+          minute: 0,
+        });
+        assert.equal(integrity.countKind(rescan(state), "before-unlock"), 0, "no unlock gate");
+      })
+    );
+
+    checks.push(
+      check("before-unlock: earliestCompleteDays=1 flags day-0 finish", () => {
+        const state = sim.createFixture({ today: "2026-07-31" });
+        const game = sim.getGame(state);
+        const task = game.weeklies[0];
+        task.earliestCompleteDays = 1;
+        const key = sim.taskKey(game, task);
+        integrity.ensureDay(state, "2026-07-20").weeklies.push(key);
+        state.completionTimestamps.push({
+          taskType: "weeklies",
+          gameId: game.id,
+          taskId: task.id || task.label,
+          dateStr: "2026-07-20",
+          hour: 14,
+          minute: 0,
+        });
+        assert.ok(integrity.countKind(rescan(state), "before-unlock") >= 1, "day-0 before unlock");
       })
     );
 

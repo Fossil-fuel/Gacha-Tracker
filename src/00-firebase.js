@@ -1,7 +1,10 @@
 /**
  * Firebase Auth + Firestore for cloud sync.
- * Requires: Firebase SDK scripts + firebase-config.js loaded before app.js.
- * When FIREBASE_CONFIG is not set or placeholder, cloud features are disabled.
+ * SDK scripts are loaded by index.html only when FIREBASE_CONFIG is real (not placeholders).
+ * When unconfigured or SDK missing, cloud features stay no-ops.
+ *
+ * Future (cloud-primary): keep __cloudSave / __applyCloudData as the cloud I/O surface;
+ * local IndexedDB becomes an offline cache via persistence mode in 01-core.js.
  */
 (function () {
   "use strict";

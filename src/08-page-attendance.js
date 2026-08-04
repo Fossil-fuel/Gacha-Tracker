@@ -1,5 +1,5 @@
-  function getHistoryDWEForDate(dateStr) {
-    const available = getTasksAvailableOnDate(dateStr);
+  function getHistoryDWEForDate(dateStr, availableOpt) {
+    const available = availableOpt || getTasksAvailableOnDate(dateStr);
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
     const wCompleted = (available.weeklies || []).filter((item) => (dayData.weeklies || []).includes(item.key)).length;
     const eCompleted = (available.endgame || []).filter((item) => (dayData.endgame || []).includes(item.key)).length;
@@ -13,9 +13,9 @@
     };
   }
 
-  function getHistoryCompletedTaskLabels(dateStr) {
+  function getHistoryCompletedTaskLabels(dateStr, availableOpt) {
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
-    const available = getTasksAvailableOnDate(dateStr);
+    const available = availableOpt || getTasksAvailableOnDate(dateStr);
     const labels = { dailies: [], weeklies: [], endgame: [] };
     (dayData.dailies || []).forEach((gameId) => {
       const game = getGame(gameId);
@@ -48,6 +48,65 @@
       });
     });
     return labels;
+  }
+
+  /** H1: one availability scan per day for History DWE bars + tooltips. */
+  function buildHistoryDayModel(dateStr) {
+    const available = getTasksAvailableOnDate(dateStr);
+    return {
+      dateStr,
+      available,
+      dwe: getHistoryDWEForDate(dateStr, available),
+      labels: getHistoryCompletedTaskLabels(dateStr, available),
+    };
+  }
+
+  // H2: cache day models across History renders; wipe when completion/games/format inputs change.
+  let historyDayModelCache = null; // { invalidationKey, models: Map<dateStr, model> }
+
+  function getHistoryDayModelCacheKey() {
+    const games = typeof getAllGames === "function" ? getAllGames() : [];
+    const gameSig = games
+      .map((g) => {
+        const w = (g.weeklies || []).map((t) => t.id || t.label).join(",");
+        const e = (g.endgame || []).map((t) => t.id || t.label).join(",");
+        return g.id + ":w[" + w + "]:e[" + e + "]";
+      })
+      .join("|");
+    const tz =
+      typeof getRecordingTimezone === "function"
+        ? getRecordingTimezone()
+        : typeof getAppTimezone === "function"
+          ? getAppTimezone()
+          : "";
+    return [
+      state.dataVersion || 0,
+      state.dateFormat || "",
+      state.firstDayOfWeek ?? "",
+      tz,
+      gameSig,
+    ].join("::");
+  }
+
+  function getCachedHistoryDayModel(dateStr, stats) {
+    const inv = getHistoryDayModelCacheKey();
+    if (!historyDayModelCache || historyDayModelCache.invalidationKey !== inv) {
+      historyDayModelCache = { invalidationKey: inv, models: new Map() };
+    }
+    const hit = historyDayModelCache.models.get(dateStr);
+    if (hit) {
+      if (stats) stats.hits++;
+      return hit;
+    }
+    if (stats) stats.misses++;
+    const model = buildHistoryDayModel(dateStr);
+    historyDayModelCache.models.set(dateStr, model);
+    // Soft cap: keep roughly a few months of visited days.
+    if (historyDayModelCache.models.size > 120) {
+      const oldest = historyDayModelCache.models.keys().next().value;
+      if (oldest != null) historyDayModelCache.models.delete(oldest);
+    }
+    return model;
   }
 
   let historyDweTooltipActive = null;
@@ -91,8 +150,46 @@
     }
   }
 
+  function normalizeHistoryTipItems(labelItems) {
+    return (labelItems || []).map((item) => (typeof item === "string" ? { text: item, carried: false } : item));
+  }
+
+  function createHistoryDweTooltipEl(items, typeName) {
+    const tooltip = document.createElement("div");
+    tooltip.className = "history-dwe-tooltip history-dwe-tooltip-" + typeName;
+    tooltip.setAttribute("role", "tooltip");
+    items.forEach((i) => {
+      const bit = document.createElement("div");
+      bit.className =
+        "history-dwe-tooltip-item attendance-tooltip-" +
+        typeName +
+        (i.carried ? " history-dwe-tooltip-carried" : "");
+      const base = String(i.text || "").replace(/\s*\(carried\)\s*$/i, "");
+      bit.appendChild(document.createTextNode(base));
+      if (i.carried) {
+        const tag = document.createElement("span");
+        tag.className = "history-dwe-tooltip-carried-tag";
+        tag.textContent = " (carried)";
+        bit.appendChild(tag);
+      }
+      tooltip.appendChild(bit);
+    });
+    return tooltip;
+  }
+
+  function ensureHistoryDweTooltip(wrap) {
+    if (historyDweTooltipWrap === wrap && historyDweTooltipActive) return historyDweTooltipActive;
+    let tip = wrap.querySelector(".history-dwe-tooltip");
+    if (tip) return tip;
+    const items = wrap._historyTipItems;
+    if (!items || !items.length) return null;
+    tip = createHistoryDweTooltipEl(items, wrap._historyTipType || "dailies");
+    wrap.appendChild(tip);
+    return tip;
+  }
+
   function showHistoryDweTooltip(wrap) {
-    const tip = wrap.querySelector(".history-dwe-tooltip");
+    const tip = ensureHistoryDweTooltip(wrap);
     if (!tip) return;
     if (historyDweTooltipActive && historyDweTooltipActive !== tip) hideHistoryDweTooltip();
     historyDweTooltipActive = tip;
@@ -102,19 +199,47 @@
     positionHistoryDweTooltip(wrap, tip);
   }
 
+  function historyBarWrapFromEvent(root, target) {
+    if (!target || !target.closest) return null;
+    const wrap = target.closest(".history-dwe-bar-wrap");
+    if (!wrap || !root.contains(wrap)) return null;
+    if (!wrap._historyTipItems || !wrap._historyTipItems.length) return null;
+    return wrap;
+  }
+
   function bindHistoryDweTooltips(root) {
     if (!root) return;
-    root.querySelectorAll(".history-dwe-bar-wrap").forEach((wrap) => {
-      if (!wrap.querySelector(".history-dwe-tooltip")) return;
-      wrap.addEventListener("mouseenter", () => showHistoryDweTooltip(wrap));
-      wrap.addEventListener("mouseleave", hideHistoryDweTooltip);
-      wrap.addEventListener("focusin", () => showHistoryDweTooltip(wrap));
-      wrap.addEventListener("focusout", (e) => {
-        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
-        hideHistoryDweTooltip();
+    // H4: delegate so H3 grid swaps do not rebind every bar; tip DOM is built on first show.
+    if (!root._historyDweTipDelegated) {
+      root._historyDweTipDelegated = true;
+      root.addEventListener("mouseover", (e) => {
+        const wrap = historyBarWrapFromEvent(root, e.target);
+        if (!wrap) return;
+        if (historyDweTooltipWrap === wrap && historyDweTooltipActive) return;
+        showHistoryDweTooltip(wrap);
       });
-    });
-    root.addEventListener("scroll", hideHistoryDweTooltip, { passive: true });
+      root.addEventListener("mouseout", (e) => {
+        const wrap = historyBarWrapFromEvent(root, e.target);
+        if (!wrap) return;
+        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+        if (historyDweTooltipWrap === wrap) hideHistoryDweTooltip();
+      });
+      root.addEventListener("focusin", (e) => {
+        const wrap = historyBarWrapFromEvent(root, e.target);
+        if (!wrap) return;
+        showHistoryDweTooltip(wrap);
+      });
+      root.addEventListener("focusout", (e) => {
+        const wrap = historyBarWrapFromEvent(root, e.target);
+        if (!wrap) return;
+        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+        if (historyDweTooltipWrap === wrap) hideHistoryDweTooltip();
+      });
+    }
+    if (!root._historyDweScrollBound) {
+      root._historyDweScrollBound = true;
+      root.addEventListener("scroll", hideHistoryDweTooltip, { passive: true });
+    }
     if (!bindHistoryDweTooltips._windowBound) {
       bindHistoryDweTooltips._windowBound = true;
       window.addEventListener("scroll", hideHistoryDweTooltip, true);
@@ -122,18 +247,270 @@
     }
   }
 
-  function renderAttendanceHistory(container) {
-    hideHistoryDweTooltip();
-    const now = getSimulatedNow();
+  const HISTORY_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+  function resolveHistoryMonthYear(now) {
     let month = state.historyMonth != null ? Number(state.historyMonth) : now.getMonth();
     let year = state.historyYear != null ? Number(state.historyYear) : now.getFullYear();
     if (!Number.isFinite(month) || month < 0 || month > 11) month = now.getMonth();
     if (!Number.isFinite(year) || year < 1970 || year > 2100) year = now.getFullYear();
+    return { month, year };
+  }
+
+  function getHistoryYearOptions(now, selectedYear) {
+    const years = new Set();
+    const nowY = now.getFullYear();
+    years.add(nowY);
+    years.add(selectedYear);
+    Object.keys(state.completionByDate || {}).forEach((ds) => {
+      if (/^\d{4}-/.test(ds)) years.add(Number(ds.slice(0, 4)));
+    });
+    (state.completionTimestamps || []).forEach((t) => {
+      if (t && isValidDateStr(t.dateStr)) years.add(Number(t.dateStr.slice(0, 4)));
+    });
+    for (let y = nowY - 1; y <= nowY + 2; y++) years.add(y);
+    return [...years].filter((y) => Number.isFinite(y) && y >= 1970 && y <= 2100).sort((a, b) => a - b);
+  }
+
+  function buildHistoryDweBar(typeLetter, completed, total, labelItems, typeName) {
+    const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
+    const items = normalizeHistoryTipItems(labelItems);
+    const wrap = document.createElement("div");
+    wrap.className = "history-dwe-bar-wrap history-dwe-bar-wrap-" + typeName;
+    const allCarried = items.length > 0 && items.every((i) => i.carried);
+    if (allCarried) wrap.classList.add("history-dwe-bar-wrap-carried");
+    else if (items.some((i) => i.carried)) wrap.classList.add("history-dwe-bar-wrap-mixed");
+    const label = document.createElement("span");
+    label.className = "history-dwe-label";
+    label.textContent = typeLetter;
+    wrap.appendChild(label);
+    const barEl = document.createElement("div");
+    barEl.className = "history-dwe-bar history-dwe-bar-" + typeLetter.toLowerCase();
+    barEl.innerHTML = "<span class=\"history-dwe-fill\" style=\"width:" + pct + "%\"></span><span class=\"history-dwe-fraction\">" + escapeHtml(String(completed) + "/" + String(total)) + "</span>";
+    wrap.appendChild(barEl);
+    if (allCarried) {
+      const mark = document.createElement("span");
+      mark.className = "history-dwe-carried-mark";
+      mark.setAttribute("aria-hidden", "true");
+      mark.title = "Carried from earlier in cycle";
+      mark.textContent = "↻";
+      wrap.appendChild(mark);
+    }
+    // H4: keep labels for aria / first hover; tip DOM is created in ensureHistoryDweTooltip.
+    if (items.length > 0) {
+      wrap._historyTipItems = items;
+      wrap._historyTipType = typeName;
+    }
+    return wrap;
+  }
+
+  function historyDayAriaLabel(dateStr, dwe, taskLabels) {
+    const dateLabel = typeof formatDate === "function" ? formatDate(dateStr) : dateStr;
+    const parts = [
+      "Dailies " + dwe.dCompleted + " of " + dwe.dTotal,
+      "Weeklies " + dwe.wCompleted + " of " + dwe.wTotal,
+      "Endgame " + dwe.eCompleted + " of " + dwe.eTotal,
+    ];
+    const finishedNames = []
+      .concat(taskLabels.dailies || [])
+      .concat(taskLabels.weeklies || [])
+      .concat(taskLabels.endgame || [])
+      .filter((i) => i && !i.carried)
+      .map((i) => i.text);
+    const carriedNames = []
+      .concat(taskLabels.weeklies || [])
+      .concat(taskLabels.endgame || [])
+      .filter((i) => i && i.carried)
+      .map((i) => i.text);
+    if (finishedNames.length) parts.push("Finished: " + finishedNames.join(", "));
+    if (carriedNames.length) parts.push("Carried: " + carriedNames.join(", "));
+    return dateLabel + ". " + parts.join(". ") + ". Press Enter to edit.";
+  }
+
+  function buildHistoryCalendarGrid(year, month, todayStr, historyDayCacheStats) {
+    const grid = document.createElement("div");
+    grid.className = "history-calendar-grid";
+    grid.setAttribute("role", "grid");
+    grid.setAttribute("aria-label", "Completion history calendar");
+    const frag = document.createDocumentFragment();
+    const firstDay = state.firstDayOfWeek === 1 ? 1 : 0;
+    const dayNamesOrdered = firstDay === 1 ? [...DAY_NAMES.slice(1), DAY_NAMES[0]] : DAY_NAMES;
+    for (let i = 0; i < 7; i++) {
+      const th = document.createElement("div");
+      th.className = "history-calendar-weekday";
+      th.textContent = dayNamesOrdered[i];
+      frag.appendChild(th);
+    }
+    const recTz = getRecordingTimezone();
+    const firstOfMonth = createDateInTimezone(year, month, 1, 12, 0, recTz);
+    const firstParts = getDatePartsInTimezone(firstOfMonth, recTz);
+    const startDay = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(firstParts.weekday);
+    const lastOfMonth = createDateInTimezone(year, month + 1, 0, 12, 0, recTz);
+    const lastParts = getDatePartsInTimezone(lastOfMonth, recTz);
+    const daysInMonth = lastParts.day;
+    const lastOfPrev = createDateInTimezone(year, month, 0, 12, 0, recTz);
+    const lastPrevParts = getDatePartsInTimezone(lastOfPrev, recTz);
+    const daysInPrevMonth = lastPrevParts.day;
+    const leadingCount = (startDay - firstDay + 7) % 7;
+    const totalCells = leadingCount + daysInMonth;
+    const trailingCount = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+    const cellDates = [];
+    for (let i = 0; i < leadingCount; i++) {
+      const d = daysInPrevMonth - leadingCount + 1 + i;
+      const date = createDateInTimezone(year, month - 1, d, 12, 0, recTz);
+      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: d });
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = createDateInTimezone(year, month, day, 12, 0, recTz);
+      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: true, dayNum: day });
+    }
+    for (let i = 0; i < trailingCount; i++) {
+      const date = createDateInTimezone(year, month + 1, i + 1, 12, 0, recTz);
+      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: i + 1 });
+    }
+    const dayCells = [];
+    cellDates.forEach(({ dateStr, isCurrentMonth, dayNum }, cellIndex) => {
+      const cell = document.createElement("div");
+      cell.className = "history-calendar-day";
+      cell.setAttribute("role", "gridcell");
+      if (!isCurrentMonth) cell.classList.add("history-calendar-day-other-month");
+      if (dateStr === todayStr) cell.classList.add("history-calendar-day-today");
+      if (dateStr > todayStr) cell.classList.add("history-calendar-day-future");
+      const topRow = document.createElement("div");
+      topRow.className = "history-calendar-day-top";
+      const dayNumEl = document.createElement("div");
+      dayNumEl.className = "history-calendar-day-num";
+      dayNumEl.textContent = dayNum;
+      topRow.appendChild(dayNumEl);
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "btn btn-ghost btn-sm history-calendar-day-edit";
+      editBtn.textContent = "Edit";
+      editBtn.tabIndex = -1;
+      editBtn.setAttribute("aria-label", "Edit " + (typeof formatDate === "function" ? formatDate(dateStr) : dateStr));
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openCalendarDayModal(dateStr);
+      });
+      topRow.appendChild(editBtn);
+      cell.appendChild(topRow);
+      const dayModel = getCachedHistoryDayModel(dateStr, historyDayCacheStats);
+      const dwe = dayModel.dwe;
+      const taskLabels = dayModel.labels;
+      cell.appendChild(buildHistoryDweBar("D", dwe.dCompleted, dwe.dTotal, taskLabels.dailies, "dailies"));
+      cell.appendChild(buildHistoryDweBar("W", dwe.wCompleted, dwe.wTotal, taskLabels.weeklies, "weeklies"));
+      cell.appendChild(buildHistoryDweBar("E", dwe.eCompleted, dwe.eTotal, taskLabels.endgame, "endgame"));
+      cell.setAttribute("aria-label", historyDayAriaLabel(dateStr, dwe, taskLabels));
+      cell.tabIndex = -1;
+      cell.dataset.cellIndex = String(cellIndex);
+      cell.addEventListener("click", (e) => {
+        if (e.target && e.target.closest && e.target.closest(".history-calendar-day-edit")) return;
+        openCalendarDayModal(dateStr);
+      });
+      cell.addEventListener("keydown", (e) => {
+        const cols = 7;
+        let next = cellIndex;
+        if (e.key === "ArrowRight") next = cellIndex + 1;
+        else if (e.key === "ArrowLeft") next = cellIndex - 1;
+        else if (e.key === "ArrowDown") next = cellIndex + cols;
+        else if (e.key === "ArrowUp") next = cellIndex - cols;
+        else if (e.key === "Home") next = cellIndex - (cellIndex % cols);
+        else if (e.key === "End") next = cellIndex - (cellIndex % cols) + (cols - 1);
+        else if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openCalendarDayModal(dateStr);
+          return;
+        } else {
+          return;
+        }
+        e.preventDefault();
+        if (next < 0 || next >= dayCells.length) return;
+        dayCells[cellIndex].tabIndex = -1;
+        dayCells[next].tabIndex = 0;
+        dayCells[next].focus();
+      });
+      dayCells.push(cell);
+      frag.appendChild(cell);
+    });
+    const focusIdx = Math.max(
+      0,
+      dayCells.findIndex((c) => c.classList.contains("history-calendar-day-today"))
+    );
+    if (dayCells[focusIdx]) dayCells[focusIdx].tabIndex = 0;
+    grid.appendChild(frag);
+    return grid;
+  }
+
+  function mountHistoryCalendarGrid(grid, gridWrap, historyDayCacheStats) {
+    const todayCell = grid.querySelector(".history-calendar-day-today");
+    if (todayCell && gridWrap.scrollWidth > gridWrap.clientWidth) {
+      requestAnimationFrame(function () {
+        const scrollLeft = todayCell.offsetLeft - (gridWrap.clientWidth / 2) + (todayCell.offsetWidth / 2);
+        gridWrap.scrollLeft = Math.max(0, scrollLeft);
+      });
+    }
+    bindHistoryDweTooltips(gridWrap);
+    if (
+      typeof isPerfDebugEnabled === "function" &&
+      isPerfDebugEnabled() &&
+      historyDayCacheStats.hits + historyDayCacheStats.misses > 0
+    ) {
+      console.log(
+        "[perf] historyDayModelCache: hits=" +
+          historyDayCacheStats.hits +
+          " misses=" +
+          historyDayCacheStats.misses +
+          " size=" +
+          (historyDayModelCache && historyDayModelCache.models ? historyDayModelCache.models.size : 0)
+      );
+    }
+  }
+
+  function syncHistoryMonthChrome(container, month, year, now) {
+    const monthLabel = container.querySelector(".history-month-label");
+    if (monthLabel) monthLabel.textContent = HISTORY_MONTH_NAMES[month] + " " + year;
+    const monthSelect = container.querySelector(".history-month-select");
+    if (monthSelect) monthSelect.value = String(month);
+    const yearSelect = container.querySelector(".history-year-select");
+    if (yearSelect) {
+      const wanted = String(year);
+      if (![...yearSelect.options].some((o) => o.value === wanted)) {
+        yearSelect.innerHTML = "";
+        getHistoryYearOptions(now, year).forEach((y) => {
+          const opt = document.createElement("option");
+          opt.value = String(y);
+          opt.textContent = String(y);
+          yearSelect.appendChild(opt);
+        });
+      }
+      yearSelect.value = wanted;
+    }
+  }
+
+  function renderAttendanceHistory(container) {
+    hideHistoryDweTooltip();
+    const historyDayCacheStats = { hits: 0, misses: 0 };
+    const now = getSimulatedNow();
+    const { month, year } = resolveHistoryMonthYear(now);
     const todayStr = getDateStr();
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    const existingShell = container.querySelector("[data-history-shell]");
+    const existingWrap = container.querySelector(".history-calendar-scroll-wrap");
+    if (existingShell && existingWrap) {
+      syncHistoryMonthChrome(container, month, year, now);
+      const grid = buildHistoryCalendarGrid(year, month, todayStr, historyDayCacheStats);
+      const oldGrid = existingWrap.querySelector(".history-calendar-grid");
+      if (oldGrid) oldGrid.replaceWith(grid);
+      else existingWrap.appendChild(grid);
+      mountHistoryCalendarGrid(grid, existingWrap, historyDayCacheStats);
+      return;
+    }
+
+    container.innerHTML = "";
 
     const header = document.createElement("div");
     header.className = "history-header";
+    header.setAttribute("data-history-shell", "1");
     const title = document.createElement("h3");
     title.className = "data-section-label";
     title.textContent = "Task history by day";
@@ -144,24 +521,12 @@
     prevBtn.type = "button";
     prevBtn.className = "btn btn-ghost";
     prevBtn.textContent = "‹ Prev";
-    prevBtn.addEventListener("click", () => {
-      closeHistoryMonthYearPicker();
-      if (month === 0) {
-        state.historyMonth = 11;
-        state.historyYear = year - 1;
-      } else {
-        state.historyMonth = month - 1;
-        state.historyYear = year;
-      }
-      save();
-      renderActiveTab();
-    });
     const monthWrap = document.createElement("div");
     monthWrap.className = "history-month-wrap";
     const monthLabel = document.createElement("button");
     monthLabel.type = "button";
     monthLabel.className = "history-month-label";
-    monthLabel.textContent = monthNames[month] + " " + year;
+    monthLabel.textContent = HISTORY_MONTH_NAMES[month] + " " + year;
     monthLabel.setAttribute("aria-haspopup", "dialog");
     monthLabel.setAttribute("aria-expanded", "false");
     monthLabel.setAttribute("aria-label", "Choose month and year");
@@ -171,21 +536,6 @@
     picker.hidden = true;
     picker.setAttribute("role", "dialog");
     picker.setAttribute("aria-label", "Month and year");
-
-    function getHistoryYearOptions() {
-      const years = new Set();
-      const nowY = now.getFullYear();
-      years.add(nowY);
-      years.add(year);
-      Object.keys(state.completionByDate || {}).forEach((ds) => {
-        if (/^\d{4}-/.test(ds)) years.add(Number(ds.slice(0, 4)));
-      });
-      (state.completionTimestamps || []).forEach((t) => {
-        if (t && isValidDateStr(t.dateStr)) years.add(Number(t.dateStr.slice(0, 4)));
-      });
-      for (let y = nowY - 1; y <= nowY + 2; y++) years.add(y);
-      return [...years].filter((y) => Number.isFinite(y) && y >= 1970 && y <= 2100).sort((a, b) => a - b);
-    }
 
     function closeHistoryMonthYearPicker() {
       picker.hidden = true;
@@ -207,10 +557,24 @@
       setTimeout(() => document.addEventListener("click", monthWrap._outsideClose), 0);
     }
 
+    prevBtn.addEventListener("click", () => {
+      closeHistoryMonthYearPicker();
+      const cur = resolveHistoryMonthYear(getSimulatedNow());
+      if (cur.month === 0) {
+        state.historyMonth = 11;
+        state.historyYear = cur.year - 1;
+      } else {
+        state.historyMonth = cur.month - 1;
+        state.historyYear = cur.year;
+      }
+      save();
+      renderActiveTab();
+    });
+
     const monthSelect = document.createElement("select");
     monthSelect.className = "history-month-select settings-select";
     monthSelect.setAttribute("aria-label", "Month");
-    monthNames.forEach((name, i) => {
+    HISTORY_MONTH_NAMES.forEach((name, i) => {
       const opt = document.createElement("option");
       opt.value = String(i);
       opt.textContent = name;
@@ -220,7 +584,7 @@
     const yearSelect = document.createElement("select");
     yearSelect.className = "history-year-select settings-select";
     yearSelect.setAttribute("aria-label", "Year");
-    getHistoryYearOptions().forEach((y) => {
+    getHistoryYearOptions(now, year).forEach((y) => {
       const opt = document.createElement("option");
       opt.value = String(y);
       opt.textContent = String(y);
@@ -273,12 +637,13 @@
     nextBtn.textContent = "Next ›";
     nextBtn.addEventListener("click", () => {
       closeHistoryMonthYearPicker();
-      if (month === 11) {
+      const cur = resolveHistoryMonthYear(getSimulatedNow());
+      if (cur.month === 11) {
         state.historyMonth = 0;
-        state.historyYear = year + 1;
+        state.historyYear = cur.year + 1;
       } else {
-        state.historyMonth = month + 1;
-        state.historyYear = year;
+        state.historyMonth = cur.month + 1;
+        state.historyYear = cur.year;
       }
       save();
       renderActiveTab();
@@ -314,183 +679,7 @@
 
     const gridWrap = document.createElement("div");
     gridWrap.className = "history-calendar-scroll-wrap";
-    const grid = document.createElement("div");
-    grid.className = "history-calendar-grid";
-    const firstDay = state.firstDayOfWeek === 1 ? 1 : 0;
-    const dayNamesOrdered = firstDay === 1 ? [...DAY_NAMES.slice(1), DAY_NAMES[0]] : DAY_NAMES;
-    for (let i = 0; i < 7; i++) {
-      const th = document.createElement("div");
-      th.className = "history-calendar-weekday";
-      th.textContent = dayNamesOrdered[i];
-      grid.appendChild(th);
-    }
-    const recTz = getRecordingTimezone();
-    const firstOfMonth = createDateInTimezone(year, month, 1, 12, 0, recTz);
-    const firstParts = getDatePartsInTimezone(firstOfMonth, recTz);
-    const startDay = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(firstParts.weekday);
-    const lastOfMonth = createDateInTimezone(year, month + 1, 0, 12, 0, recTz);
-    const lastParts = getDatePartsInTimezone(lastOfMonth, recTz);
-    const daysInMonth = lastParts.day;
-    const lastOfPrev = createDateInTimezone(year, month, 0, 12, 0, recTz);
-    const lastPrevParts = getDatePartsInTimezone(lastOfPrev, recTz);
-    const daysInPrevMonth = lastPrevParts.day;
-    const leadingCount = (startDay - firstDay + 7) % 7;
-    const totalCells = leadingCount + daysInMonth;
-    const trailingCount = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
-    const cellDates = [];
-    for (let i = 0; i < leadingCount; i++) {
-      const d = daysInPrevMonth - leadingCount + 1 + i;
-      const date = createDateInTimezone(year, month - 1, d, 12, 0, recTz);
-      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: d });
-    }
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = createDateInTimezone(year, month, day, 12, 0, recTz);
-      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: true, dayNum: day });
-    }
-    for (let i = 0; i < trailingCount; i++) {
-      const date = createDateInTimezone(year, month + 1, i + 1, 12, 0, recTz);
-      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: i + 1 });
-    }
-    function bar(typeLetter, completed, total, labelItems, typeName) {
-      const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
-      const items = (labelItems || []).map((item) => (typeof item === "string" ? { text: item, carried: false } : item));
-      const wrap = document.createElement("div");
-      wrap.className = "history-dwe-bar-wrap history-dwe-bar-wrap-" + typeName;
-      const allCarried = items.length > 0 && items.every((i) => i.carried);
-      if (allCarried) wrap.classList.add("history-dwe-bar-wrap-carried");
-      else if (items.some((i) => i.carried)) wrap.classList.add("history-dwe-bar-wrap-mixed");
-      const label = document.createElement("span");
-      label.className = "history-dwe-label";
-      label.textContent = typeLetter;
-      wrap.appendChild(label);
-      const barEl = document.createElement("div");
-      barEl.className = "history-dwe-bar history-dwe-bar-" + typeLetter.toLowerCase();
-      barEl.innerHTML = "<span class=\"history-dwe-fill\" style=\"width:" + pct + "%\"></span><span class=\"history-dwe-fraction\">" + escapeHtml(String(completed) + "/" + String(total)) + "</span>";
-      wrap.appendChild(barEl);
-      if (allCarried) {
-        const mark = document.createElement("span");
-        mark.className = "history-dwe-carried-mark";
-        mark.setAttribute("aria-hidden", "true");
-        mark.title = "Carried from earlier in cycle";
-        mark.textContent = "↻";
-        wrap.appendChild(mark);
-      }
-      if (items.length > 0) {
-        const tooltip = document.createElement("div");
-        tooltip.className = "history-dwe-tooltip history-dwe-tooltip-" + typeName;
-        tooltip.setAttribute("role", "tooltip");
-        items.forEach((i) => {
-          const bit = document.createElement("div");
-          bit.className =
-            "history-dwe-tooltip-item attendance-tooltip-" +
-            typeName +
-            (i.carried ? " history-dwe-tooltip-carried" : "");
-          const base = String(i.text || "").replace(/\s*\(carried\)\s*$/i, "");
-          bit.appendChild(document.createTextNode(base));
-          if (i.carried) {
-            const tag = document.createElement("span");
-            tag.className = "history-dwe-tooltip-carried-tag";
-            tag.textContent = " (carried)";
-            bit.appendChild(tag);
-          }
-          tooltip.appendChild(bit);
-        });
-        wrap.appendChild(tooltip);
-      }
-      return wrap;
-    }
-    function historyDayAriaLabel(dateStr, dwe, taskLabels) {
-      const dateLabel = typeof formatDate === "function" ? formatDate(dateStr) : dateStr;
-      const parts = [
-        "Dailies " + dwe.dCompleted + " of " + dwe.dTotal,
-        "Weeklies " + dwe.wCompleted + " of " + dwe.wTotal,
-        "Endgame " + dwe.eCompleted + " of " + dwe.eTotal,
-      ];
-      const finishedNames = []
-        .concat(taskLabels.dailies || [])
-        .concat(taskLabels.weeklies || [])
-        .concat(taskLabels.endgame || [])
-        .filter((i) => i && !i.carried)
-        .map((i) => i.text);
-      const carriedNames = []
-        .concat(taskLabels.weeklies || [])
-        .concat(taskLabels.endgame || [])
-        .filter((i) => i && i.carried)
-        .map((i) => i.text);
-      if (finishedNames.length) parts.push("Finished: " + finishedNames.join(", "));
-      if (carriedNames.length) parts.push("Carried: " + carriedNames.join(", "));
-      return dateLabel + ". " + parts.join(". ") + ". Press Enter to edit.";
-    }
-    grid.setAttribute("role", "grid");
-    grid.setAttribute("aria-label", "Completion history calendar");
-    const dayCells = [];
-    cellDates.forEach(({ date, dateStr, isCurrentMonth, dayNum }, cellIndex) => {
-      const cell = document.createElement("div");
-      cell.className = "history-calendar-day";
-      cell.setAttribute("role", "gridcell");
-      if (!isCurrentMonth) cell.classList.add("history-calendar-day-other-month");
-      if (dateStr === todayStr) cell.classList.add("history-calendar-day-today");
-      if (dateStr > todayStr) cell.classList.add("history-calendar-day-future");
-      const topRow = document.createElement("div");
-      topRow.className = "history-calendar-day-top";
-      const dayNumEl = document.createElement("div");
-      dayNumEl.className = "history-calendar-day-num";
-      dayNumEl.textContent = dayNum;
-      topRow.appendChild(dayNumEl);
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "btn btn-ghost btn-sm history-calendar-day-edit";
-      editBtn.textContent = "Edit";
-      editBtn.tabIndex = -1;
-      editBtn.setAttribute("aria-label", "Edit " + (typeof formatDate === "function" ? formatDate(dateStr) : dateStr));
-      editBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openCalendarDayModal(dateStr);
-      });
-      topRow.appendChild(editBtn);
-      cell.appendChild(topRow);
-      const dwe = getHistoryDWEForDate(dateStr);
-      const taskLabels = getHistoryCompletedTaskLabels(dateStr);
-      cell.appendChild(bar("D", dwe.dCompleted, dwe.dTotal, taskLabels.dailies, "dailies"));
-      cell.appendChild(bar("W", dwe.wCompleted, dwe.wTotal, taskLabels.weeklies, "weeklies"));
-      cell.appendChild(bar("E", dwe.eCompleted, dwe.eTotal, taskLabels.endgame, "endgame"));
-      cell.setAttribute("aria-label", historyDayAriaLabel(dateStr, dwe, taskLabels));
-      cell.tabIndex = -1;
-      cell.dataset.cellIndex = String(cellIndex);
-      cell.addEventListener("click", (e) => {
-        if (e.target && e.target.closest && e.target.closest(".history-calendar-day-edit")) return;
-        openCalendarDayModal(dateStr);
-      });
-      cell.addEventListener("keydown", (e) => {
-        const cols = 7;
-        let next = cellIndex;
-        if (e.key === "ArrowRight") next = cellIndex + 1;
-        else if (e.key === "ArrowLeft") next = cellIndex - 1;
-        else if (e.key === "ArrowDown") next = cellIndex + cols;
-        else if (e.key === "ArrowUp") next = cellIndex - cols;
-        else if (e.key === "Home") next = cellIndex - (cellIndex % cols);
-        else if (e.key === "End") next = cellIndex - (cellIndex % cols) + (cols - 1);
-        else if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openCalendarDayModal(dateStr);
-          return;
-        } else {
-          return;
-        }
-        e.preventDefault();
-        if (next < 0 || next >= dayCells.length) return;
-        dayCells[cellIndex].tabIndex = -1;
-        dayCells[next].tabIndex = 0;
-        dayCells[next].focus();
-      });
-      dayCells.push(cell);
-      grid.appendChild(cell);
-    });
-    const focusIdx = Math.max(
-      0,
-      dayCells.findIndex((c) => c.classList.contains("history-calendar-day-today"))
-    );
-    if (dayCells[focusIdx]) dayCells[focusIdx].tabIndex = 0;
+    const grid = buildHistoryCalendarGrid(year, month, todayStr, historyDayCacheStats);
     gridWrap.appendChild(grid);
     container.appendChild(gridWrap);
 
@@ -499,14 +688,7 @@
     legend.textContent = "Solid bars = finished that day. Muted bars = still marked complete from an earlier day in the same weekly/endgame cycle (fill-remaining).";
     container.appendChild(legend);
 
-    const todayCell = grid.querySelector(".history-calendar-day-today");
-    if (todayCell && gridWrap.scrollWidth > gridWrap.clientWidth) {
-      requestAnimationFrame(function () {
-        const scrollLeft = todayCell.offsetLeft - (gridWrap.clientWidth / 2) + (todayCell.offsetWidth / 2);
-        gridWrap.scrollLeft = Math.max(0, scrollLeft);
-      });
-    }
-    bindHistoryDweTooltips(gridWrap);
+    mountHistoryCalendarGrid(grid, gridWrap, historyDayCacheStats);
   }
 
   let lastAttendanceViewKey = "";
@@ -534,16 +716,25 @@
     if (viewKey === lastAttendanceViewKey && container.childElementCount > 0) return;
     lastAttendanceViewKey = viewKey;
     hideHistoryDweTooltip();
-    container.innerHTML = "";
     const games = getAllGames();
     if (games.length === 0) {
       container.innerHTML = '<p class="empty-state">No games yet. Add one in the Games tab.</p>';
       return;
     }
     if (state.attendanceView === "history") {
-      renderAttendanceHistory(container);
+      // Keep History chrome when shell already exists; renderAttendanceHistory swaps the grid only.
+      if (!container.querySelector("[data-history-shell]")) container.innerHTML = "";
+      const run = () => renderAttendanceHistory(container);
+      if (typeof isPerfDebugEnabled === "function" && isPerfDebugEnabled() && typeof perfMeasure === "function") {
+        const m = (Number(state.historyMonth) || 0) + 1;
+        const y = Number(state.historyYear) || 0;
+        perfMeasure("historyRender:" + y + "-" + String(m).padStart(2, "0"), run);
+      } else {
+        run();
+      }
       return;
     }
+    container.innerHTML = "";
     if (state.attendanceView === "timestamps") {
       renderAttendanceTimestamps(container);
       return;

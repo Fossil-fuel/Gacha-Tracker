@@ -3,8 +3,11 @@
  */
 /**
  * Firebase Auth + Firestore for cloud sync.
- * Requires: Firebase SDK scripts + firebase-config.js loaded before app.js.
- * When FIREBASE_CONFIG is not set or placeholder, cloud features are disabled.
+ * SDK scripts are loaded by index.html only when FIREBASE_CONFIG is real (not placeholders).
+ * When unconfigured or SDK missing, cloud features stay no-ops.
+ *
+ * Future (cloud-primary): keep __cloudSave / __applyCloudData as the cloud I/O surface;
+ * local IndexedDB becomes an offline cache via persistence mode in 01-core.js.
  */
 (function () {
   "use strict";
@@ -963,6 +966,16 @@
   const SAVE_DEBOUNCE_MS = 200;
   let saveTimer = null;
   let pendingSaveJson = null;
+  /**
+   * Persistence mode — swap later without rewriting call sites:
+   * - "localPrimary": IndexedDB is source of truth; cloud (__cloudSave) is optional mirror when signed in.
+   * - "cloudPrimary" (future): Firestore is source of truth; IndexedDB (+ slim localStorage) is offline backup.
+   *
+   * Hooks used by both modes:
+   * - persistLocalFull(jsonStr) / initPersistentStorage()
+   * - window.__cloudSave(jsonStr) / window.__applyCloudData(jsonStr)
+   */
+  const PERSISTENCE_MODE = "localPrimary";
   let storageBackend = "local"; // "local" until IDB is ready, then "idb"
   let idbOpenPromise = null;
 
@@ -1052,9 +1065,9 @@
     }
   }
 
-  function writeSavePayload(jsonStr) {
+  function persistLocalFull(jsonStr) {
     if (storageBackend === "idb") {
-      idbPutFullJson(jsonStr)
+      return idbPutFullJson(jsonStr)
         .then(() => {
           lastSavedAtMs = Date.now();
           updateLastSavedIndicator(false);
@@ -1063,11 +1076,38 @@
         .catch(() => {
           updateLastSavedIndicator(true);
         });
-      if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY, jsonStr);
+      lastSavedAtMs = Date.now();
+      updateLastSavedIndicator(false);
+    } catch (_) {
+      updateLastSavedIndicator(true);
+    }
+    return Promise.resolve();
+  }
+
+  function persistCloudMirror(jsonStr) {
+    try {
+      if (typeof window.__cloudSave === "function") {
+        const ret = window.__cloudSave(jsonStr);
+        return ret && typeof ret.then === "function" ? ret : Promise.resolve();
+      }
+    } catch (_) {}
+    return Promise.resolve();
+  }
+
+  function writeSavePayload(jsonStr) {
+    // localPrimary today: write local first, then best-effort cloud mirror.
+    // cloudPrimary later: reverse order (cloud first) and treat IndexedDB as backup in persistLocalFull.
+    if (PERSISTENCE_MODE === "cloudPrimary") {
+      persistCloudMirror(jsonStr).finally(function () {
+        persistLocalFull(jsonStr);
+      });
       return;
     }
-    localStorage.setItem(STORAGE_KEY, jsonStr);
-    if (typeof window.__cloudSave === "function") window.__cloudSave(jsonStr);
+    persistLocalFull(jsonStr);
+    persistCloudMirror(jsonStr);
   }
 
   async function initPersistentStorage() {
@@ -4473,9 +4513,13 @@
                 severity: "warn",
                 kind: "timestamp-without-calendar",
                 game: game.name,
+                gameId: game.id,
                 task: task.label || taskId,
+                taskId,
                 type,
+                key,
                 cycleStart: start,
+                dateStr: cyc.tsEarliest,
                 message: "Timestamp on " + cyc.tsEarliest + " but no calendar mark in cycle starting " + start,
               });
             }
@@ -4484,21 +4528,63 @@
                 severity: "info",
                 kind: "calendar-without-timestamp",
                 game: game.name,
+                gameId: game.id,
                 task: task.label || taskId,
+                taskId,
                 type,
+                key,
                 cycleStart: start,
+                dateStr: cyc.calEarliest,
                 message: "Calendar mark from " + cyc.calEarliest + " with no timestamp (cycle " + start + ")",
               });
             }
             if (cyc.calEarliest && cyc.tsEarliest && cyc.calEarliest < cyc.tsEarliest) {
+              let earlyStamp = null;
+              (cyc.stamps || []).forEach((s) => {
+                if (!s || !isValidDateStr(s.dateStr)) return;
+                if (!earlyStamp || completionStampSortKey(s) < completionStampSortKey(earlyStamp)) earlyStamp = s;
+              });
               push({
                 severity: "warn",
                 kind: "calendar-before-timestamp",
                 game: game.name,
+                gameId: game.id,
                 task: task.label || taskId,
+                taskId,
                 type,
+                key,
                 cycleStart: start,
-                message: "Calendar starts " + cyc.calEarliest + " but timestamp is " + cyc.tsEarliest + " (cycle " + start + ")",
+                dateStr: earlyStamp ? earlyStamp.dateStr : cyc.tsEarliest,
+                hour: earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.hour))
+                    ? Number(earlyStamp.hour)
+                    : 12
+                  : null,
+                minute: earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.minute))
+                    ? Number(earlyStamp.minute)
+                    : 0
+                  : null,
+                calEarliest: cyc.calEarliest,
+                suggestedDateStr: cyc.tsEarliest,
+                suggestedHour: earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.hour))
+                    ? Number(earlyStamp.hour)
+                    : 12
+                  : 12,
+                suggestedMinute: earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.minute))
+                    ? Number(earlyStamp.minute)
+                    : 0
+                  : 0,
+                message:
+                  "Calendar starts " +
+                  cyc.calEarliest +
+                  " but timestamp is " +
+                  cyc.tsEarliest +
+                  " (cycle " +
+                  start +
+                  ")",
               });
             }
             if (cyc.stamps.length > 1) {
@@ -4508,24 +4594,126 @@
                   severity: "warn",
                   kind: "duplicate-timestamps",
                   game: game.name,
+                  gameId: game.id,
                   task: task.label || taskId,
+                  taskId,
                   type,
+                  key,
                   cycleStart: start,
+                  stamps: (cyc.stamps || []).map((s) => ({
+                    dateStr: s.dateStr,
+                    hour: Number.isFinite(Number(s.hour)) ? Number(s.hour) : 12,
+                    minute: Number.isFinite(Number(s.minute)) ? Number(s.minute) : 0,
+                  })),
                   message: cyc.stamps.length + " timestamps in cycle " + start + " (" + [...uniq].join(", ") + ")",
                 });
               }
             }
-            const early = cyc.tsEarliest || cyc.calEarliest;
-            if (early && early < unlockDate) {
-              push({
-                severity: "error",
-                kind: "before-unlock",
-                game: game.name,
-                task: task.label || taskId,
-                type,
-                cycleStart: start,
-                message: "Completion " + early + " is before unlock day " + unlockDate + " (cycle " + start + ")",
+            // Only flag unlock windows the task actually defines (days > 0 or custom unlock time).
+            const hasUnlockWindow =
+              unlockDays > 0 ||
+              Number.isFinite(task.earliestCompleteHour) ||
+              Number.isFinite(task.earliestCompleteMinute);
+            if (hasUnlockWindow) {
+              let earlyStamp = null;
+              (cyc.stamps || []).forEach((s) => {
+                if (!s || !isValidDateStr(s.dateStr)) return;
+                if (!earlyStamp) {
+                  earlyStamp = s;
+                  return;
+                }
+                const a = completionStampSortKey(s);
+                const b = completionStampSortKey(earlyStamp);
+                if (a < b) earlyStamp = s;
               });
+              const earlyDate = earlyStamp ? earlyStamp.dateStr : cyc.calEarliest;
+              if (earlyDate) {
+                let violates = false;
+                let completionLabel = earlyDate;
+                const hour = earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.hour))
+                    ? Number(earlyStamp.hour)
+                    : 12
+                  : null;
+                const minute = earlyStamp
+                  ? Number.isFinite(Number(earlyStamp.minute))
+                    ? Number(earlyStamp.minute)
+                    : 0
+                  : null;
+                if (earlyStamp) {
+                  const y = parseInt(earlyDate.slice(0, 4), 10);
+                  const mo = parseInt(earlyDate.slice(5, 7), 10) - 1;
+                  const d = parseInt(earlyDate.slice(8, 10), 10);
+                  const baseTz = getResetTimezoneForGame(game);
+                  const tz = getTimezoneForTaskDst(task, baseTz);
+                  const offsetRef = getOffsetRefDateForTask(task, tz);
+                  const completionMoment = createDateInTimezone(y, mo, d, hour, minute, tz, offsetRef);
+                  const unlockMoment = getTaskUnlockMoment(type, task, game, completionMoment);
+                  completionLabel =
+                    earlyDate +
+                    " " +
+                    (typeof timeToStr === "function" ? timeToStr(hour, minute) : hour + ":" + String(minute).padStart(2, "0"));
+                  if (unlockMoment && completionMoment.getTime() < unlockMoment.getTime()) violates = true;
+                } else if (earlyDate < unlockDate) {
+                  violates = true;
+                }
+                if (violates) {
+                  const unlockParts = getTaskEarliestCompleteTimeParts(task, game);
+                  const unlockTimeLabel =
+                    typeof timeToStr === "function"
+                      ? timeToStr(unlockParts.hour, unlockParts.minute)
+                      : unlockParts.hour + ":" + String(unlockParts.minute).padStart(2, "0");
+                  const sameDay = earlyDate === unlockDate;
+                  const msg = earlyStamp
+                    ? sameDay
+                      ? "Completion " +
+                        completionLabel +
+                        " is before unlock time " +
+                        unlockDate +
+                        " " +
+                        unlockTimeLabel +
+                        " (cycle " +
+                        start +
+                        ")"
+                      : "Completion " +
+                        completionLabel +
+                        " is before unlock " +
+                        unlockDate +
+                        " " +
+                        unlockTimeLabel +
+                        " (cycle " +
+                        start +
+                        ")"
+                    : "Completion " +
+                      earlyDate +
+                      " is before unlock day " +
+                      unlockDate +
+                      " (cycle " +
+                      start +
+                      ")";
+                  push({
+                    severity: "error",
+                    kind: "before-unlock",
+                    game: game.name,
+                    gameId: game.id,
+                    task: task.label || taskId,
+                    taskId,
+                    type,
+                    key,
+                    cycleStart: start,
+                    dateStr: earlyDate,
+                    hour,
+                    minute,
+                    unlockDate,
+                    unlockHour: unlockParts.hour,
+                    unlockMinute: unlockParts.minute,
+                    suggestedDateStr: unlockDate,
+                    suggestedHour: unlockParts.hour,
+                    suggestedMinute: unlockParts.minute,
+                    message: msg,
+                  });
+                }
+              }
             }
           });
 
@@ -4600,12 +4788,355 @@
     }
     lines.push("");
     lines.push("Note: [info] calendar-without-timestamp is normal for older marks and is not auto-fixed.");
+    lines.push("Fix hints:");
+    lines.push("  • calendar-before-timestamp / before-unlock / duplicates → Fix times & dates…");
+    lines.push("  • tally-mismatch → Rebuild tallies only");
+    lines.push("  • timestamp-without-calendar → Fix times & dates… or Repair (safe)");
+    lines.push("  • (dropped in Fix times & dates) cycle becomes a skip after tallies rebuild");
     lines.push("");
     scan.conflicts.slice(0, 80).forEach((c, i) => {
       lines.push((i + 1) + ". [" + c.severity + "] " + (c.game || "") + " / " + (c.task || "") + " — " + c.message);
     });
     if (scan.conflicts.length > 80) lines.push("…and " + (scan.conflicts.length - 80) + " more");
     return lines.join("\n");
+  }
+
+  /** before-unlock errors from the latest scan (for Debug edit modal). */
+  function listBeforeUnlockConflicts() {
+    const scan = scanDataConflicts();
+    return (scan.conflicts || []).filter((c) => c && c.kind === "before-unlock");
+  }
+
+  /**
+   * Debug: move finish date/time for before-unlock cycles.
+   * edits: [{ type, gameId, taskId, cycleStart, newDateStr, hour, minute }]
+   * Rewrites timestamps + calendar marks in that cycle; tallies unchanged.
+   */
+  function applyDebugBeforeUnlockEdits(edits, opts) {
+    const o = opts || {};
+    const list = Array.isArray(edits) ? edits : [];
+    let updated = 0;
+    list.forEach((edit) => {
+      if (!edit || !edit.type || !edit.gameId || !edit.taskId || !isValidDateStr(edit.newDateStr)) return;
+      if (!isValidDateStr(edit.cycleStart)) return;
+      const type = edit.type;
+      if (type !== "weeklies" && type !== "endgame") return;
+      const game = getGame(edit.gameId);
+      if (!game) return;
+      const taskList = type === "weeklies" ? game.weeklies : game.endgame;
+      const task = (taskList || []).find((t) => (t.id || t.label) === edit.taskId);
+      if (!task) return;
+      const key = edit.gameId + "." + edit.taskId;
+      const bounds = getCycleBoundsForTaskType(type, task, new Date(edit.cycleStart + "T12:00:00"), game);
+      if (!bounds) return;
+      const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+      if (!dates.length || dates[0] !== edit.cycleStart) return;
+      if (edit.newDateStr < dates[0] || edit.newDateStr > dates[dates.length - 1]) return;
+
+      const hourRaw = Number(edit.hour);
+      const minuteRaw = Number(edit.minute);
+      const safeHour = Number.isFinite(hourRaw) ? Math.max(0, Math.min(23, hourRaw)) : 12;
+      const safeMinute = Number.isFinite(minuteRaw) ? Math.max(0, Math.min(59, minuteRaw)) : 0;
+
+      dates.forEach((ds) => {
+        const day = state.completionByDate[ds];
+        if (!day || !Array.isArray(day[type])) return;
+        day[type] = day[type].filter((k) => k !== key);
+        if (
+          !(day.dailies && day.dailies.length) &&
+          !(day.weeklies && day.weeklies.length) &&
+          !(day.endgame && day.endgame.length)
+        ) {
+          delete state.completionByDate[ds];
+        }
+      });
+
+      state.completionTimestamps = (state.completionTimestamps || []).filter((t) => {
+        if (!t || t.taskType !== type || t.gameId !== edit.gameId || t.taskId !== edit.taskId) return true;
+        if (!isValidDateStr(t.dateStr)) return true;
+        return dates.indexOf(t.dateStr) < 0;
+      });
+      state.completionTimestamps.push({
+        taskType: type,
+        gameId: edit.gameId,
+        taskId: edit.taskId,
+        dateStr: edit.newDateStr,
+        hour: safeHour,
+        minute: safeMinute,
+      });
+
+      const fillDates =
+        typeof getRemainingDatesInPeriod === "function"
+          ? getRemainingDatesInPeriod(type, key, edit.newDateStr)
+          : [edit.newDateStr];
+      (fillDates || []).forEach((ds) => {
+        if (!isValidDateStr(ds)) return;
+        if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+        if (!state.completionByDate[ds][type].includes(key)) state.completionByDate[ds][type].push(key);
+      });
+      updated++;
+    });
+
+    if (updated) {
+      bumpDataVersion();
+      if (!o.skipSave) save(o.saveOptions || { immediate: true });
+      if (!o.skipRender) renderActiveTab();
+    }
+    const after = typeof scanDataConflicts === "function" ? scanDataConflicts() : null;
+    return { ok: true, updated, after };
+  }
+
+  /**
+   * Queue for Debug → Fix times & dates.
+   * Includes before-unlock, calendar-before-timestamp, duplicate-timestamps, timestamp-without-calendar.
+   */
+  function listTimeDateFixQueue() {
+    const scan = scanDataConflicts();
+    const kinds = new Set([
+      "before-unlock",
+      "calendar-before-timestamp",
+      "duplicate-timestamps",
+      "timestamp-without-calendar",
+    ]);
+    const rows = (scan.conflicts || [])
+      .filter((c) => c && kinds.has(c.kind))
+      .map((c) => {
+        const suggestedDate =
+          c.suggestedDateStr ||
+          (c.kind === "before-unlock" ? c.unlockDate : null) ||
+          c.dateStr ||
+          c.cycleStart;
+        const stamps = Array.isArray(c.stamps) ? c.stamps : null;
+        let uniqueStamps = stamps;
+        if (stamps && stamps.length) {
+          const seen = new Set();
+          uniqueStamps = [];
+          stamps.forEach((s) => {
+            const key =
+              String(s.dateStr || "") +
+              "|" +
+              String(Number(s.hour) || 0) +
+              "|" +
+              String(Number(s.minute) || 0);
+            if (seen.has(key)) return;
+            seen.add(key);
+            uniqueStamps.push(s);
+          });
+        }
+        return {
+          kind: c.kind,
+          severity: c.severity,
+          game: c.game,
+          gameId: c.gameId,
+          task: c.task,
+          taskId: c.taskId,
+          type: c.type,
+          key: c.key || (c.gameId && c.taskId ? c.gameId + "." + c.taskId : null),
+          cycleStart: c.cycleStart,
+          message: c.message,
+          dateStr: c.dateStr,
+          hour: c.hour,
+          minute: c.minute,
+          unlockDate: c.unlockDate,
+          unlockHour: c.unlockHour,
+          unlockMinute: c.unlockMinute,
+          calEarliest: c.calEarliest,
+          stamps: uniqueStamps,
+          stampCount: stamps ? stamps.length : 0,
+          suggestedDateStr: suggestedDate,
+          suggestedHour:
+            c.suggestedHour != null
+              ? c.suggestedHour
+              : c.unlockHour != null
+                ? c.unlockHour
+                : c.hour != null
+                  ? c.hour
+                  : 12,
+          suggestedMinute:
+            c.suggestedMinute != null
+              ? c.suggestedMinute
+              : c.unlockMinute != null
+                ? c.unlockMinute
+                : c.minute != null
+                  ? c.minute
+                  : 0,
+        };
+      });
+    // One row per cycle (prefer duplicate-timestamps over calendar-before for same cycle).
+    const rank = { "duplicate-timestamps": 0, "before-unlock": 1, "calendar-before-timestamp": 2, "timestamp-without-calendar": 3 };
+    const best = new Map();
+    rows.forEach((row) => {
+      const k = [row.type, row.gameId, row.taskId, row.cycleStart].join("|");
+      const prev = best.get(k);
+      if (!prev || (rank[row.kind] ?? 9) < (rank[prev.kind] ?? 9)) best.set(k, row);
+    });
+    return [...best.values()];
+  }
+
+  function getOwnedCycleDatesForTask(type, game, task, cycleStart) {
+    if (!game || !task || !isValidDateStr(cycleStart)) return [];
+    const bounds = getCycleBoundsForTaskType(type, task, new Date(cycleStart + "T12:00:00"), game);
+    if (!bounds) return [];
+    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+    if (!dates.length || dates[0] !== cycleStart) return [];
+    return dates;
+  }
+
+  /** Same cycle membership as scanDataConflicts (noon on the stamp dateStr). */
+  function stampBelongsToScanCycle(type, task, game, stamp, cycleStart) {
+    if (!stamp || !task || !game || !isValidDateStr(stamp.dateStr) || !isValidDateStr(cycleStart)) return false;
+    const bounds = getCycleBoundsForTaskType(type, task, new Date(stamp.dateStr + "T12:00:00"), game);
+    if (!bounds) return false;
+    const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+    return !!(dates.length && dates[0] === cycleStart);
+  }
+
+  function removeStampsForTaskScanCycle(type, gameId, taskId, cycleStart) {
+    const game = getGame(gameId);
+    if (!game) return [];
+    const list = type === "weeklies" ? game.weeklies : game.endgame;
+    const task = (list || []).find((t) => (t.id || t.label) === taskId);
+    if (!task) return [];
+    const removedDates = [];
+    state.completionTimestamps = (state.completionTimestamps || []).filter((t) => {
+      if (!t || t.taskType !== type || t.gameId !== gameId || t.taskId !== taskId) return true;
+      if (!stampBelongsToScanCycle(type, task, game, t, cycleStart)) return true;
+      if (isValidDateStr(t.dateStr)) removedDates.push(t.dateStr);
+      return false;
+    });
+    return removedDates;
+  }
+
+  function clearTaskCycleCalendarMarks(type, gameId, taskId, cycleStart, extraDateStrs) {
+    const game = getGame(gameId);
+    if (!game) return false;
+    const list = type === "weeklies" ? game.weeklies : game.endgame;
+    const task = (list || []).find((t) => (t.id || t.label) === taskId);
+    if (!task) return false;
+    const key = gameId + "." + taskId;
+    const markDays = new Set(getOwnedCycleDatesForTask(type, game, task, cycleStart));
+    (extraDateStrs || []).forEach((ds) => {
+      if (isValidDateStr(ds)) markDays.add(ds);
+    });
+    markDays.forEach((ds) => {
+      const day = state.completionByDate[ds];
+      if (!day || !Array.isArray(day[type])) return;
+      day[type] = day[type].filter((k) => k !== key);
+      if (
+        !(day.dailies && day.dailies.length) &&
+        !(day.weeklies && day.weeklies.length) &&
+        !(day.endgame && day.endgame.length)
+      ) {
+        delete state.completionByDate[ds];
+      }
+    });
+    return markDays.size > 0;
+  }
+
+  function clearTaskCycleMarksAndStamps(type, gameId, taskId, cycleStart) {
+    const removedDates = removeStampsForTaskScanCycle(type, gameId, taskId, cycleStart);
+    clearTaskCycleCalendarMarks(type, gameId, taskId, cycleStart, removedDates);
+    return true;
+  }
+
+  /**
+   * Apply Fix times & dates queue.
+   * edits: [{ kind, type, gameId, taskId, cycleStart, action: 'set'|'drop', newDateStr?, hour?, minute?, keep? }]
+   */
+  function applyDebugTimeDateFixes(edits, opts) {
+    const o = opts || {};
+    const list = Array.isArray(edits) ? edits : [];
+    let updated = 0;
+    let dropped = 0;
+    list.forEach((edit) => {
+      if (!edit || !edit.type || !edit.gameId || !edit.taskId || !isValidDateStr(edit.cycleStart)) return;
+      const action = edit.action === "drop" ? "drop" : "set";
+      if (action === "drop") {
+        const removedDates = removeStampsForTaskScanCycle(edit.type, edit.gameId, edit.taskId, edit.cycleStart);
+        clearTaskCycleCalendarMarks(edit.type, edit.gameId, edit.taskId, edit.cycleStart, removedDates);
+        dropped++;
+        return;
+      }
+
+      // Duplicate: delete every stamp scan puts in this cycle, then keep exactly one.
+      if (edit.kind === "duplicate-timestamps") {
+        const keepDate =
+          edit.keep && isValidDateStr(edit.keep.dateStr)
+            ? edit.keep.dateStr
+            : isValidDateStr(edit.newDateStr)
+              ? edit.newDateStr
+              : null;
+        if (!keepDate) return;
+        const keepHour = edit.keep
+          ? Number(edit.keep.hour) || 0
+          : Number.isFinite(Number(edit.hour))
+            ? Number(edit.hour)
+            : 12;
+        const keepMinute = edit.keep
+          ? Number(edit.keep.minute) || 0
+          : Number.isFinite(Number(edit.minute))
+            ? Number(edit.minute)
+            : 0;
+        const removedDates = removeStampsForTaskScanCycle(edit.type, edit.gameId, edit.taskId, edit.cycleStart);
+        clearTaskCycleCalendarMarks(edit.type, edit.gameId, edit.taskId, edit.cycleStart, removedDates);
+        const key = edit.gameId + "." + edit.taskId;
+        state.completionTimestamps.push({
+          taskType: edit.type,
+          gameId: edit.gameId,
+          taskId: edit.taskId,
+          dateStr: keepDate,
+          hour: keepHour,
+          minute: keepMinute,
+        });
+        const fillDates =
+          typeof getRemainingDatesInPeriod === "function"
+            ? getRemainingDatesInPeriod(edit.type, key, keepDate)
+            : [keepDate];
+        (fillDates || []).forEach((ds) => {
+          if (!isValidDateStr(ds)) return;
+          if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+          if (!state.completionByDate[ds][edit.type].includes(key)) state.completionByDate[ds][edit.type].push(key);
+        });
+        updated++;
+        return;
+      }
+
+      if (!isValidDateStr(edit.newDateStr)) return;
+      const removedDates = removeStampsForTaskScanCycle(edit.type, edit.gameId, edit.taskId, edit.cycleStart);
+      clearTaskCycleCalendarMarks(edit.type, edit.gameId, edit.taskId, edit.cycleStart, removedDates);
+      const hourRaw = Number(edit.hour);
+      const minuteRaw = Number(edit.minute);
+      const safeHour = Number.isFinite(hourRaw) ? Math.max(0, Math.min(23, hourRaw)) : 12;
+      const safeMinute = Number.isFinite(minuteRaw) ? Math.max(0, Math.min(59, minuteRaw)) : 0;
+      const key = edit.gameId + "." + edit.taskId;
+      state.completionTimestamps.push({
+        taskType: edit.type,
+        gameId: edit.gameId,
+        taskId: edit.taskId,
+        dateStr: edit.newDateStr,
+        hour: safeHour,
+        minute: safeMinute,
+      });
+      const fillDates =
+        typeof getRemainingDatesInPeriod === "function"
+          ? getRemainingDatesInPeriod(edit.type, key, edit.newDateStr)
+          : [edit.newDateStr];
+      (fillDates || []).forEach((ds) => {
+        if (!isValidDateStr(ds)) return;
+        if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+        if (!state.completionByDate[ds][edit.type].includes(key)) state.completionByDate[ds][edit.type].push(key);
+      });
+      updated++;
+    });
+
+    if (updated || dropped) {
+      syncAllTalliesFromCalendar({ skipSave: true, skipRender: true });
+      bumpDataVersion();
+      if (!o.skipSave) save(o.saveOptions || { immediate: true });
+      if (!o.skipRender) renderActiveTab();
+    }
+    const after = typeof scanDataConflicts === "function" ? scanDataConflicts() : null;
+    return { ok: true, updated, dropped, after };
   }
 
   /**
@@ -4725,16 +5256,36 @@
             const minCompletion = addDaysToDateStr(cycleDates[0], getTaskEarliestCompleteDays(task));
 
             const tsInCycle = (state.completionTimestamps || [])
-              .filter(
-                (t) =>
-                  t.taskType === type &&
-                  t.gameId === game.id &&
-                  t.taskId === taskId &&
-                  isValidDateStr(t.dateStr) &&
-                  t.dateStr >= cycleDates[0] &&
-                  t.dateStr <= cycleEndStr
-              )
-              .sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+              .filter((t) => {
+                if (
+                  t.taskType !== type ||
+                  t.gameId !== game.id ||
+                  t.taskId !== taskId ||
+                  !isValidDateStr(t.dateStr)
+                ) {
+                  return false;
+                }
+                // Match scan membership (not owned-date string range) so evening resets /
+                // short timeLimit windows still see stamps on the shared next-cycle calendar day.
+                const stampHour = Number.isFinite(Number(t.hour)) ? Number(t.hour) : 12;
+                const stampMinute = Number.isFinite(Number(t.minute)) ? Number(t.minute) : 0;
+                const y = parseInt(t.dateStr.slice(0, 4), 10);
+                const mo = parseInt(t.dateStr.slice(5, 7), 10) - 1;
+                const d = parseInt(t.dateStr.slice(8, 10), 10);
+                const baseTz = getResetTimezoneForGame(game);
+                const tz = getTimezoneForTaskDst(task, baseTz);
+                const offsetRef = getOffsetRefDateForTask(task, tz);
+                const moment = createDateInTimezone(y, mo, d, stampHour, stampMinute, tz, offsetRef);
+                const stampBounds = getCycleBoundsForTaskType(type, task, moment, game);
+                if (!stampBounds) return false;
+                const stampDates = getCalendarDatesInCycleRange(
+                  stampBounds.cycleStart,
+                  stampBounds.cycleEnd,
+                  stampBounds.nextCycleStart
+                );
+                return stampDates[0] === startStr;
+              })
+              .sort((a, b) => completionStampSortKey(a).localeCompare(completionStampSortKey(b)));
 
             let calEarliest = null;
             for (const ds of cycleDates) {
@@ -4747,14 +5298,18 @@
             let completion = tsInCycle.length ? tsInCycle[0].dateStr : calEarliest;
             if (!completion) return;
             if (completion < minCompletion) completion = minCompletion;
-            if (completion > cycleEndStr) completion = cycleEndStr;
+            // Keep stamp dates that fall on the next-cycle calendar day (limbo before reset hour).
+            // Only clamp calendar fill to owned cycle days below — do not rewrite the stamp earlier.
+            const stampCompletion = completion;
+            const calCompletion = completion > cycleEndStr ? cycleEndStr : completion;
+            if (calCompletion < minCompletion) return;
 
             // Collapse timestamps in this cycle onto the corrected completion day.
             let keptOne = false;
             tsInCycle.forEach((t) => {
               if (!keptOne) {
-                if (t.dateStr !== completion) {
-                  t.dateStr = completion;
+                if (t.dateStr !== stampCompletion) {
+                  t.dateStr = stampCompletion;
                   changed = true;
                 }
                 keptOne = true;
@@ -4772,12 +5327,12 @@
               if (!arr) return;
               const idx = arr.indexOf(key);
               if (idx < 0) return;
-              if (ds < completion) {
+              if (ds < calCompletion) {
                 arr.splice(idx, 1);
                 changed = true;
               }
             });
-            getRemainingDatesInPeriod(type, key, completion).forEach((ds) => {
+            getRemainingDatesInPeriod(type, key, calCompletion).forEach((ds) => {
               if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
               const arr = state.completionByDate[ds][type];
               if (!arr.includes(key)) {
@@ -6546,6 +7101,7 @@
     state.extracurricularCurrencyEarned = {};
     state.tab = state.defaultTab || "about";
     save();
+    // bulk state change: full refresh
     renderAll();
     closeClearDataModal();
     closeSettingsModal();
@@ -6683,18 +7239,45 @@
     list.innerHTML = "";
     const def = defaultCompletionTimeValue();
     const isDupes = ctx.mode === "debug-dupes";
-    if (title) title.textContent = isDupes ? "Resolve duplicate times" : ctx.mode === "debug" ? "Fill missing times" : "Completion time";
+    const isUnlockEdit = ctx.mode === "debug-before-unlock";
+    const isTimeDateFix = ctx.mode === "debug-time-date-fix";
+    if (title) {
+      title.textContent = isDupes
+        ? "Resolve duplicate times"
+        : isTimeDateFix
+          ? "Fix times & dates"
+          : isUnlockEdit
+            ? "Edit unlock-error dates"
+            : ctx.mode === "debug"
+              ? "Fill missing times"
+              : "Completion time";
+    }
     if (desc) {
       desc.textContent = isDupes
         ? "These tasks have more than one finish timestamp in the same cycle. Pick which one to keep; the others are removed. Calendar marks and tallies stay unchanged."
-        : ctx.mode === "debug"
-          ? "These calendar marks have no finish time. Enter times individually, or select several and use Batch → Apply to selected."
-          : "When did you finish each newly completed task on " +
-            (typeof formatDate === "function" ? formatDate(ctx.dateStr) : ctx.dateStr) +
-            "? Select several to set the same time in one step.";
+        : isTimeDateFix
+          ? "Update finish date/time, pick which duplicate to keep, or Drop a cycle so it counts as skipped. Tallies rebuild after Save."
+          : isUnlockEdit
+            ? "These finishes are before the task unlock window. Date/time default to unlock. Tallies stay unchanged. If unlock days were set by mistake, clear them on the task in Games instead."
+            : ctx.mode === "debug"
+              ? "These calendar marks have no finish time. Enter times individually, or select several and use Batch → Apply to selected."
+              : "When did you finish each newly completed task on " +
+                (typeof formatDate === "function" ? formatDate(ctx.dateStr) : ctx.dateStr) +
+                "? Select several to set the same time in one step.";
     }
-    if (confirmBtn) confirmBtn.textContent = isDupes ? "Keep selected" : "Save times";
-    if (batchBar) batchBar.hidden = isDupes || !(ctx.rows && ctx.rows.length);
+    if (confirmBtn) {
+      confirmBtn.textContent = isDupes
+        ? "Keep selected"
+        : isTimeDateFix
+          ? "Apply fixes"
+          : isUnlockEdit
+            ? "Save dates"
+            : "Save times";
+    }
+    if (batchBar) {
+      batchBar.hidden = !!(isDupes || isUnlockEdit || isTimeDateFix || !(ctx.rows && ctx.rows.length));
+      if (isTimeDateFix || isDupes || isUnlockEdit) batchBar.setAttribute("hidden", "");
+    }
     if (batchInput) batchInput.value = def;
     if (selectAll) {
       selectAll.checked = false;
@@ -6745,6 +7328,199 @@
         });
         list.appendChild(block);
         group._radios = radios;
+      });
+      setCompletionTimeModalOpen(true);
+      return;
+    }
+
+    if (isUnlockEdit) {
+      (ctx.rows || []).forEach((row, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "completion-time-row completion-time-row-unlock-edit";
+        const lab = document.createElement("div");
+        lab.className = "completion-time-row-label";
+        lab.textContent = row.label;
+        const meta = document.createElement("div");
+        meta.className = "completion-time-row-meta";
+        meta.textContent =
+          "Cycle " +
+          row.cycleStart +
+          " · unlock " +
+          (row.unlockDate || row.suggestedDateStr || "—") +
+          (row.unlockHour != null
+            ? " " +
+              (typeof timeToStr === "function"
+                ? timeToStr(row.unlockHour, row.unlockMinute || 0)
+                : String(row.unlockHour).padStart(2, "0") +
+                  ":" +
+                  String(row.unlockMinute || 0).padStart(2, "0"))
+            : "") +
+          (row.type ? " · " + row.type : "") +
+          (row.dateStr
+            ? " · was " +
+              row.dateStr +
+              (row.hour != null
+                ? " " +
+                  (typeof timeToStr === "function"
+                    ? timeToStr(row.hour, row.minute || 0)
+                    : String(row.hour).padStart(2, "0") + ":" + String(row.minute || 0).padStart(2, "0"))
+                : "")
+            : "");
+        const dateInput = document.createElement("input");
+        dateInput.type = "date";
+        dateInput.id = "completionUnlockDate_" + idx;
+        dateInput.className = "settings-input";
+        dateInput.value = row.suggestedDateStr || row.unlockDate || row.dateStr || "";
+        dateInput.min = row.cycleStart || "";
+        const timeInput = document.createElement("input");
+        timeInput.type = "time";
+        timeInput.id = "completionUnlockTime_" + idx;
+        timeInput.className = "settings-input";
+        const h = Number.isFinite(Number(row.suggestedHour))
+          ? Number(row.suggestedHour)
+          : Number.isFinite(Number(row.unlockHour))
+            ? Number(row.unlockHour)
+            : Number.isFinite(Number(row.hour))
+              ? Number(row.hour)
+              : Number(def.slice(0, 2)) || 12;
+        const m = Number.isFinite(Number(row.suggestedMinute))
+          ? Number(row.suggestedMinute)
+          : Number.isFinite(Number(row.unlockMinute))
+            ? Number(row.unlockMinute)
+            : Number.isFinite(Number(row.minute))
+              ? Number(row.minute)
+              : Number(def.slice(3, 5)) || 0;
+        timeInput.value = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+        wrap.appendChild(lab);
+        wrap.appendChild(dateInput);
+        wrap.appendChild(timeInput);
+        wrap.appendChild(meta);
+        list.appendChild(wrap);
+        row._dateInput = dateInput;
+        row._input = timeInput;
+      });
+      setCompletionTimeModalOpen(true);
+      return;
+    }
+
+    if (isTimeDateFix) {
+      (ctx.rows || []).forEach((row, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "completion-time-row completion-time-row-unlock-edit";
+        const lab = document.createElement("div");
+        lab.className = "completion-time-row-label";
+        lab.textContent = (row.label || "") + " · " + (row.kind || "");
+        const meta = document.createElement("div");
+        meta.className = "completion-time-row-meta";
+        meta.textContent =
+          (row.message || "") +
+          (row.cycleStart ? " · cycle " + row.cycleStart : "") +
+          (row.type ? " · " + row.type : "");
+
+        const action = document.createElement("select");
+        action.className = "settings-select";
+        action.setAttribute("aria-label", "Action for " + (row.label || "item"));
+        [
+          ["set", "Update finish"],
+          ["drop", "Drop (count as skip)"],
+        ].forEach(([val, text]) => {
+          const opt = document.createElement("option");
+          opt.value = val;
+          opt.textContent = text;
+          action.appendChild(opt);
+        });
+
+        const dateInput = document.createElement("input");
+        dateInput.type = "date";
+        dateInput.className = "settings-input";
+        dateInput.value = row.suggestedDateStr || row.dateStr || row.cycleStart || "";
+
+        const timeInput = document.createElement("input");
+        timeInput.type = "time";
+        timeInput.className = "settings-input";
+        const h = Number.isFinite(Number(row.suggestedHour))
+          ? Number(row.suggestedHour)
+          : Number.isFinite(Number(row.hour))
+            ? Number(row.hour)
+            : Number(def.slice(0, 2)) || 12;
+        const m = Number.isFinite(Number(row.suggestedMinute))
+          ? Number(row.suggestedMinute)
+          : Number.isFinite(Number(row.minute))
+            ? Number(row.minute)
+            : Number(def.slice(3, 5)) || 0;
+        timeInput.value = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+
+        const syncActionUi = () => {
+          const dropping = action.value === "drop";
+          dateInput.disabled = dropping;
+          timeInput.disabled = dropping;
+          if (row._dupeRadios) row._dupeRadios.forEach((r) => { r.disabled = dropping; });
+        };
+        action.addEventListener("change", syncActionUi);
+
+        wrap.appendChild(lab);
+        wrap.appendChild(action);
+        wrap.appendChild(dateInput);
+        wrap.appendChild(timeInput);
+        wrap.appendChild(meta);
+
+        if (row.kind === "duplicate-timestamps" && Array.isArray(row.stamps) && row.stamps.length) {
+          const dupeWrap = document.createElement("div");
+          dupeWrap.className = "completion-time-dupe-group";
+          const hint = document.createElement("div");
+          hint.className = "completion-time-dupe-meta";
+          hint.textContent =
+            "Pick one finish to keep. All other timestamps in this cycle are deleted (no new stamp is added).";
+          dupeWrap.appendChild(hint);
+          const radios = [];
+          row.stamps.forEach((stamp, sIdx) => {
+            const opt = document.createElement("label");
+            opt.className = "completion-time-dupe-option";
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = "fixTimeDupe_" + idx;
+            radio.checked = sIdx === row.stamps.length - 1;
+            radio.dataset.dateStr = stamp.dateStr;
+            radio.dataset.hour = String(Number(stamp.hour) || 0);
+            radio.dataset.minute = String(Number(stamp.minute) || 0);
+            radio.addEventListener("change", () => {
+              if (!radio.checked) return;
+              dateInput.value = stamp.dateStr || dateInput.value;
+              timeInput.value =
+                String(Number(stamp.hour) || 0).padStart(2, "0") +
+                ":" +
+                String(Number(stamp.minute) || 0).padStart(2, "0");
+            });
+            const text = document.createElement("span");
+            const timeLabel =
+              typeof formatTimeOnly === "function"
+                ? formatTimeOnly(Number(stamp.hour) || 0, Number(stamp.minute) || 0)
+                : String(stamp.hour) + ":" + String(stamp.minute || 0).padStart(2, "0");
+            const dateLabel =
+              typeof formatDate === "function" ? formatDate(stamp.dateStr) : stamp.dateStr;
+            text.textContent = "Keep " + dateLabel + " · " + timeLabel;
+            opt.appendChild(radio);
+            opt.appendChild(text);
+            dupeWrap.appendChild(opt);
+            radios.push(radio);
+          });
+          wrap.appendChild(dupeWrap);
+          row._dupeRadios = radios;
+          const last = row.stamps[row.stamps.length - 1];
+          if (last) {
+            dateInput.value = last.dateStr || dateInput.value;
+            timeInput.value =
+              String(Number(last.hour) || 0).padStart(2, "0") +
+              ":" +
+              String(Number(last.minute) || 0).padStart(2, "0");
+          }
+        }
+
+        list.appendChild(wrap);
+        row._actionSelect = action;
+        row._dateInput = dateInput;
+        row._input = timeInput;
+        syncActionUi();
       });
       setCompletionTimeModalOpen(true);
       return;
@@ -6825,6 +7601,91 @@
         lines.push("Resolve duplicate times");
         lines.push("Groups resolved: " + (result.resolved || 0));
         lines.push("Timestamps removed: " + (result.removed || 0));
+        lines.push("");
+        if (result.after && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(result.after));
+        } else if (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(scanDataConflicts()));
+        }
+        report.textContent = lines.join("\n");
+      }
+      if (typeof syncSettingsUI === "function") syncSettingsUI();
+      return;
+    }
+    if (ctx.mode === "debug-before-unlock") {
+      const edits = (ctx.rows || []).map((row) => {
+        const parsed = parseTimeInputValue(row._input && row._input.value);
+        const newDateStr = (row._dateInput && row._dateInput.value) || row.suggestedDateStr || row.dateStr;
+        return {
+          type: row.type,
+          gameId: row.gameId,
+          taskId: row.taskId,
+          cycleStart: row.cycleStart,
+          newDateStr,
+          hour: parsed.hour,
+          minute: parsed.minute,
+        };
+      });
+      closeCompletionTimeModal();
+      const result =
+        typeof applyDebugBeforeUnlockEdits === "function"
+          ? applyDebugBeforeUnlockEdits(edits)
+          : { ok: false, updated: 0 };
+      const report = qs("settingsDebugReport");
+      if (report) {
+        const lines = [];
+        lines.push("Edit unlock-error dates");
+        lines.push("Cycles updated: " + (result.updated || 0));
+        lines.push("");
+        if (result.after && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(result.after));
+        } else if (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function") {
+          lines.push(formatConflictScanReport(scanDataConflicts()));
+        }
+        report.textContent = lines.join("\n");
+      }
+      if (typeof syncSettingsUI === "function") syncSettingsUI();
+      return;
+    }
+    if (ctx.mode === "debug-time-date-fix") {
+      const edits = (ctx.rows || []).map((row) => {
+        const action = (row._actionSelect && row._actionSelect.value) || "set";
+        const parsed = parseTimeInputValue(row._input && row._input.value);
+        const newDateStr = (row._dateInput && row._dateInput.value) || row.suggestedDateStr || row.dateStr;
+        let keep = null;
+        if (row.kind === "duplicate-timestamps" && row._dupeRadios) {
+          const picked = row._dupeRadios.find((r) => r.checked) || row._dupeRadios[row._dupeRadios.length - 1];
+          if (picked) {
+            keep = {
+              dateStr: picked.dataset.dateStr,
+              hour: Number(picked.dataset.hour) || 0,
+              minute: Number(picked.dataset.minute) || 0,
+            };
+          }
+        }
+        return {
+          kind: row.kind,
+          type: row.type,
+          gameId: row.gameId,
+          taskId: row.taskId,
+          cycleStart: row.cycleStart,
+          action,
+          newDateStr: keep ? keep.dateStr : newDateStr,
+          hour: keep ? keep.hour : parsed.hour,
+          minute: keep ? keep.minute : parsed.minute,
+          keep,
+        };
+      });
+      closeCompletionTimeModal();
+      const result =
+        typeof applyDebugTimeDateFixes === "function"
+          ? applyDebugTimeDateFixes(edits)
+          : { ok: false, updated: 0, dropped: 0 };
+      const report = qs("settingsDebugReport");
+      if (report) {
+        const lines = [];
+        lines.push("Fix times & dates");
+        lines.push("Updated: " + (result.updated || 0) + "  ·  Dropped: " + (result.dropped || 0));
         lines.push("");
         if (result.after && typeof formatConflictScanReport === "function") {
           lines.push(formatConflictScanReport(result.after));
@@ -8681,6 +9542,48 @@
     });
   }
 
+  function openDebugFixTimesDates() {
+    if (typeof listTimeDateFixQueue !== "function") {
+      alert("Fix times & dates is unavailable.");
+      return;
+    }
+    const queue = listTimeDateFixQueue();
+    const report = qs("settingsDebugReport");
+    if (!queue.length) {
+      if (report) {
+        report.textContent =
+          "Fix times & dates\n\nNo time/date conflicts to fix." +
+          (typeof scanDataConflicts === "function" && typeof formatConflictScanReport === "function"
+            ? "\n\n" + formatConflictScanReport(scanDataConflicts())
+            : "");
+      }
+      return;
+    }
+    openCompletionTimeModal({
+      mode: "debug-time-date-fix",
+      rows: queue.map((c) => ({
+        kind: c.kind,
+        type: c.type,
+        key: c.key,
+        gameId: c.gameId,
+        taskId: c.taskId,
+        label: (c.game || "") + " — " + (c.task || c.taskId || ""),
+        cycleStart: c.cycleStart,
+        message: c.message,
+        dateStr: c.dateStr,
+        hour: c.hour,
+        minute: c.minute,
+        unlockDate: c.unlockDate,
+        unlockHour: c.unlockHour,
+        unlockMinute: c.unlockMinute,
+        stamps: c.stamps,
+        suggestedDateStr: c.suggestedDateStr,
+        suggestedHour: c.suggestedHour,
+        suggestedMinute: c.suggestedMinute,
+      })),
+    });
+  }
+
   let settingsModalOpen = false;
 
   const PRESET_NAMES = {
@@ -9465,13 +10368,15 @@
       freezeTalliesOnTimezoneChange();
       save();
       updateSidebarTime();
-      renderAll();
+      // display-only: active tab + chrome
+      renderActiveTab();
     });
     const dateFormatEl = qs("settingsDateFormat");
     if (dateFormatEl) dateFormatEl.addEventListener("change", () => {
       state.dateFormat = dateFormatEl.value || "mdy";
       save();
-      renderAll();
+      // display-only: active tab + chrome
+      renderActiveTab();
     });
     const timeFormatEl = qs("settingsTimeFormat");
     if (timeFormatEl) timeFormatEl.addEventListener("change", () => {
@@ -9488,19 +10393,22 @@
       freezeTalliesOnTimezoneChange();
       save();
       updateSidebarTime();
-      renderAll();
+      // display-only: active tab + chrome
+      renderActiveTab();
     });
     const firstDayEl = qs("settingsFirstDayOfWeek");
     if (firstDayEl) firstDayEl.addEventListener("change", () => {
       state.firstDayOfWeek = parseInt(firstDayEl.value, 10) || 0;
       save();
-      renderAll();
+      // display-only: active tab + chrome
+      renderActiveTab();
     });
     const compactEl = qs("settingsCompactMode");
     if (compactEl) compactEl.addEventListener("change", () => {
       state.compactMode = compactEl.checked;
       applyCompactMode();
       save();
+      // display-only: active tab + chrome
       renderActiveTab();
     });
     const defaultTabEl = qs("settingsDefaultTab");
@@ -9656,6 +10564,7 @@
           // Must flush before load(), or load() reloads the previous localStorage and undoes the import.
           save({ immediate: true });
           load();
+          // bulk state change: full refresh
           renderAll();
           const report = qs("settingsDebugReport");
           if (report && typeof formatConflictScanReport === "function" && typeof scanDataConflicts === "function") {
@@ -9734,8 +10643,8 @@
     });
     const debugFillTimesBtn = qs("settingsDebugFillMissingTimesBtn");
     if (debugFillTimesBtn) debugFillTimesBtn.addEventListener("click", () => openDebugFillMissingTimes());
-    const debugResolveDupesBtn = qs("settingsDebugResolveDuplicateTimesBtn");
-    if (debugResolveDupesBtn) debugResolveDupesBtn.addEventListener("click", () => openDebugResolveDuplicateTimes());
+    const debugFixTimesDatesBtn = qs("settingsDebugFixTimesDatesBtn");
+    if (debugFixTimesDatesBtn) debugFixTimesDatesBtn.addEventListener("click", () => openDebugFixTimesDates());
 
     function getSelectedCompactMonths() {
       const sel = qs("settingsCompactMonths");
@@ -13026,8 +13935,8 @@
   }
 
 
-  function getHistoryDWEForDate(dateStr) {
-    const available = getTasksAvailableOnDate(dateStr);
+  function getHistoryDWEForDate(dateStr, availableOpt) {
+    const available = availableOpt || getTasksAvailableOnDate(dateStr);
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
     const wCompleted = (available.weeklies || []).filter((item) => (dayData.weeklies || []).includes(item.key)).length;
     const eCompleted = (available.endgame || []).filter((item) => (dayData.endgame || []).includes(item.key)).length;
@@ -13041,9 +13950,9 @@
     };
   }
 
-  function getHistoryCompletedTaskLabels(dateStr) {
+  function getHistoryCompletedTaskLabels(dateStr, availableOpt) {
     const dayData = state.completionByDate[dateStr] || { dailies: [], weeklies: [], endgame: [] };
-    const available = getTasksAvailableOnDate(dateStr);
+    const available = availableOpt || getTasksAvailableOnDate(dateStr);
     const labels = { dailies: [], weeklies: [], endgame: [] };
     (dayData.dailies || []).forEach((gameId) => {
       const game = getGame(gameId);
@@ -13076,6 +13985,65 @@
       });
     });
     return labels;
+  }
+
+  /** H1: one availability scan per day for History DWE bars + tooltips. */
+  function buildHistoryDayModel(dateStr) {
+    const available = getTasksAvailableOnDate(dateStr);
+    return {
+      dateStr,
+      available,
+      dwe: getHistoryDWEForDate(dateStr, available),
+      labels: getHistoryCompletedTaskLabels(dateStr, available),
+    };
+  }
+
+  // H2: cache day models across History renders; wipe when completion/games/format inputs change.
+  let historyDayModelCache = null; // { invalidationKey, models: Map<dateStr, model> }
+
+  function getHistoryDayModelCacheKey() {
+    const games = typeof getAllGames === "function" ? getAllGames() : [];
+    const gameSig = games
+      .map((g) => {
+        const w = (g.weeklies || []).map((t) => t.id || t.label).join(",");
+        const e = (g.endgame || []).map((t) => t.id || t.label).join(",");
+        return g.id + ":w[" + w + "]:e[" + e + "]";
+      })
+      .join("|");
+    const tz =
+      typeof getRecordingTimezone === "function"
+        ? getRecordingTimezone()
+        : typeof getAppTimezone === "function"
+          ? getAppTimezone()
+          : "";
+    return [
+      state.dataVersion || 0,
+      state.dateFormat || "",
+      state.firstDayOfWeek ?? "",
+      tz,
+      gameSig,
+    ].join("::");
+  }
+
+  function getCachedHistoryDayModel(dateStr, stats) {
+    const inv = getHistoryDayModelCacheKey();
+    if (!historyDayModelCache || historyDayModelCache.invalidationKey !== inv) {
+      historyDayModelCache = { invalidationKey: inv, models: new Map() };
+    }
+    const hit = historyDayModelCache.models.get(dateStr);
+    if (hit) {
+      if (stats) stats.hits++;
+      return hit;
+    }
+    if (stats) stats.misses++;
+    const model = buildHistoryDayModel(dateStr);
+    historyDayModelCache.models.set(dateStr, model);
+    // Soft cap: keep roughly a few months of visited days.
+    if (historyDayModelCache.models.size > 120) {
+      const oldest = historyDayModelCache.models.keys().next().value;
+      if (oldest != null) historyDayModelCache.models.delete(oldest);
+    }
+    return model;
   }
 
   let historyDweTooltipActive = null;
@@ -13119,8 +14087,46 @@
     }
   }
 
+  function normalizeHistoryTipItems(labelItems) {
+    return (labelItems || []).map((item) => (typeof item === "string" ? { text: item, carried: false } : item));
+  }
+
+  function createHistoryDweTooltipEl(items, typeName) {
+    const tooltip = document.createElement("div");
+    tooltip.className = "history-dwe-tooltip history-dwe-tooltip-" + typeName;
+    tooltip.setAttribute("role", "tooltip");
+    items.forEach((i) => {
+      const bit = document.createElement("div");
+      bit.className =
+        "history-dwe-tooltip-item attendance-tooltip-" +
+        typeName +
+        (i.carried ? " history-dwe-tooltip-carried" : "");
+      const base = String(i.text || "").replace(/\s*\(carried\)\s*$/i, "");
+      bit.appendChild(document.createTextNode(base));
+      if (i.carried) {
+        const tag = document.createElement("span");
+        tag.className = "history-dwe-tooltip-carried-tag";
+        tag.textContent = " (carried)";
+        bit.appendChild(tag);
+      }
+      tooltip.appendChild(bit);
+    });
+    return tooltip;
+  }
+
+  function ensureHistoryDweTooltip(wrap) {
+    if (historyDweTooltipWrap === wrap && historyDweTooltipActive) return historyDweTooltipActive;
+    let tip = wrap.querySelector(".history-dwe-tooltip");
+    if (tip) return tip;
+    const items = wrap._historyTipItems;
+    if (!items || !items.length) return null;
+    tip = createHistoryDweTooltipEl(items, wrap._historyTipType || "dailies");
+    wrap.appendChild(tip);
+    return tip;
+  }
+
   function showHistoryDweTooltip(wrap) {
-    const tip = wrap.querySelector(".history-dwe-tooltip");
+    const tip = ensureHistoryDweTooltip(wrap);
     if (!tip) return;
     if (historyDweTooltipActive && historyDweTooltipActive !== tip) hideHistoryDweTooltip();
     historyDweTooltipActive = tip;
@@ -13130,19 +14136,47 @@
     positionHistoryDweTooltip(wrap, tip);
   }
 
+  function historyBarWrapFromEvent(root, target) {
+    if (!target || !target.closest) return null;
+    const wrap = target.closest(".history-dwe-bar-wrap");
+    if (!wrap || !root.contains(wrap)) return null;
+    if (!wrap._historyTipItems || !wrap._historyTipItems.length) return null;
+    return wrap;
+  }
+
   function bindHistoryDweTooltips(root) {
     if (!root) return;
-    root.querySelectorAll(".history-dwe-bar-wrap").forEach((wrap) => {
-      if (!wrap.querySelector(".history-dwe-tooltip")) return;
-      wrap.addEventListener("mouseenter", () => showHistoryDweTooltip(wrap));
-      wrap.addEventListener("mouseleave", hideHistoryDweTooltip);
-      wrap.addEventListener("focusin", () => showHistoryDweTooltip(wrap));
-      wrap.addEventListener("focusout", (e) => {
-        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
-        hideHistoryDweTooltip();
+    // H4: delegate so H3 grid swaps do not rebind every bar; tip DOM is built on first show.
+    if (!root._historyDweTipDelegated) {
+      root._historyDweTipDelegated = true;
+      root.addEventListener("mouseover", (e) => {
+        const wrap = historyBarWrapFromEvent(root, e.target);
+        if (!wrap) return;
+        if (historyDweTooltipWrap === wrap && historyDweTooltipActive) return;
+        showHistoryDweTooltip(wrap);
       });
-    });
-    root.addEventListener("scroll", hideHistoryDweTooltip, { passive: true });
+      root.addEventListener("mouseout", (e) => {
+        const wrap = historyBarWrapFromEvent(root, e.target);
+        if (!wrap) return;
+        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+        if (historyDweTooltipWrap === wrap) hideHistoryDweTooltip();
+      });
+      root.addEventListener("focusin", (e) => {
+        const wrap = historyBarWrapFromEvent(root, e.target);
+        if (!wrap) return;
+        showHistoryDweTooltip(wrap);
+      });
+      root.addEventListener("focusout", (e) => {
+        const wrap = historyBarWrapFromEvent(root, e.target);
+        if (!wrap) return;
+        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+        if (historyDweTooltipWrap === wrap) hideHistoryDweTooltip();
+      });
+    }
+    if (!root._historyDweScrollBound) {
+      root._historyDweScrollBound = true;
+      root.addEventListener("scroll", hideHistoryDweTooltip, { passive: true });
+    }
     if (!bindHistoryDweTooltips._windowBound) {
       bindHistoryDweTooltips._windowBound = true;
       window.addEventListener("scroll", hideHistoryDweTooltip, true);
@@ -13150,18 +14184,270 @@
     }
   }
 
-  function renderAttendanceHistory(container) {
-    hideHistoryDweTooltip();
-    const now = getSimulatedNow();
+  const HISTORY_MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+  function resolveHistoryMonthYear(now) {
     let month = state.historyMonth != null ? Number(state.historyMonth) : now.getMonth();
     let year = state.historyYear != null ? Number(state.historyYear) : now.getFullYear();
     if (!Number.isFinite(month) || month < 0 || month > 11) month = now.getMonth();
     if (!Number.isFinite(year) || year < 1970 || year > 2100) year = now.getFullYear();
+    return { month, year };
+  }
+
+  function getHistoryYearOptions(now, selectedYear) {
+    const years = new Set();
+    const nowY = now.getFullYear();
+    years.add(nowY);
+    years.add(selectedYear);
+    Object.keys(state.completionByDate || {}).forEach((ds) => {
+      if (/^\d{4}-/.test(ds)) years.add(Number(ds.slice(0, 4)));
+    });
+    (state.completionTimestamps || []).forEach((t) => {
+      if (t && isValidDateStr(t.dateStr)) years.add(Number(t.dateStr.slice(0, 4)));
+    });
+    for (let y = nowY - 1; y <= nowY + 2; y++) years.add(y);
+    return [...years].filter((y) => Number.isFinite(y) && y >= 1970 && y <= 2100).sort((a, b) => a - b);
+  }
+
+  function buildHistoryDweBar(typeLetter, completed, total, labelItems, typeName) {
+    const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
+    const items = normalizeHistoryTipItems(labelItems);
+    const wrap = document.createElement("div");
+    wrap.className = "history-dwe-bar-wrap history-dwe-bar-wrap-" + typeName;
+    const allCarried = items.length > 0 && items.every((i) => i.carried);
+    if (allCarried) wrap.classList.add("history-dwe-bar-wrap-carried");
+    else if (items.some((i) => i.carried)) wrap.classList.add("history-dwe-bar-wrap-mixed");
+    const label = document.createElement("span");
+    label.className = "history-dwe-label";
+    label.textContent = typeLetter;
+    wrap.appendChild(label);
+    const barEl = document.createElement("div");
+    barEl.className = "history-dwe-bar history-dwe-bar-" + typeLetter.toLowerCase();
+    barEl.innerHTML = "<span class=\"history-dwe-fill\" style=\"width:" + pct + "%\"></span><span class=\"history-dwe-fraction\">" + escapeHtml(String(completed) + "/" + String(total)) + "</span>";
+    wrap.appendChild(barEl);
+    if (allCarried) {
+      const mark = document.createElement("span");
+      mark.className = "history-dwe-carried-mark";
+      mark.setAttribute("aria-hidden", "true");
+      mark.title = "Carried from earlier in cycle";
+      mark.textContent = "↻";
+      wrap.appendChild(mark);
+    }
+    // H4: keep labels for aria / first hover; tip DOM is created in ensureHistoryDweTooltip.
+    if (items.length > 0) {
+      wrap._historyTipItems = items;
+      wrap._historyTipType = typeName;
+    }
+    return wrap;
+  }
+
+  function historyDayAriaLabel(dateStr, dwe, taskLabels) {
+    const dateLabel = typeof formatDate === "function" ? formatDate(dateStr) : dateStr;
+    const parts = [
+      "Dailies " + dwe.dCompleted + " of " + dwe.dTotal,
+      "Weeklies " + dwe.wCompleted + " of " + dwe.wTotal,
+      "Endgame " + dwe.eCompleted + " of " + dwe.eTotal,
+    ];
+    const finishedNames = []
+      .concat(taskLabels.dailies || [])
+      .concat(taskLabels.weeklies || [])
+      .concat(taskLabels.endgame || [])
+      .filter((i) => i && !i.carried)
+      .map((i) => i.text);
+    const carriedNames = []
+      .concat(taskLabels.weeklies || [])
+      .concat(taskLabels.endgame || [])
+      .filter((i) => i && i.carried)
+      .map((i) => i.text);
+    if (finishedNames.length) parts.push("Finished: " + finishedNames.join(", "));
+    if (carriedNames.length) parts.push("Carried: " + carriedNames.join(", "));
+    return dateLabel + ". " + parts.join(". ") + ". Press Enter to edit.";
+  }
+
+  function buildHistoryCalendarGrid(year, month, todayStr, historyDayCacheStats) {
+    const grid = document.createElement("div");
+    grid.className = "history-calendar-grid";
+    grid.setAttribute("role", "grid");
+    grid.setAttribute("aria-label", "Completion history calendar");
+    const frag = document.createDocumentFragment();
+    const firstDay = state.firstDayOfWeek === 1 ? 1 : 0;
+    const dayNamesOrdered = firstDay === 1 ? [...DAY_NAMES.slice(1), DAY_NAMES[0]] : DAY_NAMES;
+    for (let i = 0; i < 7; i++) {
+      const th = document.createElement("div");
+      th.className = "history-calendar-weekday";
+      th.textContent = dayNamesOrdered[i];
+      frag.appendChild(th);
+    }
+    const recTz = getRecordingTimezone();
+    const firstOfMonth = createDateInTimezone(year, month, 1, 12, 0, recTz);
+    const firstParts = getDatePartsInTimezone(firstOfMonth, recTz);
+    const startDay = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(firstParts.weekday);
+    const lastOfMonth = createDateInTimezone(year, month + 1, 0, 12, 0, recTz);
+    const lastParts = getDatePartsInTimezone(lastOfMonth, recTz);
+    const daysInMonth = lastParts.day;
+    const lastOfPrev = createDateInTimezone(year, month, 0, 12, 0, recTz);
+    const lastPrevParts = getDatePartsInTimezone(lastOfPrev, recTz);
+    const daysInPrevMonth = lastPrevParts.day;
+    const leadingCount = (startDay - firstDay + 7) % 7;
+    const totalCells = leadingCount + daysInMonth;
+    const trailingCount = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+    const cellDates = [];
+    for (let i = 0; i < leadingCount; i++) {
+      const d = daysInPrevMonth - leadingCount + 1 + i;
+      const date = createDateInTimezone(year, month - 1, d, 12, 0, recTz);
+      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: d });
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = createDateInTimezone(year, month, day, 12, 0, recTz);
+      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: true, dayNum: day });
+    }
+    for (let i = 0; i < trailingCount; i++) {
+      const date = createDateInTimezone(year, month + 1, i + 1, 12, 0, recTz);
+      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: i + 1 });
+    }
+    const dayCells = [];
+    cellDates.forEach(({ dateStr, isCurrentMonth, dayNum }, cellIndex) => {
+      const cell = document.createElement("div");
+      cell.className = "history-calendar-day";
+      cell.setAttribute("role", "gridcell");
+      if (!isCurrentMonth) cell.classList.add("history-calendar-day-other-month");
+      if (dateStr === todayStr) cell.classList.add("history-calendar-day-today");
+      if (dateStr > todayStr) cell.classList.add("history-calendar-day-future");
+      const topRow = document.createElement("div");
+      topRow.className = "history-calendar-day-top";
+      const dayNumEl = document.createElement("div");
+      dayNumEl.className = "history-calendar-day-num";
+      dayNumEl.textContent = dayNum;
+      topRow.appendChild(dayNumEl);
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "btn btn-ghost btn-sm history-calendar-day-edit";
+      editBtn.textContent = "Edit";
+      editBtn.tabIndex = -1;
+      editBtn.setAttribute("aria-label", "Edit " + (typeof formatDate === "function" ? formatDate(dateStr) : dateStr));
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openCalendarDayModal(dateStr);
+      });
+      topRow.appendChild(editBtn);
+      cell.appendChild(topRow);
+      const dayModel = getCachedHistoryDayModel(dateStr, historyDayCacheStats);
+      const dwe = dayModel.dwe;
+      const taskLabels = dayModel.labels;
+      cell.appendChild(buildHistoryDweBar("D", dwe.dCompleted, dwe.dTotal, taskLabels.dailies, "dailies"));
+      cell.appendChild(buildHistoryDweBar("W", dwe.wCompleted, dwe.wTotal, taskLabels.weeklies, "weeklies"));
+      cell.appendChild(buildHistoryDweBar("E", dwe.eCompleted, dwe.eTotal, taskLabels.endgame, "endgame"));
+      cell.setAttribute("aria-label", historyDayAriaLabel(dateStr, dwe, taskLabels));
+      cell.tabIndex = -1;
+      cell.dataset.cellIndex = String(cellIndex);
+      cell.addEventListener("click", (e) => {
+        if (e.target && e.target.closest && e.target.closest(".history-calendar-day-edit")) return;
+        openCalendarDayModal(dateStr);
+      });
+      cell.addEventListener("keydown", (e) => {
+        const cols = 7;
+        let next = cellIndex;
+        if (e.key === "ArrowRight") next = cellIndex + 1;
+        else if (e.key === "ArrowLeft") next = cellIndex - 1;
+        else if (e.key === "ArrowDown") next = cellIndex + cols;
+        else if (e.key === "ArrowUp") next = cellIndex - cols;
+        else if (e.key === "Home") next = cellIndex - (cellIndex % cols);
+        else if (e.key === "End") next = cellIndex - (cellIndex % cols) + (cols - 1);
+        else if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openCalendarDayModal(dateStr);
+          return;
+        } else {
+          return;
+        }
+        e.preventDefault();
+        if (next < 0 || next >= dayCells.length) return;
+        dayCells[cellIndex].tabIndex = -1;
+        dayCells[next].tabIndex = 0;
+        dayCells[next].focus();
+      });
+      dayCells.push(cell);
+      frag.appendChild(cell);
+    });
+    const focusIdx = Math.max(
+      0,
+      dayCells.findIndex((c) => c.classList.contains("history-calendar-day-today"))
+    );
+    if (dayCells[focusIdx]) dayCells[focusIdx].tabIndex = 0;
+    grid.appendChild(frag);
+    return grid;
+  }
+
+  function mountHistoryCalendarGrid(grid, gridWrap, historyDayCacheStats) {
+    const todayCell = grid.querySelector(".history-calendar-day-today");
+    if (todayCell && gridWrap.scrollWidth > gridWrap.clientWidth) {
+      requestAnimationFrame(function () {
+        const scrollLeft = todayCell.offsetLeft - (gridWrap.clientWidth / 2) + (todayCell.offsetWidth / 2);
+        gridWrap.scrollLeft = Math.max(0, scrollLeft);
+      });
+    }
+    bindHistoryDweTooltips(gridWrap);
+    if (
+      typeof isPerfDebugEnabled === "function" &&
+      isPerfDebugEnabled() &&
+      historyDayCacheStats.hits + historyDayCacheStats.misses > 0
+    ) {
+      console.log(
+        "[perf] historyDayModelCache: hits=" +
+          historyDayCacheStats.hits +
+          " misses=" +
+          historyDayCacheStats.misses +
+          " size=" +
+          (historyDayModelCache && historyDayModelCache.models ? historyDayModelCache.models.size : 0)
+      );
+    }
+  }
+
+  function syncHistoryMonthChrome(container, month, year, now) {
+    const monthLabel = container.querySelector(".history-month-label");
+    if (monthLabel) monthLabel.textContent = HISTORY_MONTH_NAMES[month] + " " + year;
+    const monthSelect = container.querySelector(".history-month-select");
+    if (monthSelect) monthSelect.value = String(month);
+    const yearSelect = container.querySelector(".history-year-select");
+    if (yearSelect) {
+      const wanted = String(year);
+      if (![...yearSelect.options].some((o) => o.value === wanted)) {
+        yearSelect.innerHTML = "";
+        getHistoryYearOptions(now, year).forEach((y) => {
+          const opt = document.createElement("option");
+          opt.value = String(y);
+          opt.textContent = String(y);
+          yearSelect.appendChild(opt);
+        });
+      }
+      yearSelect.value = wanted;
+    }
+  }
+
+  function renderAttendanceHistory(container) {
+    hideHistoryDweTooltip();
+    const historyDayCacheStats = { hits: 0, misses: 0 };
+    const now = getSimulatedNow();
+    const { month, year } = resolveHistoryMonthYear(now);
     const todayStr = getDateStr();
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    const existingShell = container.querySelector("[data-history-shell]");
+    const existingWrap = container.querySelector(".history-calendar-scroll-wrap");
+    if (existingShell && existingWrap) {
+      syncHistoryMonthChrome(container, month, year, now);
+      const grid = buildHistoryCalendarGrid(year, month, todayStr, historyDayCacheStats);
+      const oldGrid = existingWrap.querySelector(".history-calendar-grid");
+      if (oldGrid) oldGrid.replaceWith(grid);
+      else existingWrap.appendChild(grid);
+      mountHistoryCalendarGrid(grid, existingWrap, historyDayCacheStats);
+      return;
+    }
+
+    container.innerHTML = "";
 
     const header = document.createElement("div");
     header.className = "history-header";
+    header.setAttribute("data-history-shell", "1");
     const title = document.createElement("h3");
     title.className = "data-section-label";
     title.textContent = "Task history by day";
@@ -13172,24 +14458,12 @@
     prevBtn.type = "button";
     prevBtn.className = "btn btn-ghost";
     prevBtn.textContent = "‹ Prev";
-    prevBtn.addEventListener("click", () => {
-      closeHistoryMonthYearPicker();
-      if (month === 0) {
-        state.historyMonth = 11;
-        state.historyYear = year - 1;
-      } else {
-        state.historyMonth = month - 1;
-        state.historyYear = year;
-      }
-      save();
-      renderActiveTab();
-    });
     const monthWrap = document.createElement("div");
     monthWrap.className = "history-month-wrap";
     const monthLabel = document.createElement("button");
     monthLabel.type = "button";
     monthLabel.className = "history-month-label";
-    monthLabel.textContent = monthNames[month] + " " + year;
+    monthLabel.textContent = HISTORY_MONTH_NAMES[month] + " " + year;
     monthLabel.setAttribute("aria-haspopup", "dialog");
     monthLabel.setAttribute("aria-expanded", "false");
     monthLabel.setAttribute("aria-label", "Choose month and year");
@@ -13199,21 +14473,6 @@
     picker.hidden = true;
     picker.setAttribute("role", "dialog");
     picker.setAttribute("aria-label", "Month and year");
-
-    function getHistoryYearOptions() {
-      const years = new Set();
-      const nowY = now.getFullYear();
-      years.add(nowY);
-      years.add(year);
-      Object.keys(state.completionByDate || {}).forEach((ds) => {
-        if (/^\d{4}-/.test(ds)) years.add(Number(ds.slice(0, 4)));
-      });
-      (state.completionTimestamps || []).forEach((t) => {
-        if (t && isValidDateStr(t.dateStr)) years.add(Number(t.dateStr.slice(0, 4)));
-      });
-      for (let y = nowY - 1; y <= nowY + 2; y++) years.add(y);
-      return [...years].filter((y) => Number.isFinite(y) && y >= 1970 && y <= 2100).sort((a, b) => a - b);
-    }
 
     function closeHistoryMonthYearPicker() {
       picker.hidden = true;
@@ -13235,10 +14494,24 @@
       setTimeout(() => document.addEventListener("click", monthWrap._outsideClose), 0);
     }
 
+    prevBtn.addEventListener("click", () => {
+      closeHistoryMonthYearPicker();
+      const cur = resolveHistoryMonthYear(getSimulatedNow());
+      if (cur.month === 0) {
+        state.historyMonth = 11;
+        state.historyYear = cur.year - 1;
+      } else {
+        state.historyMonth = cur.month - 1;
+        state.historyYear = cur.year;
+      }
+      save();
+      renderActiveTab();
+    });
+
     const monthSelect = document.createElement("select");
     monthSelect.className = "history-month-select settings-select";
     monthSelect.setAttribute("aria-label", "Month");
-    monthNames.forEach((name, i) => {
+    HISTORY_MONTH_NAMES.forEach((name, i) => {
       const opt = document.createElement("option");
       opt.value = String(i);
       opt.textContent = name;
@@ -13248,7 +14521,7 @@
     const yearSelect = document.createElement("select");
     yearSelect.className = "history-year-select settings-select";
     yearSelect.setAttribute("aria-label", "Year");
-    getHistoryYearOptions().forEach((y) => {
+    getHistoryYearOptions(now, year).forEach((y) => {
       const opt = document.createElement("option");
       opt.value = String(y);
       opt.textContent = String(y);
@@ -13301,12 +14574,13 @@
     nextBtn.textContent = "Next ›";
     nextBtn.addEventListener("click", () => {
       closeHistoryMonthYearPicker();
-      if (month === 11) {
+      const cur = resolveHistoryMonthYear(getSimulatedNow());
+      if (cur.month === 11) {
         state.historyMonth = 0;
-        state.historyYear = year + 1;
+        state.historyYear = cur.year + 1;
       } else {
-        state.historyMonth = month + 1;
-        state.historyYear = year;
+        state.historyMonth = cur.month + 1;
+        state.historyYear = cur.year;
       }
       save();
       renderActiveTab();
@@ -13342,183 +14616,7 @@
 
     const gridWrap = document.createElement("div");
     gridWrap.className = "history-calendar-scroll-wrap";
-    const grid = document.createElement("div");
-    grid.className = "history-calendar-grid";
-    const firstDay = state.firstDayOfWeek === 1 ? 1 : 0;
-    const dayNamesOrdered = firstDay === 1 ? [...DAY_NAMES.slice(1), DAY_NAMES[0]] : DAY_NAMES;
-    for (let i = 0; i < 7; i++) {
-      const th = document.createElement("div");
-      th.className = "history-calendar-weekday";
-      th.textContent = dayNamesOrdered[i];
-      grid.appendChild(th);
-    }
-    const recTz = getRecordingTimezone();
-    const firstOfMonth = createDateInTimezone(year, month, 1, 12, 0, recTz);
-    const firstParts = getDatePartsInTimezone(firstOfMonth, recTz);
-    const startDay = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(firstParts.weekday);
-    const lastOfMonth = createDateInTimezone(year, month + 1, 0, 12, 0, recTz);
-    const lastParts = getDatePartsInTimezone(lastOfMonth, recTz);
-    const daysInMonth = lastParts.day;
-    const lastOfPrev = createDateInTimezone(year, month, 0, 12, 0, recTz);
-    const lastPrevParts = getDatePartsInTimezone(lastOfPrev, recTz);
-    const daysInPrevMonth = lastPrevParts.day;
-    const leadingCount = (startDay - firstDay + 7) % 7;
-    const totalCells = leadingCount + daysInMonth;
-    const trailingCount = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
-    const cellDates = [];
-    for (let i = 0; i < leadingCount; i++) {
-      const d = daysInPrevMonth - leadingCount + 1 + i;
-      const date = createDateInTimezone(year, month - 1, d, 12, 0, recTz);
-      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: d });
-    }
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = createDateInTimezone(year, month, day, 12, 0, recTz);
-      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: true, dayNum: day });
-    }
-    for (let i = 0; i < trailingCount; i++) {
-      const date = createDateInTimezone(year, month + 1, i + 1, 12, 0, recTz);
-      cellDates.push({ date, dateStr: getDateStr(date), isCurrentMonth: false, dayNum: i + 1 });
-    }
-    function bar(typeLetter, completed, total, labelItems, typeName) {
-      const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
-      const items = (labelItems || []).map((item) => (typeof item === "string" ? { text: item, carried: false } : item));
-      const wrap = document.createElement("div");
-      wrap.className = "history-dwe-bar-wrap history-dwe-bar-wrap-" + typeName;
-      const allCarried = items.length > 0 && items.every((i) => i.carried);
-      if (allCarried) wrap.classList.add("history-dwe-bar-wrap-carried");
-      else if (items.some((i) => i.carried)) wrap.classList.add("history-dwe-bar-wrap-mixed");
-      const label = document.createElement("span");
-      label.className = "history-dwe-label";
-      label.textContent = typeLetter;
-      wrap.appendChild(label);
-      const barEl = document.createElement("div");
-      barEl.className = "history-dwe-bar history-dwe-bar-" + typeLetter.toLowerCase();
-      barEl.innerHTML = "<span class=\"history-dwe-fill\" style=\"width:" + pct + "%\"></span><span class=\"history-dwe-fraction\">" + escapeHtml(String(completed) + "/" + String(total)) + "</span>";
-      wrap.appendChild(barEl);
-      if (allCarried) {
-        const mark = document.createElement("span");
-        mark.className = "history-dwe-carried-mark";
-        mark.setAttribute("aria-hidden", "true");
-        mark.title = "Carried from earlier in cycle";
-        mark.textContent = "↻";
-        wrap.appendChild(mark);
-      }
-      if (items.length > 0) {
-        const tooltip = document.createElement("div");
-        tooltip.className = "history-dwe-tooltip history-dwe-tooltip-" + typeName;
-        tooltip.setAttribute("role", "tooltip");
-        items.forEach((i) => {
-          const bit = document.createElement("div");
-          bit.className =
-            "history-dwe-tooltip-item attendance-tooltip-" +
-            typeName +
-            (i.carried ? " history-dwe-tooltip-carried" : "");
-          const base = String(i.text || "").replace(/\s*\(carried\)\s*$/i, "");
-          bit.appendChild(document.createTextNode(base));
-          if (i.carried) {
-            const tag = document.createElement("span");
-            tag.className = "history-dwe-tooltip-carried-tag";
-            tag.textContent = " (carried)";
-            bit.appendChild(tag);
-          }
-          tooltip.appendChild(bit);
-        });
-        wrap.appendChild(tooltip);
-      }
-      return wrap;
-    }
-    function historyDayAriaLabel(dateStr, dwe, taskLabels) {
-      const dateLabel = typeof formatDate === "function" ? formatDate(dateStr) : dateStr;
-      const parts = [
-        "Dailies " + dwe.dCompleted + " of " + dwe.dTotal,
-        "Weeklies " + dwe.wCompleted + " of " + dwe.wTotal,
-        "Endgame " + dwe.eCompleted + " of " + dwe.eTotal,
-      ];
-      const finishedNames = []
-        .concat(taskLabels.dailies || [])
-        .concat(taskLabels.weeklies || [])
-        .concat(taskLabels.endgame || [])
-        .filter((i) => i && !i.carried)
-        .map((i) => i.text);
-      const carriedNames = []
-        .concat(taskLabels.weeklies || [])
-        .concat(taskLabels.endgame || [])
-        .filter((i) => i && i.carried)
-        .map((i) => i.text);
-      if (finishedNames.length) parts.push("Finished: " + finishedNames.join(", "));
-      if (carriedNames.length) parts.push("Carried: " + carriedNames.join(", "));
-      return dateLabel + ". " + parts.join(". ") + ". Press Enter to edit.";
-    }
-    grid.setAttribute("role", "grid");
-    grid.setAttribute("aria-label", "Completion history calendar");
-    const dayCells = [];
-    cellDates.forEach(({ date, dateStr, isCurrentMonth, dayNum }, cellIndex) => {
-      const cell = document.createElement("div");
-      cell.className = "history-calendar-day";
-      cell.setAttribute("role", "gridcell");
-      if (!isCurrentMonth) cell.classList.add("history-calendar-day-other-month");
-      if (dateStr === todayStr) cell.classList.add("history-calendar-day-today");
-      if (dateStr > todayStr) cell.classList.add("history-calendar-day-future");
-      const topRow = document.createElement("div");
-      topRow.className = "history-calendar-day-top";
-      const dayNumEl = document.createElement("div");
-      dayNumEl.className = "history-calendar-day-num";
-      dayNumEl.textContent = dayNum;
-      topRow.appendChild(dayNumEl);
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "btn btn-ghost btn-sm history-calendar-day-edit";
-      editBtn.textContent = "Edit";
-      editBtn.tabIndex = -1;
-      editBtn.setAttribute("aria-label", "Edit " + (typeof formatDate === "function" ? formatDate(dateStr) : dateStr));
-      editBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openCalendarDayModal(dateStr);
-      });
-      topRow.appendChild(editBtn);
-      cell.appendChild(topRow);
-      const dwe = getHistoryDWEForDate(dateStr);
-      const taskLabels = getHistoryCompletedTaskLabels(dateStr);
-      cell.appendChild(bar("D", dwe.dCompleted, dwe.dTotal, taskLabels.dailies, "dailies"));
-      cell.appendChild(bar("W", dwe.wCompleted, dwe.wTotal, taskLabels.weeklies, "weeklies"));
-      cell.appendChild(bar("E", dwe.eCompleted, dwe.eTotal, taskLabels.endgame, "endgame"));
-      cell.setAttribute("aria-label", historyDayAriaLabel(dateStr, dwe, taskLabels));
-      cell.tabIndex = -1;
-      cell.dataset.cellIndex = String(cellIndex);
-      cell.addEventListener("click", (e) => {
-        if (e.target && e.target.closest && e.target.closest(".history-calendar-day-edit")) return;
-        openCalendarDayModal(dateStr);
-      });
-      cell.addEventListener("keydown", (e) => {
-        const cols = 7;
-        let next = cellIndex;
-        if (e.key === "ArrowRight") next = cellIndex + 1;
-        else if (e.key === "ArrowLeft") next = cellIndex - 1;
-        else if (e.key === "ArrowDown") next = cellIndex + cols;
-        else if (e.key === "ArrowUp") next = cellIndex - cols;
-        else if (e.key === "Home") next = cellIndex - (cellIndex % cols);
-        else if (e.key === "End") next = cellIndex - (cellIndex % cols) + (cols - 1);
-        else if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openCalendarDayModal(dateStr);
-          return;
-        } else {
-          return;
-        }
-        e.preventDefault();
-        if (next < 0 || next >= dayCells.length) return;
-        dayCells[cellIndex].tabIndex = -1;
-        dayCells[next].tabIndex = 0;
-        dayCells[next].focus();
-      });
-      dayCells.push(cell);
-      grid.appendChild(cell);
-    });
-    const focusIdx = Math.max(
-      0,
-      dayCells.findIndex((c) => c.classList.contains("history-calendar-day-today"))
-    );
-    if (dayCells[focusIdx]) dayCells[focusIdx].tabIndex = 0;
+    const grid = buildHistoryCalendarGrid(year, month, todayStr, historyDayCacheStats);
     gridWrap.appendChild(grid);
     container.appendChild(gridWrap);
 
@@ -13527,14 +14625,7 @@
     legend.textContent = "Solid bars = finished that day. Muted bars = still marked complete from an earlier day in the same weekly/endgame cycle (fill-remaining).";
     container.appendChild(legend);
 
-    const todayCell = grid.querySelector(".history-calendar-day-today");
-    if (todayCell && gridWrap.scrollWidth > gridWrap.clientWidth) {
-      requestAnimationFrame(function () {
-        const scrollLeft = todayCell.offsetLeft - (gridWrap.clientWidth / 2) + (todayCell.offsetWidth / 2);
-        gridWrap.scrollLeft = Math.max(0, scrollLeft);
-      });
-    }
-    bindHistoryDweTooltips(gridWrap);
+    mountHistoryCalendarGrid(grid, gridWrap, historyDayCacheStats);
   }
 
   let lastAttendanceViewKey = "";
@@ -13562,16 +14653,25 @@
     if (viewKey === lastAttendanceViewKey && container.childElementCount > 0) return;
     lastAttendanceViewKey = viewKey;
     hideHistoryDweTooltip();
-    container.innerHTML = "";
     const games = getAllGames();
     if (games.length === 0) {
       container.innerHTML = '<p class="empty-state">No games yet. Add one in the Games tab.</p>';
       return;
     }
     if (state.attendanceView === "history") {
-      renderAttendanceHistory(container);
+      // Keep History chrome when shell already exists; renderAttendanceHistory swaps the grid only.
+      if (!container.querySelector("[data-history-shell]")) container.innerHTML = "";
+      const run = () => renderAttendanceHistory(container);
+      if (typeof isPerfDebugEnabled === "function" && isPerfDebugEnabled() && typeof perfMeasure === "function") {
+        const m = (Number(state.historyMonth) || 0) + 1;
+        const y = Number(state.historyYear) || 0;
+        perfMeasure("historyRender:" + y + "-" + String(m).padStart(2, "0"), run);
+      } else {
+        run();
+      }
       return;
     }
+    container.innerHTML = "";
     if (state.attendanceView === "timestamps") {
       renderAttendanceTimestamps(container);
       return;
@@ -17704,13 +18804,21 @@
       if (document.visibilityState === "hidden" && typeof window.flushPendingSave === "function") {
         window.flushPendingSave();
       }
+      // Phase 5: catch up sidebar clock as soon as the tab is focused again.
+      if (document.visibilityState === "visible" && typeof updateSidebarTime === "function") {
+        updateSidebarTime();
+      }
     });
     setInterval(() => {
       const changed = processResets();
       updateTaskRemainingTexts();
       if (changed) renderActiveTab();
     }, 60000);
-    setInterval(updateSidebarTime, 1000);
+    // Pause sidebar clock while the page is in a background tab (saves work; resets timer unchanged).
+    setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      updateSidebarTime();
+    }, 1000);
 
     // Games banners switch home↔games crop at the hamburger breakpoint.
     try {
@@ -17722,7 +18830,8 @@
       else if (gamesBannerMq.addListener) gamesBannerMq.addListener(onGamesBannerModeChange);
     } catch (_) {}
 
-    renderAll();
+    // Cold start: active tab + chrome only. Full renderAll stays for import/repair/cloud/dev skips.
+    renderActiveTab();
 
     // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
     if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {
@@ -17804,6 +18913,10 @@
         cleanupCycleBoundaryBleedMarks,
         processResets,
         scanDataConflicts,
+        listBeforeUnlockConflicts,
+        applyDebugBeforeUnlockEdits,
+        listTimeDateFixQueue,
+        applyDebugTimeDateFixes,
         getDateStr,
         getSimulatedNow,
         getPeriodDateStrForReset,
