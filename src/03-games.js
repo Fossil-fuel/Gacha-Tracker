@@ -94,6 +94,10 @@
         const existingIdx = taskModal.taskId ? game.weeklies.findIndex((t) => t.id === taskModal.taskId) : -1;
         const dstToggle = qs("taskAdjustForDST");
         const adjustForDST = dstToggle ? dstToggle.checked : true;
+        const manualResetToggle = qs("taskManualReset");
+        const manualReset = !!(manualResetToggle && manualResetToggle.checked);
+        const prevTask = existingIdx >= 0 ? game.weeklies[existingIdx] : null;
+        const wasManual = !!(prevTask && prevTask.manualReset);
         const next = {
           id: taskModal.taskId || ("w_" + Date.now()),
           label,
@@ -116,6 +120,12 @@
           earliestCompleteMinute: hasUnlockTime ? earliestCompleteMinute : undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
+          manualReset: manualReset || undefined,
+          manualDueDateStr: manualReset
+            ? (prevTask && isValidDateStr(prevTask.manualDueDateStr) ? prevTask.manualDueDateStr : null)
+            : null,
+          manualDueTbd: manualReset ? !!(prevTask && prevTask.manualDueTbd) || !(prevTask && isValidDateStr(prevTask.manualDueDateStr)) : undefined,
+          manualAwaitingRestart: manualReset ? !!(prevTask && prevTask.manualAwaitingRestart) : undefined,
         };
         if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
         applyTaskBannersToSavePayload(next);
@@ -136,14 +146,41 @@
             delete merged.cycleEndHour;
             delete merged.cycleEndMinute;
           }
+          if (!manualReset) {
+            delete merged.manualReset;
+            delete merged.manualDueDateStr;
+            delete merged.manualDueTbd;
+            delete merged.manualAwaitingRestart;
+            delete merged.manualClosedCycles;
+          }
           clearTaskBannerFieldsFromMerged(merged);
           game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
+
+        save();
+        if (typeof bumpDataVersion === "function") bumpDataVersion();
+        const savedId = next.id;
+        const openManual = manualReset && (!wasManual || existingIdx < 0);
+        closeTaskModal();
+        renderActiveTab();
+        if (openManual && typeof openManualResetModal === "function") {
+          openManualResetModal({
+            gameId: game.id,
+            taskType: "weeklies",
+            taskId: savedId,
+            reason: "create",
+          });
+        }
+        return;
       } else if (taskModal.taskType === "endgame") {
         game.endgame = game.endgame || [];
         const existingIdx = taskModal.taskId ? game.endgame.findIndex((t) => t.id === taskModal.taskId) : -1;
         const dstToggle = qs("taskAdjustForDST");
         const adjustForDST = dstToggle ? dstToggle.checked : true;
+        const manualResetToggle = qs("taskManualReset");
+        const manualReset = !!(manualResetToggle && manualResetToggle.checked);
+        const prevTask = existingIdx >= 0 ? game.endgame[existingIdx] : null;
+        const wasManual = !!(prevTask && prevTask.manualReset);
         const next = {
           id: taskModal.taskId || ("e_" + Date.now()),
           label,
@@ -166,6 +203,12 @@
           earliestCompleteMinute: hasUnlockTime ? earliestCompleteMinute : undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
+          manualReset: manualReset || undefined,
+          manualDueDateStr: manualReset
+            ? (prevTask && isValidDateStr(prevTask.manualDueDateStr) ? prevTask.manualDueDateStr : null)
+            : null,
+          manualDueTbd: manualReset ? !!(prevTask && prevTask.manualDueTbd) || !(prevTask && isValidDateStr(prevTask.manualDueDateStr)) : undefined,
+          manualAwaitingRestart: manualReset ? !!(prevTask && prevTask.manualAwaitingRestart) : undefined,
         };
         if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
         applyTaskBannersToSavePayload(next);
@@ -196,19 +239,37 @@
             delete merged.cycleEndHour;
             delete merged.cycleEndMinute;
           }
+          if (!manualReset) {
+            delete merged.manualReset;
+            delete merged.manualDueDateStr;
+            delete merged.manualDueTbd;
+            delete merged.manualAwaitingRestart;
+            delete merged.manualClosedCycles;
+          }
           clearTaskBannerFieldsFromMerged(merged);
           game.endgame[existingIdx] = merged;
         } else {
           game.endgame.push(next);
         }
+
+        save();
+        if (typeof bumpDataVersion === "function") bumpDataVersion();
+        const savedId = next.id;
+        const openManual = manualReset && (!wasManual || existingIdx < 0);
+        closeTaskModal();
+        renderActiveTab();
+        if (openManual && typeof openManualResetModal === "function") {
+          openManualResetModal({
+            gameId: game.id,
+            taskType: "endgame",
+            taskId: savedId,
+            reason: "create",
+          });
+        }
+        return;
       } else {
         return;
       }
-
-      save();
-      if (typeof bumpDataVersion === "function") bumpDataVersion();
-      closeTaskModal();
-      renderActiveTab();
     });
   }
 
@@ -497,6 +558,92 @@
     delete state.extracurricularCompleted[taskId];
     if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
     if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[taskId];
+    save();
+    renderActiveTab();
+  }
+
+  /**
+   * Confirm before deleting a task (honors Settings → Confirm before delete).
+   * Uses the shared delete-task modal; onConfirm runs only if the user confirms.
+   */
+  function confirmTaskDelete(taskLabel, onConfirm) {
+    if (typeof onConfirm !== "function") return;
+    if (state.confirmBeforeDelete === false) {
+      onConfirm();
+      return;
+    }
+    openDeleteTaskModal(taskLabel, onConfirm);
+  }
+
+  /** Remove a weekly/endgame task from its game and related completion state (same persist/render pattern as extracurricular). */
+  function deleteGameBoardTask(gameId, taskType, taskId) {
+    if (!gameId || !taskId || (taskType !== "weeklies" && taskType !== "endgame")) return;
+    const game = getGame(gameId);
+    if (!game) return;
+    const listKey = taskType === "weeklies" ? "weeklies" : "endgame";
+    const list = game[listKey] || [];
+    const task = list.find((t) => (t.id || t.label) === taskId);
+    if (!task) return;
+    confirmTaskDelete(task.label || taskId, () => reallyDeleteGameBoardTask(gameId, taskType, taskId));
+  }
+
+  function reallyDeleteGameBoardTask(gameId, taskType, taskId) {
+    if (!gameId || !taskId || (taskType !== "weeklies" && taskType !== "endgame")) return;
+    const game = getGame(gameId);
+    if (!game) return;
+    const listKey = taskType === "weeklies" ? "weeklies" : "endgame";
+    const list = game[listKey] || [];
+    const next = list.filter((t) => (t.id || t.label) !== taskId);
+    if (next.length === list.length) return;
+    game[listKey] = next;
+
+    const key = gameId + "." + taskId;
+    if (taskType === "weeklies") {
+      delete state.weekliesCompleted[key];
+      delete state.weekliesAttempted[key];
+      if (state.lastProcessedResets && state.lastProcessedResets.weeklies) {
+        delete state.lastProcessedResets.weeklies[key];
+      }
+    } else {
+      delete state.endgameCompleted[key];
+      delete state.endgameAttempted[key];
+      if (state.endgameCompletionDates) delete state.endgameCompletionDates[key];
+      if (state.endgamePendingCurrency) delete state.endgamePendingCurrency[key];
+      if (state.endgamePendingCycleStartMs) delete state.endgamePendingCycleStartMs[key];
+      if (state.lastProcessedResets && state.lastProcessedResets.endgame) {
+        delete state.lastProcessedResets.endgame[key];
+      }
+      if (state.endgameCurrencyEarned && state.endgameCurrencyEarned[gameId]) {
+        delete state.endgameCurrencyEarned[gameId][taskId];
+      }
+      if (state.endgameCurrencyPotential && state.endgameCurrencyPotential[gameId]) {
+        delete state.endgameCurrencyPotential[gameId][taskId];
+      }
+      if (state.timestampsSelectedEndgameTasks) {
+        delete state.timestampsSelectedEndgameTasks[key];
+      }
+    }
+
+    Object.keys(state.completionByDate || {}).forEach((dateStr) => {
+      const day = state.completionByDate[dateStr];
+      if (!day || !Array.isArray(day[taskType])) return;
+      day[taskType] = day[taskType].filter((k) => k !== key);
+      if (
+        !(day.dailies && day.dailies.length) &&
+        !(day.weeklies && day.weeklies.length) &&
+        !(day.endgame && day.endgame.length)
+      ) {
+        delete state.completionByDate[dateStr];
+      }
+    });
+
+    if (Array.isArray(state.completionTimestamps)) {
+      state.completionTimestamps = state.completionTimestamps.filter((t) => {
+        if (!t || t.taskType !== taskType || t.gameId !== gameId) return true;
+        return String(t.taskId || "") !== String(taskId);
+      });
+    }
+
     save();
     renderActiveTab();
   }

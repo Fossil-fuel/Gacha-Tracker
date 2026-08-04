@@ -213,19 +213,33 @@
 
   /** Bundled stock banners (relative paths; stored as URL strings on tasks). */
   const STOCK_BANNER_ASSETS = [
-    { id: "story-castorice", path: "assets/stock-banner-story-01.png", kind: "story", label: "Castorice" },
-    { id: "story-acheron", path: "assets/stock-banner-story-acheron.png", kind: "story", label: "Acheron" },
-    { id: "story-aemeath", path: "assets/stock-banner-story-aemeath.png", kind: "story", label: "Aemeath" },
-    { id: "event-acheron", path: "assets/stock-banner-event-acheron.png", kind: "event", label: "Crimson Rain" },
-    { id: "event-acheron-figure", path: "assets/stock-banner-event-acheron-with-figure.png", kind: "event", label: "Crimson Rain (figure)" },
-    { id: "event-hsin", path: "assets/stock-banner-event-hsin.png", kind: "event", label: "Moon Festival" },
-    { id: "event-ye", path: "assets/stock-banner-event-ye.png", kind: "event", label: "Qingming" },
-    { id: "event-endfield-01", path: "assets/stock-banner-event-endfield-01.png", kind: "event", label: "Wuling Blossom" },
-    { id: "event-endfield-02", path: "assets/stock-banner-event-endfield-02.png", kind: "event", label: "Wuling Rain Pillars" },
+    { id: "story-castorice-fields", path: "assets/Story - Castorice fields.png", kind: "story", label: "Castorice Fields" },
+    { id: "story-qingming", path: "assets/Story - QingMing.png", kind: "story", label: "Qingming" },
+    { id: "story-startorch", path: "assets/Story - Startorch.png", kind: "story", label: "Startorch" },
+    { id: "story-wuling", path: "assets/Story - Wuling.png", kind: "story", label: "Wuling" },
+    { id: "event-acheron", path: "assets/Event - Acheron.png", kind: "event", label: "Acheron" },
+    { id: "event-endfield", path: "assets/Event - Endfield.png", kind: "event", label: "Endfield" },
+    { id: "event-excostrider", path: "assets/Event - Excostrider.png", kind: "event", label: "Excostrider" },
+    { id: "event-stellar-jade", path: "assets/Event - Stellar Jade.png", kind: "event", label: "Stellar Jade" },
+    { id: "event-zzz", path: "assets/Event - ZZZ.png", kind: "event", label: "ZZZ" },
+  ];
+
+  /** Bundled profile pictures (Settings gallery; not offered in the task banner picker). */
+  const STOCK_PFP_ASSETS = [
+    { id: "pfp-endfield-arcane", path: "assets/PFP - Endfield - Arcane.png", kind: "pfp", label: "Endfield — Arcane" },
+    { id: "pfp-hi3rd-seele", path: "assets/PFP - HI3rd - Seele.png", kind: "pfp", label: "HI3rd — Seele" },
+    { id: "pfp-hsr-castorice", path: "assets/PFP - HSR - Castorice.png", kind: "pfp", label: "HSR — Castorice" },
+    { id: "pfp-pgr-alpha", path: "assets/PFP - PGR - Alpha.png", kind: "pfp", label: "PGR — Alpha" },
+    { id: "pfp-wuwa-hsin", path: "assets/PFP - WuWa - Hsin.png", kind: "pfp", label: "WuWa — Hsin" },
+    { id: "pfp-zzz-shungus", path: "assets/PFP - ZZZ - Shungus.png", kind: "pfp", label: "ZZZ — Shungus" },
   ];
 
   function getStockBannerAssets() {
     return STOCK_BANNER_ASSETS.slice();
+  }
+
+  function getStockPfpAssets() {
+    return STOCK_PFP_ASSETS.slice();
   }
 
   function resolveStockBannerUrl(path) {
@@ -285,6 +299,11 @@
   const deleteGameModalState = {
     open: false,
     gameId: null,
+  };
+
+  const deleteTaskModalState = {
+    open: false,
+    onConfirm: null,
   };
 
   let state = {
@@ -1642,6 +1661,7 @@
   }
 
   function getEndgameTimeRemainingMs(task, now, game) {
+    if (task && task.manualReset) return getManualResetRemainingMs(task, now);
     const n = now || new Date();
     if (isTaskCycleEnded(task, n, game)) return 0;
     const bounds = getEndgameCycleBoundsForMoment(task, n, game);
@@ -1652,6 +1672,7 @@
   }
 
   function getEndgameTimeRemainingText(task, now, game) {
+    if (task && task.manualReset) return getManualResetRemainingText(task, now);
     if (isTaskCycleEnded(task, now, game)) return "Ended";
     return formatRemainingMs(getEndgameTimeRemainingMs(task, now, game));
   }
@@ -1898,6 +1919,7 @@
   }
 
   function getWeeklyTimeRemainingMs(task, now, game) {
+    if (task && task.manualReset) return getManualResetRemainingMs(task, now);
     const n = now || new Date();
     if (isTaskCycleEnded(task, n, game)) return 0;
     const bounds = getWeeklyCycleBoundsForMoment(task, n, game);
@@ -1908,8 +1930,231 @@
   }
 
   function getWeeklyTimeRemainingText(task, now, game) {
+    if (task && task.manualReset) return getManualResetRemainingText(task, now);
     if (isTaskCycleEnded(task, now, game)) return "Ended";
     return formatRemainingMs(getWeeklyTimeRemainingMs(task, now, game));
+  }
+
+  function isManualResetTask(task) {
+    return !!(task && task.manualReset);
+  }
+
+  /** Calendar-only placeholder duration when manual due is TBD. Weeklies: 7d, Endgame: 4 weeks. */
+  function getManualResetPlaceholderMs(taskType) {
+    if (taskType === "endgame") return 28 * 24 * 60 * 60 * 1000;
+    return 7 * 24 * 60 * 60 * 1000;
+  }
+
+  /** Due end ms for manual-reset tasks. null = TBD (unknown) — not a calendar placeholder. */
+  function getManualResetDueMs(task) {
+    if (!task || !task.manualReset) return null;
+    if (task.manualDueTbd || !task.manualDueDateStr || !isValidDateStr(task.manualDueDateStr)) return null;
+    const tz = getRecordingTimezone();
+    const parts = String(task.manualDueDateStr).split("-").map(Number);
+    const y = parts[0];
+    const m = (parts[1] || 1) - 1;
+    const d = parts[2] || 1;
+    // End of due calendar day at task reset time when available, else 23:59.
+    const hour = Number.isFinite(task.weekStartHour) ? task.weekStartHour : 23;
+    const minute = Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 59;
+    const end = createDateInTimezone(y, m, d, hour, minute, tz);
+    // If using midnight-ish reset, treat due as that clock on the due day; if 23:59, fine as-is.
+    return end.getTime();
+  }
+
+  /**
+   * Cycle bounds for manual-reset tasks (calendar / completion membership).
+   * Remaining UI still shows TBD when due is unset; this only scaffolds calendar/history windows.
+   */
+  function getManualResetCycleBounds(task, game, taskType) {
+    if (!isManualResetTask(task)) return null;
+    const cycleStart = getEndgameAnchorDate(task, game);
+    const dueMs = getManualResetDueMs(task);
+    let cycleEndMs = dueMs != null ? dueMs : (cycleStart.getTime() + getManualResetPlaceholderMs(taskType));
+    if (!(cycleEndMs > cycleStart.getTime())) {
+      cycleEndMs = cycleStart.getTime() + getManualResetPlaceholderMs(taskType);
+    }
+    const cycleEnd = new Date(cycleEndMs);
+    return {
+      cycleStart,
+      cycleEnd,
+      nextCycleStart: new Date(cycleEndMs),
+    };
+  }
+
+  /** Rebuild a Date at the task's reset clock for a YYYY-MM-DD (used for closed-cycle history). */
+  function getManualResetMomentOnDate(task, dateStr, game) {
+    if (!isValidDateStr(dateStr)) return null;
+    return getEndgameAnchorDate(Object.assign({}, task, { dateStarted: dateStr }), game);
+  }
+
+  /**
+   * Remove calendar marks (+ matching timestamps) for key in [fromMoment, toMomentExclusive)
+   * so assumed TBD fill beyond the new cycle start cannot complete the next window.
+   */
+  function clearManualResetMarksInRange(key, type, fromMoment, toMomentExclusive) {
+    if (!(fromMoment instanceof Date) || !(toMomentExclusive instanceof Date)) return;
+    if (fromMoment.getTime() >= toMomentExclusive.getTime()) return;
+    const dates = getCalendarDatesInCycleRange(fromMoment, toMomentExclusive, toMomentExclusive);
+    if (!dates.length) return;
+    const dateSet = new Set(dates);
+    dates.forEach((ds) => {
+      const dayData = state.completionByDate[ds];
+      if (!dayData || !Array.isArray(dayData[type])) return;
+      const idx = dayData[type].indexOf(key);
+      if (idx >= 0) dayData[type].splice(idx, 1);
+    });
+    if (Array.isArray(state.completionTimestamps) && state.completionTimestamps.length) {
+      const dot = key.indexOf(".");
+      const gameId = dot > 0 ? key.slice(0, dot) : key;
+      const taskId = dot > 0 ? key.slice(dot + 1) : "";
+      state.completionTimestamps = state.completionTimestamps.filter((t) => {
+        if (!t || !dateSet.has(t.dateStr)) return true;
+        if (t.taskType !== type) return true;
+        if (t.gameId !== gameId) return true;
+        if (type !== "dailies" && (t.taskId || t.taskLabel) !== taskId && t.taskId !== taskId) return true;
+        return false;
+      });
+    }
+  }
+
+  function getManualResetRemainingMs(task, now) {
+    const dueMs = getManualResetDueMs(task);
+    if (dueMs == null) return null;
+    const n = now || getSimulatedNow();
+    return dueMs - n.getTime();
+  }
+
+  function getManualResetRemainingText(task, now) {
+    if (task && task.manualAwaitingRestart) return "Awaiting restart";
+    const ms = getManualResetRemainingMs(task, now);
+    if (ms == null) return "TBD";
+    if (ms <= 0) return "Due";
+    return formatRemainingMs(ms);
+  }
+
+  function isManualResetExpired(task, now) {
+    if (!isManualResetTask(task) || task.manualDueTbd || task.manualAwaitingRestart) return false;
+    if (!task.manualDueDateStr || !isValidDateStr(task.manualDueDateStr)) return false;
+    const ms = getManualResetRemainingMs(task, now);
+    return ms != null && ms <= 0;
+  }
+
+  /**
+   * Finalize previous manual window tallies (if any) and open a new window.
+   * When prior was TBD (or calendar end is past the new start), clamp previous end to
+   * the new cycle start [oldStart, newStart) so history/calendar ranges never overlap.
+   * After Start/confirm the new window always begins incomplete (calendar marks + pending earned cleared).
+   * reason: "create" | "reset" | "expiry"
+   */
+  function startManualResetWindow(game, task, taskType, opts) {
+    if (!game || !task || !isManualResetTask(task)) return false;
+    const o = opts || {};
+    const key = game.id + "." + (task.id || task.label);
+    const type = taskType === "endgame" ? "endgame" : "weeklies";
+    const now = getSimulatedNow();
+    const todayStr = getDateStr(now);
+    const reason = o.reason || "reset";
+    const newStartStr = isValidDateStr(o.dateStarted) ? o.dateStarted : todayStr;
+    const newStartMoment = getManualResetMomentOnDate(task, newStartStr, game) || getEndgameAnchorDate(
+      Object.assign({}, task, { dateStarted: newStartStr }),
+      game
+    );
+
+    if (reason !== "create") {
+      const prevBounds = getManualResetCycleBounds(task, game, type);
+      if (prevBounds && prevBounds.cycleStart.getTime() <= newStartMoment.getTime()) {
+        const sameStart = prevBounds.cycleStart.getTime() === newStartMoment.getTime();
+        let cycleEnd = prevBounds.cycleEnd;
+        let nextCycleStart = prevBounds.nextCycleStart;
+        const endBeyondNewStart = cycleEnd.getTime() > newStartMoment.getTime();
+        let completedMark = null;
+
+        if (sameStart) {
+          // Same calendar start: board toggle already counted tallies; only archive the window.
+          completedMark = findCompletionDateInBounds(key, type, prevBounds);
+          cycleEnd = new Date(newStartMoment.getTime());
+          nextCycleStart = new Date(newStartMoment.getTime());
+        } else {
+          if (endBeyondNewStart) {
+            // Drop assumed-TBD / overshoot marks that would bleed into the new window.
+            clearManualResetMarksInRange(key, type, newStartMoment, cycleEnd);
+            cycleEnd = new Date(newStartMoment.getTime());
+            nextCycleStart = new Date(newStartMoment.getTime());
+          }
+          completedMark = findCompletionDateInBounds(key, type, {
+            cycleStart: prevBounds.cycleStart,
+            cycleEnd,
+            nextCycleStart,
+          });
+        }
+
+        const closedBounds = {
+          cycleStart: prevBounds.cycleStart,
+          cycleEnd,
+          nextCycleStart,
+        };
+        if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
+        task.manualClosedCycles.push({
+          start: getDateStr(closedBounds.cycleStart),
+          end: getDateStr(closedBounds.cycleEnd),
+          completed: completedMark ? 1 : 0,
+        });
+        if (completedMark && !sameStart) {
+          if (type === "weeklies") {
+            state.weekliesCompleted[key] = getCompletedAmount(state.weekliesCompleted, key) + 1;
+          } else {
+            state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
+            ensureEndgameEarnedArrayLength(game.id, task.id || task.label, getCompletedAmount(state.endgameCompleted, key));
+            if (!state.endgameCompletionDates) state.endgameCompletionDates = {};
+            if (!state.endgameCompletionDates[key]) state.endgameCompletionDates[key] = [];
+            state.endgameCompletionDates[key].push({
+              start: getDateStr(closedBounds.cycleStart),
+              end: getDateStr(closedBounds.cycleEnd),
+            });
+          }
+        }
+      }
+    }
+
+    task.dateStarted = newStartStr;
+    if (o.tbd) {
+      task.manualDueTbd = true;
+      task.manualDueDateStr = null;
+    } else if (isValidDateStr(o.dueDateStr)) {
+      task.manualDueTbd = false;
+      task.manualDueDateStr = o.dueDateStr;
+    } else {
+      task.manualDueTbd = true;
+      task.manualDueDateStr = null;
+    }
+    task.manualAwaitingRestart = false;
+
+    // New cycle must start incomplete — same as a calendar reset opening an empty window.
+    const newBounds = getManualResetCycleBounds(task, game, type);
+    if (newBounds) {
+      clearManualResetMarksInRange(key, type, newBounds.cycleStart, newBounds.cycleEnd);
+    }
+    if (type === "endgame") {
+      if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
+      if (!state.endgamePendingCycleStartMs) state.endgamePendingCycleStartMs = {};
+      state.endgamePendingCurrency[key] = 0;
+      state.endgamePendingCycleStartMs[key] = newBounds
+        ? newBounds.cycleStart.getTime()
+        : newStartMoment.getTime();
+    }
+
+    if (type === "weeklies") {
+      state.weekliesAttempted[key] = getAttemptedAmount(state.weekliesAttempted, key) + 1;
+    } else {
+      const attemptIdx = getAttemptedAmount(state.endgameAttempted, key);
+      state.endgameAttempted[key] = attemptIdx + 1;
+      snapshotEndgamePotentialAt(game.id, task.id || task.label, attemptIdx, getEndgamePotential(task));
+      ensureEndgamePotentialArrayLength(game.id, task.id || task.label, getAttemptedAmount(state.endgameAttempted, key));
+    }
+
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    return true;
   }
 
   function getWeekDates() {
@@ -1976,6 +2221,13 @@
   }
 
   function getWeeklyCycleBoundsForMoment(task, moment, game) {
+    if (isManualResetTask(task)) {
+      const bounds = getManualResetCycleBounds(task, game, "weeklies");
+      if (!bounds) return null;
+      const d = moment instanceof Date ? moment : new Date();
+      if (d.getTime() < bounds.cycleStart.getTime()) return null;
+      return bounds;
+    }
     const d = moment instanceof Date ? moment : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const { intervalMs } = getCycleParams(task);
@@ -1993,6 +2245,13 @@
   }
 
   function getEndgameCycleBoundsForMoment(task, moment, game) {
+    if (isManualResetTask(task)) {
+      const bounds = getManualResetCycleBounds(task, game, "endgame");
+      if (!bounds) return null;
+      const d = moment instanceof Date ? moment : new Date();
+      if (d.getTime() < bounds.cycleStart.getTime()) return null;
+      return bounds;
+    }
     const d = moment instanceof Date ? moment : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const intervalMs = getIntervalMs(task.frequencyEvery, (task && task.frequencyUnit === "day") ? "day" : "week");
@@ -5558,8 +5817,9 @@
       }
 
       (game.weeklies || []).forEach((task) => {
+        // Manual Reset/Start tasks never auto-advance cycles.
+        if (isManualResetTask(task)) return;
         const key = game.id + "." + (task.id || task.label);
-        const anchor = getEndgameAnchorDate(task, game);
         const { intervalMs, timeLimitMs } = getCycleParams(task);
         let lastMs = state.lastProcessedResets.weeklies[key];
         let cycleStartMs;
@@ -5598,8 +5858,9 @@
       });
 
       (game.endgame || []).forEach((task) => {
+        // Manual Reset/Start tasks never auto-advance cycles.
+        if (isManualResetTask(task)) return;
         const key = game.id + "." + (task.id || task.label);
-        const anchor = getEndgameAnchorDate(task, game);
         const { intervalMs, timeLimitMs } = getCycleParams(task);
         let lastMs = state.lastProcessedResets.endgame[key];
         let cycleStartMs;
@@ -5861,6 +6122,9 @@
 
   /** Get cycle start for a cycle-based task (weekly, endgame) given a date. Uses dateStarted anchor. */
   function getCycleStartForDate(task, dateStr, game) {
+    if (isManualResetTask(task)) {
+      return getEndgameAnchorDate(task, game);
+    }
     const d = isValidDateStr(dateStr) ? new Date(dateStr + "T12:00:00") : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const { intervalMs } = getCycleParams(task);
@@ -5939,6 +6203,33 @@
     } else if (type === "weeklies") {
       const task = (game.weeklies || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
       if (!task) return result;
+      if (isManualResetTask(task)) {
+        const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+        closed.forEach((c) => {
+          if (!c || !isValidDateStr(c.start) || !isValidDateStr(c.end)) return;
+          const periodStart = getManualResetMomentOnDate(task, c.start, game);
+          const periodEnd = getManualResetMomentOnDate(task, c.end, game);
+          if (!periodStart || !periodEnd) return;
+          result.push({
+            periodStart,
+            periodEnd,
+            nextCycleStart: new Date(periodEnd.getTime()),
+            completed: c.completed ? 1 : 0,
+          });
+        });
+        const bounds = getManualResetCycleBounds(task, game, "weeklies");
+        if (bounds) {
+          const completed = isPeriodCompletedFromCalendar(key, "weeklies", bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart) ? 1 : 0;
+          result.push({
+            periodStart: bounds.cycleStart,
+            periodEnd: bounds.cycleEnd,
+            nextCycleStart: bounds.nextCycleStart,
+            completed,
+          });
+        }
+        tallyCacheSet(cacheKey, result);
+        return result;
+      }
       const { intervalMs, timeLimitMs } = getCycleParams(task);
       let earliestStr = null;
       Object.keys(state.completionByDate || {}).forEach((dateStr) => {
@@ -5964,6 +6255,33 @@
     } else if (type === "endgame") {
       const task = (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
       if (!task) return result;
+      if (isManualResetTask(task)) {
+        const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+        closed.forEach((c) => {
+          if (!c || !isValidDateStr(c.start) || !isValidDateStr(c.end)) return;
+          const periodStart = getManualResetMomentOnDate(task, c.start, game);
+          const periodEnd = getManualResetMomentOnDate(task, c.end, game);
+          if (!periodStart || !periodEnd) return;
+          result.push({
+            periodStart,
+            periodEnd,
+            nextCycleStart: new Date(periodEnd.getTime()),
+            completed: c.completed ? 1 : 0,
+          });
+        });
+        const bounds = getManualResetCycleBounds(task, game, "endgame");
+        if (bounds) {
+          const completed = isPeriodCompletedFromCalendar(key, "endgame", bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart) ? 1 : 0;
+          result.push({
+            periodStart: bounds.cycleStart,
+            periodEnd: bounds.cycleEnd,
+            nextCycleStart: bounds.nextCycleStart,
+            completed,
+          });
+        }
+        tallyCacheSet(cacheKey, result);
+        return result;
+      }
       const { intervalMs, timeLimitMs } = getCycleParams(task);
       let earliestStr = null;
       Object.keys(state.completionByDate || {}).forEach((dateStr) => {
@@ -6962,6 +7280,63 @@
     document.body.style.overflow = open ? "hidden" : "";
     if (open) activateModalFocus(el);
     else deactivateModalFocus();
+  }
+
+  function setDeleteTaskModalOpen(open) {
+    const el = qs("deleteTaskModal");
+    if (!el) return;
+    deleteTaskModalState.open = open;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    document.body.style.overflow = open ? "hidden" : "";
+    if (open) activateModalFocus(el);
+    else deactivateModalFocus();
+  }
+
+  function openDeleteTaskModal(taskLabel, onConfirm) {
+    if (typeof onConfirm !== "function") return;
+    deleteTaskModalState.onConfirm = onConfirm;
+    const msg = qs("deleteTaskMessage");
+    if (msg) {
+      const name = String(taskLabel || "").trim() || "this task";
+      msg.textContent = 'Are you sure you want to delete "' + name + '"? This cannot be undone.';
+    }
+    setDeleteTaskModalOpen(true);
+  }
+
+  function closeDeleteTaskModal() {
+    setDeleteTaskModalOpen(false);
+    deleteTaskModalState.onConfirm = null;
+  }
+
+  function initDeleteTaskModal() {
+    const modalEl = qs("deleteTaskModal");
+    const closeBtn = qs("deleteTaskModalClose");
+    const cancelBtn = qs("deleteTaskCancel");
+    const confirmBtn = qs("deleteTaskConfirm");
+    if (!modalEl || !confirmBtn) return;
+
+    modalEl.addEventListener("click", (e) => {
+      if (
+        e.target.classList.contains("modal-backdrop") ||
+        (e.target.getAttribute && e.target.getAttribute("data-close") === "deleteTaskModal")
+      ) {
+        closeDeleteTaskModal();
+      }
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeDeleteTaskModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeDeleteTaskModal);
+
+    confirmBtn.addEventListener("click", () => {
+      const fn = deleteTaskModalState.onConfirm;
+      closeDeleteTaskModal();
+      if (typeof fn === "function") fn();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (!deleteTaskModalState.open) return;
+      if (e.key === "Escape") closeDeleteTaskModal();
+    });
   }
 
   const MODAL_FOCUSABLE =
@@ -8586,6 +8961,7 @@
     const freqEvery = qs("taskFrequencyEvery");
     const limEvery = qs("taskTimeLimitEvery");
     const dstToggle = qs("taskAdjustForDST");
+    const manualResetToggle = qs("taskManualReset");
     const { hour, minute } = parseTimeStr(resetTime && resetTime.value ? resetTime.value : getDefaultTimeStr());
     const dateStarted = isValidDateStr(dateInput && dateInput.value) ? dateInput.value : getDateStr();
     return Object.assign(
@@ -8601,6 +8977,7 @@
         adjustForDST: dstToggle ? dstToggle.checked : true,
         cycleEndEnabled: !!(qs("taskCycleEndEnabled") && qs("taskCycleEndEnabled").checked),
         cycleEndDate: qs("taskCycleEndDate") && qs("taskCycleEndDate").value ? qs("taskCycleEndDate").value : null,
+        manualReset: !!(manualResetToggle && manualResetToggle.checked),
       },
       readCycleEndTimeFieldsFromModal(hour, minute)
     );
@@ -8904,6 +9281,9 @@
     const dstToggle = qs("taskAdjustForDST");
     if (dstToggle) dstToggle.checked = task && task.adjustForDST !== false;
 
+    const manualResetToggle = qs("taskManualReset");
+    if (manualResetToggle) manualResetToggle.checked = !!(task && task.manualReset);
+
     // frequency + time limit (stored on task but not used elsewhere yet)
     const fEvery = Math.max(1, Number(task && task.frequencyEvery) || 1);
     const fUnit = (task && (task.frequencyUnit === "day" || task.frequencyUnit === "week")) ? task.frequencyUnit : (taskType === "weeklies" ? "week" : "week");
@@ -8954,6 +9334,214 @@
     resetTaskBannerCropState();
     syncTaskBannerPreview();
     syncTaskBannerTargetButtons();
+  }
+
+  const manualResetModalState = {
+    open: false,
+    gameId: null,
+    taskType: null,
+    taskId: null,
+    reason: "reset", // "create" | "reset" | "expiry"
+  };
+
+  function setManualResetModalOpen(open) {
+    const el = qs("manualResetModal");
+    if (!el) return;
+    manualResetModalState.open = open;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) {
+      document.body.style.overflow = "hidden";
+      activateModalFocus(el);
+    } else {
+      const otherOpen = Array.from(document.querySelectorAll(".modal")).some((m) => m !== el && !m.hidden);
+      if (!otherOpen) document.body.style.overflow = "";
+      deactivateModalFocus();
+    }
+  }
+
+  function syncManualResetDueInputs() {
+    const tbd = qs("manualResetDueTbd");
+    const due = qs("manualResetDueDate");
+    if (!due) return;
+    const isTbd = !!(tbd && tbd.checked);
+    due.disabled = isTbd;
+    due.setAttribute("aria-disabled", isTbd ? "true" : "false");
+  }
+
+  function openManualResetModal(opts) {
+    const o = opts || {};
+    const game = getGame(o.gameId);
+    if (!game) return;
+    const list = o.taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []);
+    const task = list.find((t) => (t.id || t.label) === o.taskId);
+    if (!task || !task.manualReset) return;
+    if (manualResetModalState.open) return;
+
+    manualResetModalState.gameId = o.gameId;
+    manualResetModalState.taskType = o.taskType === "endgame" ? "endgame" : "weeklies";
+    manualResetModalState.taskId = o.taskId;
+    manualResetModalState.reason = o.reason || "reset";
+
+    const title = qs("manualResetModalTitle");
+    const desc = qs("manualResetModalDesc");
+    const dueInput = qs("manualResetDueDate");
+    const tbdToggle = qs("manualResetDueTbd");
+    const label = task.label || (manualResetModalState.taskType === "endgame" ? "Endgame" : "Weekly");
+
+    if (title) {
+      title.textContent = manualResetModalState.reason === "expiry"
+        ? "Cycle due — set next window"
+        : "Manual Reset / Start";
+    }
+    if (desc) {
+      desc.textContent = manualResetModalState.reason === "expiry"
+        ? ("\"" + label + "\" is past due. Set the next due date, or TBD if you do not know yet.")
+        : ("Set when \"" + label + "\" is due, or leave TBD if you do not know yet.");
+    }
+
+    const hasDue = !task.manualDueTbd && isValidDateStr(task.manualDueDateStr);
+    if (tbdToggle) tbdToggle.checked = false;
+    if (dueInput) {
+      dueInput.value = hasDue && manualResetModalState.reason === "reset"
+        ? task.manualDueDateStr
+        : getDateStr();
+    }
+    syncManualResetDueInputs();
+    setManualResetModalOpen(true);
+  }
+
+  function closeManualResetModal() {
+    setManualResetModalOpen(false);
+    manualResetModalState.gameId = null;
+    manualResetModalState.taskType = null;
+    manualResetModalState.taskId = null;
+    manualResetModalState.reason = "reset";
+  }
+
+  function confirmManualResetModal() {
+    const game = getGame(manualResetModalState.gameId);
+    if (!game) {
+      closeManualResetModal();
+      return;
+    }
+    const list = manualResetModalState.taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []);
+    const task = list.find((t) => (t.id || t.label) === manualResetModalState.taskId);
+    if (!task) {
+      closeManualResetModal();
+      return;
+    }
+    const tbdToggle = qs("manualResetDueTbd");
+    const dueInput = qs("manualResetDueDate");
+    const tbd = !!(tbdToggle && tbdToggle.checked);
+    const dueDateStr = !tbd && dueInput && isValidDateStr(dueInput.value) ? dueInput.value : null;
+    if (!tbd && !dueDateStr) {
+      if (dueInput) dueInput.focus();
+      return;
+    }
+
+    startManualResetWindow(game, task, manualResetModalState.taskType, {
+      reason: manualResetModalState.reason,
+      tbd,
+      dueDateStr,
+      dateStarted: (manualResetModalState.reason === "create" && isValidDateStr(task.dateStarted))
+        ? task.dateStarted
+        : getDateStr(),
+    });
+    save();
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    closeManualResetModal();
+    renderActiveTab();
+    if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
+  }
+
+  function cancelManualResetModal() {
+    const game = getGame(manualResetModalState.gameId);
+    const list = game
+      ? (manualResetModalState.taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []))
+      : [];
+    const task = list.find((t) => (t.id || t.label) === manualResetModalState.taskId);
+    const reason = manualResetModalState.reason;
+    // Cancel on create/expiry = "don't know next cycle yet" (pin). Cancel on mid-cycle Reset aborts with no change.
+    if (task && task.manualReset && (reason === "create" || reason === "expiry")) {
+      task.manualAwaitingRestart = true;
+      if (reason === "create" && !isValidDateStr(task.manualDueDateStr)) {
+        task.manualDueTbd = true;
+        task.manualDueDateStr = null;
+      }
+      save();
+      if (typeof bumpDataVersion === "function") bumpDataVersion();
+      renderActiveTab();
+    }
+    closeManualResetModal();
+  }
+
+  function initManualResetModal() {
+    const modalEl = qs("manualResetModal");
+    if (!modalEl) return;
+    const confirmBtn = qs("manualResetModalConfirm");
+    const cancelBtn = qs("manualResetModalCancel");
+    const closeBtn = qs("manualResetModalClose");
+    const tbdToggle = qs("manualResetDueTbd");
+    const dueInput = qs("manualResetDueDate");
+
+    modalEl.addEventListener("click", (e) => {
+      const target = e.target;
+      if (target && target.getAttribute && target.getAttribute("data-close") === "manualResetModal") {
+        cancelManualResetModal();
+      }
+    });
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmManualResetModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", cancelManualResetModal);
+    if (closeBtn) closeBtn.addEventListener("click", cancelManualResetModal);
+    if (tbdToggle) tbdToggle.addEventListener("change", syncManualResetDueInputs);
+    if (dueInput) {
+      dueInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmManualResetModal();
+        }
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      if (!manualResetModalState.open) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelManualResetModal();
+      }
+    });
+  }
+
+  /** Scan for expired manual-reset due windows and open the start popup (once per task). */
+  function checkManualResetExpiries() {
+    if (manualResetModalState.open) return false;
+    const now = getSimulatedNow();
+    const games = typeof getAllGames === "function" ? getAllGames() : (state.games || []);
+    for (let gi = 0; gi < games.length; gi++) {
+      const game = games[gi];
+      const pairs = [
+        ["weeklies", game.weeklies || []],
+        ["endgame", game.endgame || []],
+      ];
+      for (let pi = 0; pi < pairs.length; pi++) {
+        const taskType = pairs[pi][0];
+        const list = pairs[pi][1];
+        for (let ti = 0; ti < list.length; ti++) {
+          const task = list[ti];
+          if (!isManualResetTask(task)) continue;
+          if (task.manualAwaitingRestart) continue;
+          if (!isManualResetExpired(task, now)) continue;
+          openManualResetModal({
+            gameId: game.id,
+            taskType,
+            taskId: task.id || task.label,
+            reason: "expiry",
+          });
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   function getPreset(presetId) {
@@ -11564,33 +12152,74 @@
     });
   }
 
+  function appendStockAssetCard(grid, asset, kindLabel) {
+    const card = document.createElement("figure");
+    card.className = "stock-assets-card";
+    const img = document.createElement("img");
+    img.src = resolveStockBannerUrl(asset.path);
+    img.alt = asset.label;
+    img.loading = "lazy";
+    const fig = document.createElement("figcaption");
+    fig.textContent = kindLabel + " · " + asset.label;
+    const path = document.createElement("code");
+    path.className = "stock-assets-path";
+    path.textContent = asset.path;
+    card.appendChild(img);
+    card.appendChild(fig);
+    card.appendChild(path);
+    grid.appendChild(card);
+  }
+
   function fillSettingsStockAssetsGallery() {
     const host = qs("settingsStockAssetsList");
     if (!host) return;
     host.innerHTML = "";
-    const assets = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
-    if (!assets.length) {
-      host.innerHTML = '<p class="settings-hint">No stock banners found.</p>';
+    const banners = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
+    const pfps = typeof getStockPfpAssets === "function" ? getStockPfpAssets() : [];
+    if (!banners.length && !pfps.length) {
+      host.innerHTML = '<p class="settings-hint">No stock assets found.</p>';
       return;
     }
-    assets.forEach((asset) => {
-      const card = document.createElement("figure");
-      card.className = "stock-assets-card";
-      const img = document.createElement("img");
-      img.src = resolveStockBannerUrl(asset.path);
-      img.alt = asset.label;
-      img.loading = "lazy";
-      const fig = document.createElement("figcaption");
-      const kind = asset.kind === "story" ? "Story" : asset.kind === "event" ? "Event" : "Banner";
-      fig.textContent = kind + " · " + asset.label;
-      const path = document.createElement("code");
-      path.className = "stock-assets-path";
-      path.textContent = asset.path;
-      card.appendChild(img);
-      card.appendChild(fig);
-      card.appendChild(path);
-      host.appendChild(card);
-    });
+
+    if (banners.length) {
+      const block = document.createElement("div");
+      block.className = "stock-assets-block";
+      const heading = document.createElement("h5");
+      heading.className = "stock-assets-section-heading";
+      heading.textContent = "Banners";
+      const grid = document.createElement("div");
+      grid.className = "stock-assets-gallery";
+      banners.forEach((asset) => {
+        const kind =
+          asset.kind === "story" ? "Story" : asset.kind === "event" ? "Event" : "Banner";
+        appendStockAssetCard(grid, asset, kind);
+      });
+      block.appendChild(heading);
+      block.appendChild(grid);
+      host.appendChild(block);
+    }
+
+    if (pfps.length) {
+      if (banners.length) {
+        const divider = document.createElement("hr");
+        divider.className = "stock-assets-divider";
+        divider.setAttribute("aria-hidden", "true");
+        host.appendChild(divider);
+      }
+      const block = document.createElement("div");
+      block.className = "stock-assets-block";
+      const heading = document.createElement("h5");
+      heading.className = "stock-assets-section-heading";
+      heading.id = "settings-stock-pfps-heading";
+      heading.textContent = "Profile pictures";
+      const grid = document.createElement("div");
+      grid.className = "stock-assets-gallery stock-assets-gallery--pfp";
+      grid.setAttribute("aria-labelledby", "settings-stock-pfps-heading");
+      pfps.forEach((asset) => appendStockAssetCard(grid, asset, "PFP"));
+      block.appendChild(heading);
+      block.appendChild(grid);
+      host.appendChild(block);
+    }
   }
 
   function closeStockBannerPicker() {
@@ -12173,6 +12802,10 @@
         const existingIdx = taskModal.taskId ? game.weeklies.findIndex((t) => t.id === taskModal.taskId) : -1;
         const dstToggle = qs("taskAdjustForDST");
         const adjustForDST = dstToggle ? dstToggle.checked : true;
+        const manualResetToggle = qs("taskManualReset");
+        const manualReset = !!(manualResetToggle && manualResetToggle.checked);
+        const prevTask = existingIdx >= 0 ? game.weeklies[existingIdx] : null;
+        const wasManual = !!(prevTask && prevTask.manualReset);
         const next = {
           id: taskModal.taskId || ("w_" + Date.now()),
           label,
@@ -12195,6 +12828,12 @@
           earliestCompleteMinute: hasUnlockTime ? earliestCompleteMinute : undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
+          manualReset: manualReset || undefined,
+          manualDueDateStr: manualReset
+            ? (prevTask && isValidDateStr(prevTask.manualDueDateStr) ? prevTask.manualDueDateStr : null)
+            : null,
+          manualDueTbd: manualReset ? !!(prevTask && prevTask.manualDueTbd) || !(prevTask && isValidDateStr(prevTask.manualDueDateStr)) : undefined,
+          manualAwaitingRestart: manualReset ? !!(prevTask && prevTask.manualAwaitingRestart) : undefined,
         };
         if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
         applyTaskBannersToSavePayload(next);
@@ -12215,14 +12854,41 @@
             delete merged.cycleEndHour;
             delete merged.cycleEndMinute;
           }
+          if (!manualReset) {
+            delete merged.manualReset;
+            delete merged.manualDueDateStr;
+            delete merged.manualDueTbd;
+            delete merged.manualAwaitingRestart;
+            delete merged.manualClosedCycles;
+          }
           clearTaskBannerFieldsFromMerged(merged);
           game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
+
+        save();
+        if (typeof bumpDataVersion === "function") bumpDataVersion();
+        const savedId = next.id;
+        const openManual = manualReset && (!wasManual || existingIdx < 0);
+        closeTaskModal();
+        renderActiveTab();
+        if (openManual && typeof openManualResetModal === "function") {
+          openManualResetModal({
+            gameId: game.id,
+            taskType: "weeklies",
+            taskId: savedId,
+            reason: "create",
+          });
+        }
+        return;
       } else if (taskModal.taskType === "endgame") {
         game.endgame = game.endgame || [];
         const existingIdx = taskModal.taskId ? game.endgame.findIndex((t) => t.id === taskModal.taskId) : -1;
         const dstToggle = qs("taskAdjustForDST");
         const adjustForDST = dstToggle ? dstToggle.checked : true;
+        const manualResetToggle = qs("taskManualReset");
+        const manualReset = !!(manualResetToggle && manualResetToggle.checked);
+        const prevTask = existingIdx >= 0 ? game.endgame[existingIdx] : null;
+        const wasManual = !!(prevTask && prevTask.manualReset);
         const next = {
           id: taskModal.taskId || ("e_" + Date.now()),
           label,
@@ -12245,6 +12911,12 @@
           earliestCompleteMinute: hasUnlockTime ? earliestCompleteMinute : undefined,
           cycleEndEnabled: cycleEndEnabled || undefined,
           cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
+          manualReset: manualReset || undefined,
+          manualDueDateStr: manualReset
+            ? (prevTask && isValidDateStr(prevTask.manualDueDateStr) ? prevTask.manualDueDateStr : null)
+            : null,
+          manualDueTbd: manualReset ? !!(prevTask && prevTask.manualDueTbd) || !(prevTask && isValidDateStr(prevTask.manualDueDateStr)) : undefined,
+          manualAwaitingRestart: manualReset ? !!(prevTask && prevTask.manualAwaitingRestart) : undefined,
         };
         if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
         applyTaskBannersToSavePayload(next);
@@ -12275,19 +12947,37 @@
             delete merged.cycleEndHour;
             delete merged.cycleEndMinute;
           }
+          if (!manualReset) {
+            delete merged.manualReset;
+            delete merged.manualDueDateStr;
+            delete merged.manualDueTbd;
+            delete merged.manualAwaitingRestart;
+            delete merged.manualClosedCycles;
+          }
           clearTaskBannerFieldsFromMerged(merged);
           game.endgame[existingIdx] = merged;
         } else {
           game.endgame.push(next);
         }
+
+        save();
+        if (typeof bumpDataVersion === "function") bumpDataVersion();
+        const savedId = next.id;
+        const openManual = manualReset && (!wasManual || existingIdx < 0);
+        closeTaskModal();
+        renderActiveTab();
+        if (openManual && typeof openManualResetModal === "function") {
+          openManualResetModal({
+            gameId: game.id,
+            taskType: "endgame",
+            taskId: savedId,
+            reason: "create",
+          });
+        }
+        return;
       } else {
         return;
       }
-
-      save();
-      if (typeof bumpDataVersion === "function") bumpDataVersion();
-      closeTaskModal();
-      renderActiveTab();
     });
   }
 
@@ -12576,6 +13266,92 @@
     delete state.extracurricularCompleted[taskId];
     if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
     if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[taskId];
+    save();
+    renderActiveTab();
+  }
+
+  /**
+   * Confirm before deleting a task (honors Settings → Confirm before delete).
+   * Uses the shared delete-task modal; onConfirm runs only if the user confirms.
+   */
+  function confirmTaskDelete(taskLabel, onConfirm) {
+    if (typeof onConfirm !== "function") return;
+    if (state.confirmBeforeDelete === false) {
+      onConfirm();
+      return;
+    }
+    openDeleteTaskModal(taskLabel, onConfirm);
+  }
+
+  /** Remove a weekly/endgame task from its game and related completion state (same persist/render pattern as extracurricular). */
+  function deleteGameBoardTask(gameId, taskType, taskId) {
+    if (!gameId || !taskId || (taskType !== "weeklies" && taskType !== "endgame")) return;
+    const game = getGame(gameId);
+    if (!game) return;
+    const listKey = taskType === "weeklies" ? "weeklies" : "endgame";
+    const list = game[listKey] || [];
+    const task = list.find((t) => (t.id || t.label) === taskId);
+    if (!task) return;
+    confirmTaskDelete(task.label || taskId, () => reallyDeleteGameBoardTask(gameId, taskType, taskId));
+  }
+
+  function reallyDeleteGameBoardTask(gameId, taskType, taskId) {
+    if (!gameId || !taskId || (taskType !== "weeklies" && taskType !== "endgame")) return;
+    const game = getGame(gameId);
+    if (!game) return;
+    const listKey = taskType === "weeklies" ? "weeklies" : "endgame";
+    const list = game[listKey] || [];
+    const next = list.filter((t) => (t.id || t.label) !== taskId);
+    if (next.length === list.length) return;
+    game[listKey] = next;
+
+    const key = gameId + "." + taskId;
+    if (taskType === "weeklies") {
+      delete state.weekliesCompleted[key];
+      delete state.weekliesAttempted[key];
+      if (state.lastProcessedResets && state.lastProcessedResets.weeklies) {
+        delete state.lastProcessedResets.weeklies[key];
+      }
+    } else {
+      delete state.endgameCompleted[key];
+      delete state.endgameAttempted[key];
+      if (state.endgameCompletionDates) delete state.endgameCompletionDates[key];
+      if (state.endgamePendingCurrency) delete state.endgamePendingCurrency[key];
+      if (state.endgamePendingCycleStartMs) delete state.endgamePendingCycleStartMs[key];
+      if (state.lastProcessedResets && state.lastProcessedResets.endgame) {
+        delete state.lastProcessedResets.endgame[key];
+      }
+      if (state.endgameCurrencyEarned && state.endgameCurrencyEarned[gameId]) {
+        delete state.endgameCurrencyEarned[gameId][taskId];
+      }
+      if (state.endgameCurrencyPotential && state.endgameCurrencyPotential[gameId]) {
+        delete state.endgameCurrencyPotential[gameId][taskId];
+      }
+      if (state.timestampsSelectedEndgameTasks) {
+        delete state.timestampsSelectedEndgameTasks[key];
+      }
+    }
+
+    Object.keys(state.completionByDate || {}).forEach((dateStr) => {
+      const day = state.completionByDate[dateStr];
+      if (!day || !Array.isArray(day[taskType])) return;
+      day[taskType] = day[taskType].filter((k) => k !== key);
+      if (
+        !(day.dailies && day.dailies.length) &&
+        !(day.weeklies && day.weeklies.length) &&
+        !(day.endgame && day.endgame.length)
+      ) {
+        delete state.completionByDate[dateStr];
+      }
+    });
+
+    if (Array.isArray(state.completionTimestamps)) {
+      state.completionTimestamps = state.completionTimestamps.filter((t) => {
+        if (!t || t.taskType !== taskType || t.gameId !== gameId) return true;
+        return String(t.taskId || "") !== String(taskId);
+      });
+    }
+
     save();
     renderActiveTab();
   }
@@ -13017,19 +13793,19 @@
       const nowMs = now.getTime();
       if (nowMs - lastDstSidebarUpdateMs >= 60000) {
         lastDstSidebarUpdateMs = nowMs;
-        const server = getSidebarPrimaryServer();
-        const dstZoneMap = { america: "America/New_York", europe: "Europe/Paris", asia: null };
-        const dstTz = (server === "asia" || !getDSTTransitionDates) ? null : (dstZoneMap[server] || "America/New_York");
-        const dstInfo = dstTz ? getDSTTransitionDates(dstTz, now.getFullYear()) : null;
-        if (dstInfo && (dstInfo.spring || dstInfo.fall)) {
-          const lines = [];
-          if (dstInfo.spring) lines.push("DST starts: " + formatDate(dstInfo.spring));
-          if (dstInfo.fall) lines.push("DST ends: " + formatDate(dstInfo.fall));
-          dstDatesEl.textContent = lines.join(" · ");
-          dstDatesEl.style.display = "";
-        } else {
-          dstDatesEl.textContent = "";
-          dstDatesEl.style.display = "none";
+      const server = getSidebarPrimaryServer();
+      const dstZoneMap = { america: "America/New_York", europe: "Europe/Paris", asia: null };
+      const dstTz = (server === "asia" || !getDSTTransitionDates) ? null : (dstZoneMap[server] || "America/New_York");
+      const dstInfo = dstTz ? getDSTTransitionDates(dstTz, now.getFullYear()) : null;
+      if (dstInfo && (dstInfo.spring || dstInfo.fall)) {
+        const lines = [];
+        if (dstInfo.spring) lines.push("DST starts: " + formatDate(dstInfo.spring));
+        if (dstInfo.fall) lines.push("DST ends: " + formatDate(dstInfo.fall));
+        dstDatesEl.textContent = lines.join(" · ");
+        dstDatesEl.style.display = "";
+      } else {
+        dstDatesEl.textContent = "";
+        dstDatesEl.style.display = "none";
         }
       }
     }
@@ -13180,6 +13956,9 @@
   /** Sort board entries: incomplete first by soonest due, completed at end. */
   function sortBoardTaskEntries(entries) {
     return [...entries].sort((a, b) => {
+      const aAwait = !!(a.task && a.task.manualAwaitingRestart);
+      const bAwait = !!(b.task && b.task.manualAwaitingRestart);
+      if (aAwait !== bAwait) return aAwait ? -1 : 1;
       if (!!a.completed !== !!b.completed) return a.completed ? 1 : -1;
       const aDue = Number.isFinite(a.dueMs) ? a.dueMs : Number.POSITIVE_INFINITY;
       const bDue = Number.isFinite(b.dueMs) ? b.dueMs : Number.POSITIVE_INFINITY;
@@ -13779,7 +14558,33 @@
     const el = document.createElement(tagName || "li");
     el.className = "task-item" + (doneToday ? " done" : "") + (ended ? " task-item-ended" : "") + (locked ? " task-item-locked" : "");
 
-    appendTaskCardMedia(el, task, game, opts);
+    const media = appendTaskCardMedia(el, task, game, opts);
+    const surface = (opts && opts.surface) || "board";
+    if (surface !== "home" && media) {
+      const actions = document.createElement("div");
+      actions.className = "task-card-media-actions";
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "icon-btn";
+      editBtn.textContent = "✎";
+      editBtn.setAttribute("aria-label", "Edit task");
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openTaskModal({ gameId: game.id, taskType: "weeklies", task: task });
+      });
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "icon-btn";
+      deleteBtn.textContent = "×";
+      deleteBtn.setAttribute("aria-label", "Delete task");
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteGameBoardTask(game.id, "weeklies", task.id || task.label);
+      });
+      actions.appendChild(editBtn);
+      actions.appendChild(deleteBtn);
+      media.appendChild(actions);
+    }
     const body = appendTaskCardBody(el);
 
     const top = document.createElement("div");
@@ -13840,13 +14645,36 @@
     labelR.innerHTML = "<strong>Time remaining:</strong>";
     leftR.appendChild(labelR);
     remainingRow.appendChild(leftR);
+    const rightR = document.createElement("div");
+    rightR.className = "task-subrow-right";
     const remainingVal = document.createElement("span");
     remainingVal.className = "task-remaining";
     remainingVal.dataset.type = "weekly";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
     remainingVal.textContent = remainingText;
-    remainingRow.appendChild(remainingVal);
+    rightR.appendChild(remainingVal);
+    if (task.manualReset) {
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "task-manual-reset-btn";
+      resetBtn.setAttribute("aria-label", "Manual reset / start");
+      resetBtn.title = "Manual reset / start";
+      resetBtn.innerHTML = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><polyline points=\"23 4 23 10 17 10\"/><path d=\"M20.49 15a9 9 0 1 1-2.12-9.36L23 10\"/></svg>";
+      resetBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (typeof openManualResetModal === "function") {
+          openManualResetModal({
+            gameId: game.id,
+            taskType: "weeklies",
+            taskId: task.id || task.label,
+            reason: "reset",
+          });
+        }
+      });
+      rightR.appendChild(resetBtn);
+    }
+    remainingRow.appendChild(rightR);
     sub.appendChild(remainingRow);
 
     body.appendChild(sub);
@@ -13865,7 +14693,10 @@
           game,
           task,
           completed: isWeeklyCompletedInCurrentCycle(key, todayStr),
-          dueMs: now.getTime() + getWeeklyTimeRemainingMs(task, now, game),
+          dueMs: (() => {
+            const rem = getWeeklyTimeRemainingMs(task, now, game);
+            return rem == null ? Number.POSITIVE_INFINITY : now.getTime() + rem;
+          })(),
           gameOrder: gameIdx,
           taskOrder: taskIdx,
         });
@@ -13917,7 +14748,33 @@
     const el = document.createElement(tagName || "li");
     el.className = "task-item" + (doneToday ? " done" : "") + (ended ? " task-item-ended" : "") + (locked ? " task-item-locked" : "");
 
-    appendTaskCardMedia(el, task, game, opts);
+    const media = appendTaskCardMedia(el, task, game, opts);
+    const surface = (opts && opts.surface) || "board";
+    if (surface !== "home" && media) {
+      const actions = document.createElement("div");
+      actions.className = "task-card-media-actions";
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "icon-btn";
+      editBtn.textContent = "✎";
+      editBtn.setAttribute("aria-label", "Edit task");
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openTaskModal({ gameId: game.id, taskType: "endgame", task: task });
+      });
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "icon-btn";
+      deleteBtn.textContent = "×";
+      deleteBtn.setAttribute("aria-label", "Delete task");
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteGameBoardTask(game.id, "endgame", task.id || task.label);
+      });
+      actions.appendChild(editBtn);
+      actions.appendChild(deleteBtn);
+      media.appendChild(actions);
+    }
     const body = appendTaskCardBody(el);
 
     const top = document.createElement("div");
@@ -13999,6 +14856,8 @@
     label2.innerHTML = "<strong>Earned this cycle:</strong>";
     left2.appendChild(label2);
     row2.appendChild(left2);
+    const right2 = document.createElement("div");
+    right2.className = "task-subrow-right";
     const inp = document.createElement("input");
     inp.type = "number";
     inp.min = "0";
@@ -14020,7 +14879,28 @@
         setEndgamePendingAmount(key, game, task, inp.value);
       }
     });
-    row2.appendChild(inp);
+    right2.appendChild(inp);
+    if (task.manualReset) {
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "task-manual-reset-btn";
+      resetBtn.setAttribute("aria-label", "Manual reset / start");
+      resetBtn.title = "Manual reset / start";
+      resetBtn.innerHTML = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><polyline points=\"23 4 23 10 17 10\"/><path d=\"M20.49 15a9 9 0 1 1-2.12-9.36L23 10\"/></svg>";
+      resetBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (typeof openManualResetModal === "function") {
+          openManualResetModal({
+            gameId: game.id,
+            taskType: "endgame",
+            taskId: task.id || task.label,
+            reason: "reset",
+          });
+        }
+      });
+      right2.appendChild(resetBtn);
+    }
+    row2.appendChild(right2);
     sub.appendChild(row2);
 
     body.appendChild(sub);
@@ -14039,7 +14919,10 @@
           game,
           task,
           completed: isEndgameCompletedInCurrentCycle(key, todayStr),
-          dueMs: now.getTime() + getEndgameTimeRemainingMs(task, now, game),
+          dueMs: (() => {
+            const rem = getEndgameTimeRemainingMs(task, now, game);
+            return rem == null ? Number.POSITIVE_INFINITY : now.getTime() + rem;
+          })(),
           gameOrder: gameIdx,
           taskOrder: taskIdx,
         });
@@ -16702,6 +17585,13 @@
   }
 
   function deleteExtracurricularTask(taskId) {
+    const task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
+    if (!task) return;
+    confirmTaskDelete(task.label || taskId, () => reallyDeleteExtracurricularTask(taskId));
+  }
+
+  function reallyDeleteExtracurricularTask(taskId) {
+    if (!(state.extracurricularTasks || []).some((t) => t.id === taskId)) return;
     state.extracurricularTasks = (state.extracurricularTasks || []).filter((t) => t.id !== taskId);
     delete state.extracurricularCompleted[taskId];
     if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
@@ -17741,6 +18631,15 @@
     editBtn.setAttribute("aria-label", "Edit task");
     editBtn.addEventListener("click", () => openTaskModal({ gameId: selected.id, taskType: taskType, task: t }));
     header.appendChild(editBtn);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "icon-btn";
+    deleteBtn.textContent = "×";
+    deleteBtn.setAttribute("aria-label", "Delete task");
+    deleteBtn.addEventListener("click", () => {
+      deleteGameBoardTask(selected.id, taskType, t.id || t.label);
+    });
+    header.appendChild(deleteBtn);
     top.appendChild(header);
 
     const meta = document.createElement("div");
@@ -18949,9 +19848,11 @@
     setDateLabels();
     initTabs();
     initTaskModal();
+    initManualResetModal();
     initGameModal();
     initGameIdentityModal();
     initDeleteGameModal();
+    initDeleteTaskModal();
     initClearGameDataModal();
     initCalendarDayModal();
     initEarningsModal();
@@ -18980,14 +19881,19 @@
         window.flushPendingSave();
       }
       // Phase 5: catch up sidebar clock as soon as the tab is focused again.
-      if (document.visibilityState === "visible" && typeof updateSidebarTime === "function") {
-        updateSidebarTime();
+      if (document.visibilityState === "visible") {
+        if (typeof updateSidebarTime === "function") updateSidebarTime();
+        if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
       }
+    });
+    window.addEventListener("focus", () => {
+      if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
     });
     setInterval(() => {
       const changed = processResets();
       updateTaskRemainingTexts();
       if (changed) renderActiveTab();
+      if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
     }, 60000);
     // Pause sidebar clock while the page is in a background tab (saves work; resets timer unchanged).
     setInterval(() => {
@@ -19007,6 +19913,7 @@
 
     // Cold start: active tab + chrome only. Full renderAll stays for import/repair/cloud/dev skips.
     renderActiveTab();
+    if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
 
     // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
     if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {

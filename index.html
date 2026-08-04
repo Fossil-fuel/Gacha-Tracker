@@ -352,6 +352,15 @@
           </div>
           <button type="button" class="task-menu-cell toggle-cell" id="taskTimeLimitUnitDay" data-unit="day">Day</button>
           <button type="button" class="task-menu-cell toggle-cell" id="taskTimeLimitUnitWeek" data-unit="week">Week</button>
+
+          <!-- Manual reset/start (weeklies + endgame): ignores fixed cycle timers -->
+          <div class="form-row-toggle task-menu-toggle-row task-menu-cell span-7" style="grid-column: 1 / -1;">
+            <label class="settings-label" for="taskManualReset">Manual Reset/Start</label>
+            <input type="checkbox" id="taskManualReset" class="settings-toggle" />
+          </div>
+          <p class="settings-hint task-menu-cell span-7" id="taskManualResetHint" style="grid-column: 1 / -1; margin: 0;">
+            When on, cycle length is ignored. You set a due date (or TBD) when the task starts or when you hit Reset. TBD still uses a calendar placeholder (weeklies: 7 days, endgame: 4 weeks) until you set a real due or edit history. Off by default.
+          </p>
         </div>
 
         <div id="taskModalExtra" class="task-menu-extra"></div>
@@ -1118,8 +1127,8 @@
           </section>
           <section id="settings-section-stock-assets" class="settings-section" aria-labelledby="settings-stock-assets-heading">
             <h4 id="settings-stock-assets-heading" class="settings-section-title">Stock Assets</h4>
-            <p class="settings-hint">Bundled banner images you can apply from <strong>Stock Image</strong> when editing a task banner. Saved tasks store the asset path (not a copy of the file).</p>
-            <div id="settingsStockAssetsList" class="stock-assets-gallery" aria-live="polite"></div>
+            <p class="settings-hint">Bundled banners (usable from <strong>Stock Image</strong> when editing a task) and profile pictures. Saved tasks store the asset path (not a copy of the file).</p>
+            <div id="settingsStockAssetsList" class="stock-assets-browse" aria-live="polite"></div>
           </section>
         </div>
       </div>
@@ -1137,6 +1146,32 @@
       <div class="modal-body">
         <p class="settings-hint">Pick a bundled Story or Event banner. You can still crop after applying.</p>
         <div id="stockBannerPickerGrid" class="stock-banner-picker-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual Reset/Start: due date or TBD -->
+  <div id="manualResetModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="manualResetModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="manualResetModalTitle">
+      <div class="modal-header">
+        <h3 id="manualResetModalTitle" class="modal-title">Manual Reset / Start</h3>
+        <button type="button" class="icon-btn" id="manualResetModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="manualResetModalDesc" class="settings-hint">Set when this cycle is due, or leave TBD if you do not know yet.</p>
+        <div class="form-row">
+          <label for="manualResetDueDate">Due date</label>
+          <input id="manualResetDueDate" type="date" />
+        </div>
+        <div class="form-row-toggle">
+          <label class="settings-label" for="manualResetDueTbd">TBD (no due date)</label>
+          <input type="checkbox" id="manualResetDueTbd" class="settings-toggle" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="manualResetModalCancel">Cancel</button>
+        <button type="button" class="btn btn-add" id="manualResetModalConfirm">Start</button>
       </div>
     </div>
   </div>
@@ -1307,6 +1342,24 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="deleteGameCancel">Cancel</button>
           <button type="button" class="btn btn-danger" id="deleteGameConfirm">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Task delete confirmation modal -->
+  <div id="deleteTaskModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="deleteTaskModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="deleteTaskModalTitle">
+      <div class="modal-header">
+        <h3 id="deleteTaskModalTitle" class="modal-title">Delete task</h3>
+        <button type="button" class="icon-btn" id="deleteTaskModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="deleteTaskMessage">Are you sure you want to delete this task? This cannot be undone.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="deleteTaskCancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="deleteTaskConfirm">Delete</button>
         </div>
       </div>
     </div>

@@ -7,7 +7,33 @@
     const el = document.createElement(tagName || "li");
     el.className = "task-item" + (doneToday ? " done" : "") + (ended ? " task-item-ended" : "") + (locked ? " task-item-locked" : "");
 
-    appendTaskCardMedia(el, task, game, opts);
+    const media = appendTaskCardMedia(el, task, game, opts);
+    const surface = (opts && opts.surface) || "board";
+    if (surface !== "home" && media) {
+      const actions = document.createElement("div");
+      actions.className = "task-card-media-actions";
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "icon-btn";
+      editBtn.textContent = "✎";
+      editBtn.setAttribute("aria-label", "Edit task");
+      editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openTaskModal({ gameId: game.id, taskType: "weeklies", task: task });
+      });
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "icon-btn";
+      deleteBtn.textContent = "×";
+      deleteBtn.setAttribute("aria-label", "Delete task");
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteGameBoardTask(game.id, "weeklies", task.id || task.label);
+      });
+      actions.appendChild(editBtn);
+      actions.appendChild(deleteBtn);
+      media.appendChild(actions);
+    }
     const body = appendTaskCardBody(el);
 
     const top = document.createElement("div");
@@ -68,13 +94,36 @@
     labelR.innerHTML = "<strong>Time remaining:</strong>";
     leftR.appendChild(labelR);
     remainingRow.appendChild(leftR);
+    const rightR = document.createElement("div");
+    rightR.className = "task-subrow-right";
     const remainingVal = document.createElement("span");
     remainingVal.className = "task-remaining";
     remainingVal.dataset.type = "weekly";
     remainingVal.dataset.gameId = game.id;
     remainingVal.dataset.taskId = (task.id || task.label);
     remainingVal.textContent = remainingText;
-    remainingRow.appendChild(remainingVal);
+    rightR.appendChild(remainingVal);
+    if (task.manualReset) {
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "task-manual-reset-btn";
+      resetBtn.setAttribute("aria-label", "Manual reset / start");
+      resetBtn.title = "Manual reset / start";
+      resetBtn.innerHTML = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><polyline points=\"23 4 23 10 17 10\"/><path d=\"M20.49 15a9 9 0 1 1-2.12-9.36L23 10\"/></svg>";
+      resetBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (typeof openManualResetModal === "function") {
+          openManualResetModal({
+            gameId: game.id,
+            taskType: "weeklies",
+            taskId: task.id || task.label,
+            reason: "reset",
+          });
+        }
+      });
+      rightR.appendChild(resetBtn);
+    }
+    remainingRow.appendChild(rightR);
     sub.appendChild(remainingRow);
 
     body.appendChild(sub);
@@ -93,7 +142,10 @@
           game,
           task,
           completed: isWeeklyCompletedInCurrentCycle(key, todayStr),
-          dueMs: now.getTime() + getWeeklyTimeRemainingMs(task, now, game),
+          dueMs: (() => {
+            const rem = getWeeklyTimeRemainingMs(task, now, game);
+            return rem == null ? Number.POSITIVE_INFINITY : now.getTime() + rem;
+          })(),
           gameOrder: gameIdx,
           taskOrder: taskIdx,
         });

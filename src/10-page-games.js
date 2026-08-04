@@ -62,6 +62,15 @@
     editBtn.setAttribute("aria-label", "Edit task");
     editBtn.addEventListener("click", () => openTaskModal({ gameId: selected.id, taskType: taskType, task: t }));
     header.appendChild(editBtn);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "icon-btn";
+    deleteBtn.textContent = "×";
+    deleteBtn.setAttribute("aria-label", "Delete task");
+    deleteBtn.addEventListener("click", () => {
+      deleteGameBoardTask(selected.id, taskType, t.id || t.label);
+    });
+    header.appendChild(deleteBtn);
     top.appendChild(header);
 
     const meta = document.createElement("div");

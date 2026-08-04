@@ -31,6 +31,63 @@
     else deactivateModalFocus();
   }
 
+  function setDeleteTaskModalOpen(open) {
+    const el = qs("deleteTaskModal");
+    if (!el) return;
+    deleteTaskModalState.open = open;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    document.body.style.overflow = open ? "hidden" : "";
+    if (open) activateModalFocus(el);
+    else deactivateModalFocus();
+  }
+
+  function openDeleteTaskModal(taskLabel, onConfirm) {
+    if (typeof onConfirm !== "function") return;
+    deleteTaskModalState.onConfirm = onConfirm;
+    const msg = qs("deleteTaskMessage");
+    if (msg) {
+      const name = String(taskLabel || "").trim() || "this task";
+      msg.textContent = 'Are you sure you want to delete "' + name + '"? This cannot be undone.';
+    }
+    setDeleteTaskModalOpen(true);
+  }
+
+  function closeDeleteTaskModal() {
+    setDeleteTaskModalOpen(false);
+    deleteTaskModalState.onConfirm = null;
+  }
+
+  function initDeleteTaskModal() {
+    const modalEl = qs("deleteTaskModal");
+    const closeBtn = qs("deleteTaskModalClose");
+    const cancelBtn = qs("deleteTaskCancel");
+    const confirmBtn = qs("deleteTaskConfirm");
+    if (!modalEl || !confirmBtn) return;
+
+    modalEl.addEventListener("click", (e) => {
+      if (
+        e.target.classList.contains("modal-backdrop") ||
+        (e.target.getAttribute && e.target.getAttribute("data-close") === "deleteTaskModal")
+      ) {
+        closeDeleteTaskModal();
+      }
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeDeleteTaskModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeDeleteTaskModal);
+
+    confirmBtn.addEventListener("click", () => {
+      const fn = deleteTaskModalState.onConfirm;
+      closeDeleteTaskModal();
+      if (typeof fn === "function") fn();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (!deleteTaskModalState.open) return;
+      if (e.key === "Escape") closeDeleteTaskModal();
+    });
+  }
+
   const MODAL_FOCUSABLE =
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
   let modalFocusReturnEl = null;
@@ -1653,6 +1710,7 @@
     const freqEvery = qs("taskFrequencyEvery");
     const limEvery = qs("taskTimeLimitEvery");
     const dstToggle = qs("taskAdjustForDST");
+    const manualResetToggle = qs("taskManualReset");
     const { hour, minute } = parseTimeStr(resetTime && resetTime.value ? resetTime.value : getDefaultTimeStr());
     const dateStarted = isValidDateStr(dateInput && dateInput.value) ? dateInput.value : getDateStr();
     return Object.assign(
@@ -1668,6 +1726,7 @@
         adjustForDST: dstToggle ? dstToggle.checked : true,
         cycleEndEnabled: !!(qs("taskCycleEndEnabled") && qs("taskCycleEndEnabled").checked),
         cycleEndDate: qs("taskCycleEndDate") && qs("taskCycleEndDate").value ? qs("taskCycleEndDate").value : null,
+        manualReset: !!(manualResetToggle && manualResetToggle.checked),
       },
       readCycleEndTimeFieldsFromModal(hour, minute)
     );
@@ -1971,6 +2030,9 @@
     const dstToggle = qs("taskAdjustForDST");
     if (dstToggle) dstToggle.checked = task && task.adjustForDST !== false;
 
+    const manualResetToggle = qs("taskManualReset");
+    if (manualResetToggle) manualResetToggle.checked = !!(task && task.manualReset);
+
     // frequency + time limit (stored on task but not used elsewhere yet)
     const fEvery = Math.max(1, Number(task && task.frequencyEvery) || 1);
     const fUnit = (task && (task.frequencyUnit === "day" || task.frequencyUnit === "week")) ? task.frequencyUnit : (taskType === "weeklies" ? "week" : "week");
@@ -2021,6 +2083,214 @@
     resetTaskBannerCropState();
     syncTaskBannerPreview();
     syncTaskBannerTargetButtons();
+  }
+
+  const manualResetModalState = {
+    open: false,
+    gameId: null,
+    taskType: null,
+    taskId: null,
+    reason: "reset", // "create" | "reset" | "expiry"
+  };
+
+  function setManualResetModalOpen(open) {
+    const el = qs("manualResetModal");
+    if (!el) return;
+    manualResetModalState.open = open;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) {
+      document.body.style.overflow = "hidden";
+      activateModalFocus(el);
+    } else {
+      const otherOpen = Array.from(document.querySelectorAll(".modal")).some((m) => m !== el && !m.hidden);
+      if (!otherOpen) document.body.style.overflow = "";
+      deactivateModalFocus();
+    }
+  }
+
+  function syncManualResetDueInputs() {
+    const tbd = qs("manualResetDueTbd");
+    const due = qs("manualResetDueDate");
+    if (!due) return;
+    const isTbd = !!(tbd && tbd.checked);
+    due.disabled = isTbd;
+    due.setAttribute("aria-disabled", isTbd ? "true" : "false");
+  }
+
+  function openManualResetModal(opts) {
+    const o = opts || {};
+    const game = getGame(o.gameId);
+    if (!game) return;
+    const list = o.taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []);
+    const task = list.find((t) => (t.id || t.label) === o.taskId);
+    if (!task || !task.manualReset) return;
+    if (manualResetModalState.open) return;
+
+    manualResetModalState.gameId = o.gameId;
+    manualResetModalState.taskType = o.taskType === "endgame" ? "endgame" : "weeklies";
+    manualResetModalState.taskId = o.taskId;
+    manualResetModalState.reason = o.reason || "reset";
+
+    const title = qs("manualResetModalTitle");
+    const desc = qs("manualResetModalDesc");
+    const dueInput = qs("manualResetDueDate");
+    const tbdToggle = qs("manualResetDueTbd");
+    const label = task.label || (manualResetModalState.taskType === "endgame" ? "Endgame" : "Weekly");
+
+    if (title) {
+      title.textContent = manualResetModalState.reason === "expiry"
+        ? "Cycle due — set next window"
+        : "Manual Reset / Start";
+    }
+    if (desc) {
+      desc.textContent = manualResetModalState.reason === "expiry"
+        ? ("\"" + label + "\" is past due. Set the next due date, or TBD if you do not know yet.")
+        : ("Set when \"" + label + "\" is due, or leave TBD if you do not know yet.");
+    }
+
+    const hasDue = !task.manualDueTbd && isValidDateStr(task.manualDueDateStr);
+    if (tbdToggle) tbdToggle.checked = false;
+    if (dueInput) {
+      dueInput.value = hasDue && manualResetModalState.reason === "reset"
+        ? task.manualDueDateStr
+        : getDateStr();
+    }
+    syncManualResetDueInputs();
+    setManualResetModalOpen(true);
+  }
+
+  function closeManualResetModal() {
+    setManualResetModalOpen(false);
+    manualResetModalState.gameId = null;
+    manualResetModalState.taskType = null;
+    manualResetModalState.taskId = null;
+    manualResetModalState.reason = "reset";
+  }
+
+  function confirmManualResetModal() {
+    const game = getGame(manualResetModalState.gameId);
+    if (!game) {
+      closeManualResetModal();
+      return;
+    }
+    const list = manualResetModalState.taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []);
+    const task = list.find((t) => (t.id || t.label) === manualResetModalState.taskId);
+    if (!task) {
+      closeManualResetModal();
+      return;
+    }
+    const tbdToggle = qs("manualResetDueTbd");
+    const dueInput = qs("manualResetDueDate");
+    const tbd = !!(tbdToggle && tbdToggle.checked);
+    const dueDateStr = !tbd && dueInput && isValidDateStr(dueInput.value) ? dueInput.value : null;
+    if (!tbd && !dueDateStr) {
+      if (dueInput) dueInput.focus();
+      return;
+    }
+
+    startManualResetWindow(game, task, manualResetModalState.taskType, {
+      reason: manualResetModalState.reason,
+      tbd,
+      dueDateStr,
+      dateStarted: (manualResetModalState.reason === "create" && isValidDateStr(task.dateStarted))
+        ? task.dateStarted
+        : getDateStr(),
+    });
+    save();
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    closeManualResetModal();
+    renderActiveTab();
+    if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
+  }
+
+  function cancelManualResetModal() {
+    const game = getGame(manualResetModalState.gameId);
+    const list = game
+      ? (manualResetModalState.taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []))
+      : [];
+    const task = list.find((t) => (t.id || t.label) === manualResetModalState.taskId);
+    const reason = manualResetModalState.reason;
+    // Cancel on create/expiry = "don't know next cycle yet" (pin). Cancel on mid-cycle Reset aborts with no change.
+    if (task && task.manualReset && (reason === "create" || reason === "expiry")) {
+      task.manualAwaitingRestart = true;
+      if (reason === "create" && !isValidDateStr(task.manualDueDateStr)) {
+        task.manualDueTbd = true;
+        task.manualDueDateStr = null;
+      }
+      save();
+      if (typeof bumpDataVersion === "function") bumpDataVersion();
+      renderActiveTab();
+    }
+    closeManualResetModal();
+  }
+
+  function initManualResetModal() {
+    const modalEl = qs("manualResetModal");
+    if (!modalEl) return;
+    const confirmBtn = qs("manualResetModalConfirm");
+    const cancelBtn = qs("manualResetModalCancel");
+    const closeBtn = qs("manualResetModalClose");
+    const tbdToggle = qs("manualResetDueTbd");
+    const dueInput = qs("manualResetDueDate");
+
+    modalEl.addEventListener("click", (e) => {
+      const target = e.target;
+      if (target && target.getAttribute && target.getAttribute("data-close") === "manualResetModal") {
+        cancelManualResetModal();
+      }
+    });
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmManualResetModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", cancelManualResetModal);
+    if (closeBtn) closeBtn.addEventListener("click", cancelManualResetModal);
+    if (tbdToggle) tbdToggle.addEventListener("change", syncManualResetDueInputs);
+    if (dueInput) {
+      dueInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmManualResetModal();
+        }
+      });
+    }
+    document.addEventListener("keydown", (e) => {
+      if (!manualResetModalState.open) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelManualResetModal();
+      }
+    });
+  }
+
+  /** Scan for expired manual-reset due windows and open the start popup (once per task). */
+  function checkManualResetExpiries() {
+    if (manualResetModalState.open) return false;
+    const now = getSimulatedNow();
+    const games = typeof getAllGames === "function" ? getAllGames() : (state.games || []);
+    for (let gi = 0; gi < games.length; gi++) {
+      const game = games[gi];
+      const pairs = [
+        ["weeklies", game.weeklies || []],
+        ["endgame", game.endgame || []],
+      ];
+      for (let pi = 0; pi < pairs.length; pi++) {
+        const taskType = pairs[pi][0];
+        const list = pairs[pi][1];
+        for (let ti = 0; ti < list.length; ti++) {
+          const task = list[ti];
+          if (!isManualResetTask(task)) continue;
+          if (task.manualAwaitingRestart) continue;
+          if (!isManualResetExpired(task, now)) continue;
+          openManualResetModal({
+            gameId: game.id,
+            taskType,
+            taskId: task.id || task.label,
+            reason: "expiry",
+          });
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   function getPreset(presetId) {
@@ -4631,33 +4901,74 @@
     });
   }
 
+  function appendStockAssetCard(grid, asset, kindLabel) {
+    const card = document.createElement("figure");
+    card.className = "stock-assets-card";
+    const img = document.createElement("img");
+    img.src = resolveStockBannerUrl(asset.path);
+    img.alt = asset.label;
+    img.loading = "lazy";
+    const fig = document.createElement("figcaption");
+    fig.textContent = kindLabel + " · " + asset.label;
+    const path = document.createElement("code");
+    path.className = "stock-assets-path";
+    path.textContent = asset.path;
+    card.appendChild(img);
+    card.appendChild(fig);
+    card.appendChild(path);
+    grid.appendChild(card);
+  }
+
   function fillSettingsStockAssetsGallery() {
     const host = qs("settingsStockAssetsList");
     if (!host) return;
     host.innerHTML = "";
-    const assets = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
-    if (!assets.length) {
-      host.innerHTML = '<p class="settings-hint">No stock banners found.</p>';
+    const banners = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
+    const pfps = typeof getStockPfpAssets === "function" ? getStockPfpAssets() : [];
+    if (!banners.length && !pfps.length) {
+      host.innerHTML = '<p class="settings-hint">No stock assets found.</p>';
       return;
     }
-    assets.forEach((asset) => {
-      const card = document.createElement("figure");
-      card.className = "stock-assets-card";
-      const img = document.createElement("img");
-      img.src = resolveStockBannerUrl(asset.path);
-      img.alt = asset.label;
-      img.loading = "lazy";
-      const fig = document.createElement("figcaption");
-      const kind = asset.kind === "story" ? "Story" : asset.kind === "event" ? "Event" : "Banner";
-      fig.textContent = kind + " · " + asset.label;
-      const path = document.createElement("code");
-      path.className = "stock-assets-path";
-      path.textContent = asset.path;
-      card.appendChild(img);
-      card.appendChild(fig);
-      card.appendChild(path);
-      host.appendChild(card);
-    });
+
+    if (banners.length) {
+      const block = document.createElement("div");
+      block.className = "stock-assets-block";
+      const heading = document.createElement("h5");
+      heading.className = "stock-assets-section-heading";
+      heading.textContent = "Banners";
+      const grid = document.createElement("div");
+      grid.className = "stock-assets-gallery";
+      banners.forEach((asset) => {
+        const kind =
+          asset.kind === "story" ? "Story" : asset.kind === "event" ? "Event" : "Banner";
+        appendStockAssetCard(grid, asset, kind);
+      });
+      block.appendChild(heading);
+      block.appendChild(grid);
+      host.appendChild(block);
+    }
+
+    if (pfps.length) {
+      if (banners.length) {
+        const divider = document.createElement("hr");
+        divider.className = "stock-assets-divider";
+        divider.setAttribute("aria-hidden", "true");
+        host.appendChild(divider);
+      }
+      const block = document.createElement("div");
+      block.className = "stock-assets-block";
+      const heading = document.createElement("h5");
+      heading.className = "stock-assets-section-heading";
+      heading.id = "settings-stock-pfps-heading";
+      heading.textContent = "Profile pictures";
+      const grid = document.createElement("div");
+      grid.className = "stock-assets-gallery stock-assets-gallery--pfp";
+      grid.setAttribute("aria-labelledby", "settings-stock-pfps-heading");
+      pfps.forEach((asset) => appendStockAssetCard(grid, asset, "PFP"));
+      block.appendChild(heading);
+      block.appendChild(grid);
+      host.appendChild(block);
+    }
   }
 
   function closeStockBannerPicker() {

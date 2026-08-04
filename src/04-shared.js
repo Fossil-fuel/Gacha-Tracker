@@ -75,19 +75,19 @@
       const nowMs = now.getTime();
       if (nowMs - lastDstSidebarUpdateMs >= 60000) {
         lastDstSidebarUpdateMs = nowMs;
-        const server = getSidebarPrimaryServer();
-        const dstZoneMap = { america: "America/New_York", europe: "Europe/Paris", asia: null };
-        const dstTz = (server === "asia" || !getDSTTransitionDates) ? null : (dstZoneMap[server] || "America/New_York");
-        const dstInfo = dstTz ? getDSTTransitionDates(dstTz, now.getFullYear()) : null;
-        if (dstInfo && (dstInfo.spring || dstInfo.fall)) {
-          const lines = [];
-          if (dstInfo.spring) lines.push("DST starts: " + formatDate(dstInfo.spring));
-          if (dstInfo.fall) lines.push("DST ends: " + formatDate(dstInfo.fall));
-          dstDatesEl.textContent = lines.join(" · ");
-          dstDatesEl.style.display = "";
-        } else {
-          dstDatesEl.textContent = "";
-          dstDatesEl.style.display = "none";
+      const server = getSidebarPrimaryServer();
+      const dstZoneMap = { america: "America/New_York", europe: "Europe/Paris", asia: null };
+      const dstTz = (server === "asia" || !getDSTTransitionDates) ? null : (dstZoneMap[server] || "America/New_York");
+      const dstInfo = dstTz ? getDSTTransitionDates(dstTz, now.getFullYear()) : null;
+      if (dstInfo && (dstInfo.spring || dstInfo.fall)) {
+        const lines = [];
+        if (dstInfo.spring) lines.push("DST starts: " + formatDate(dstInfo.spring));
+        if (dstInfo.fall) lines.push("DST ends: " + formatDate(dstInfo.fall));
+        dstDatesEl.textContent = lines.join(" · ");
+        dstDatesEl.style.display = "";
+      } else {
+        dstDatesEl.textContent = "";
+        dstDatesEl.style.display = "none";
         }
       }
     }
@@ -238,6 +238,9 @@
   /** Sort board entries: incomplete first by soonest due, completed at end. */
   function sortBoardTaskEntries(entries) {
     return [...entries].sort((a, b) => {
+      const aAwait = !!(a.task && a.task.manualAwaitingRestart);
+      const bAwait = !!(b.task && b.task.manualAwaitingRestart);
+      if (aAwait !== bAwait) return aAwait ? -1 : 1;
       if (!!a.completed !== !!b.completed) return a.completed ? 1 : -1;
       const aDue = Number.isFinite(a.dueMs) ? a.dueMs : Number.POSITIVE_INFINITY;
       const bDue = Number.isFinite(b.dueMs) ? b.dueMs : Number.POSITIVE_INFINITY;

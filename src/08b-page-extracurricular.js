@@ -471,6 +471,13 @@
   }
 
   function deleteExtracurricularTask(taskId) {
+    const task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
+    if (!task) return;
+    confirmTaskDelete(task.label || taskId, () => reallyDeleteExtracurricularTask(taskId));
+  }
+
+  function reallyDeleteExtracurricularTask(taskId) {
+    if (!(state.extracurricularTasks || []).some((t) => t.id === taskId)) return;
     state.extracurricularTasks = (state.extracurricularTasks || []).filter((t) => t.id !== taskId);
     delete state.extracurricularCompleted[taskId];
     if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];

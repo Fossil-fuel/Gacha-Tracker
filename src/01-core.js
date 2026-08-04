@@ -90,19 +90,33 @@
 
   /** Bundled stock banners (relative paths; stored as URL strings on tasks). */
   const STOCK_BANNER_ASSETS = [
-    { id: "story-castorice", path: "assets/stock-banner-story-01.png", kind: "story", label: "Castorice" },
-    { id: "story-acheron", path: "assets/stock-banner-story-acheron.png", kind: "story", label: "Acheron" },
-    { id: "story-aemeath", path: "assets/stock-banner-story-aemeath.png", kind: "story", label: "Aemeath" },
-    { id: "event-acheron", path: "assets/stock-banner-event-acheron.png", kind: "event", label: "Crimson Rain" },
-    { id: "event-acheron-figure", path: "assets/stock-banner-event-acheron-with-figure.png", kind: "event", label: "Crimson Rain (figure)" },
-    { id: "event-hsin", path: "assets/stock-banner-event-hsin.png", kind: "event", label: "Moon Festival" },
-    { id: "event-ye", path: "assets/stock-banner-event-ye.png", kind: "event", label: "Qingming" },
-    { id: "event-endfield-01", path: "assets/stock-banner-event-endfield-01.png", kind: "event", label: "Wuling Blossom" },
-    { id: "event-endfield-02", path: "assets/stock-banner-event-endfield-02.png", kind: "event", label: "Wuling Rain Pillars" },
+    { id: "story-castorice-fields", path: "assets/Story - Castorice fields.png", kind: "story", label: "Castorice Fields" },
+    { id: "story-qingming", path: "assets/Story - QingMing.png", kind: "story", label: "Qingming" },
+    { id: "story-startorch", path: "assets/Story - Startorch.png", kind: "story", label: "Startorch" },
+    { id: "story-wuling", path: "assets/Story - Wuling.png", kind: "story", label: "Wuling" },
+    { id: "event-acheron", path: "assets/Event - Acheron.png", kind: "event", label: "Acheron" },
+    { id: "event-endfield", path: "assets/Event - Endfield.png", kind: "event", label: "Endfield" },
+    { id: "event-excostrider", path: "assets/Event - Excostrider.png", kind: "event", label: "Excostrider" },
+    { id: "event-stellar-jade", path: "assets/Event - Stellar Jade.png", kind: "event", label: "Stellar Jade" },
+    { id: "event-zzz", path: "assets/Event - ZZZ.png", kind: "event", label: "ZZZ" },
+  ];
+
+  /** Bundled profile pictures (Settings gallery; not offered in the task banner picker). */
+  const STOCK_PFP_ASSETS = [
+    { id: "pfp-endfield-arcane", path: "assets/PFP - Endfield - Arcane.png", kind: "pfp", label: "Endfield — Arcane" },
+    { id: "pfp-hi3rd-seele", path: "assets/PFP - HI3rd - Seele.png", kind: "pfp", label: "HI3rd — Seele" },
+    { id: "pfp-hsr-castorice", path: "assets/PFP - HSR - Castorice.png", kind: "pfp", label: "HSR — Castorice" },
+    { id: "pfp-pgr-alpha", path: "assets/PFP - PGR - Alpha.png", kind: "pfp", label: "PGR — Alpha" },
+    { id: "pfp-wuwa-hsin", path: "assets/PFP - WuWa - Hsin.png", kind: "pfp", label: "WuWa — Hsin" },
+    { id: "pfp-zzz-shungus", path: "assets/PFP - ZZZ - Shungus.png", kind: "pfp", label: "ZZZ — Shungus" },
   ];
 
   function getStockBannerAssets() {
     return STOCK_BANNER_ASSETS.slice();
+  }
+
+  function getStockPfpAssets() {
+    return STOCK_PFP_ASSETS.slice();
   }
 
   function resolveStockBannerUrl(path) {
@@ -162,6 +176,11 @@
   const deleteGameModalState = {
     open: false,
     gameId: null,
+  };
+
+  const deleteTaskModalState = {
+    open: false,
+    onConfirm: null,
   };
 
   let state = {
@@ -1519,6 +1538,7 @@
   }
 
   function getEndgameTimeRemainingMs(task, now, game) {
+    if (task && task.manualReset) return getManualResetRemainingMs(task, now);
     const n = now || new Date();
     if (isTaskCycleEnded(task, n, game)) return 0;
     const bounds = getEndgameCycleBoundsForMoment(task, n, game);
@@ -1529,6 +1549,7 @@
   }
 
   function getEndgameTimeRemainingText(task, now, game) {
+    if (task && task.manualReset) return getManualResetRemainingText(task, now);
     if (isTaskCycleEnded(task, now, game)) return "Ended";
     return formatRemainingMs(getEndgameTimeRemainingMs(task, now, game));
   }
@@ -1775,6 +1796,7 @@
   }
 
   function getWeeklyTimeRemainingMs(task, now, game) {
+    if (task && task.manualReset) return getManualResetRemainingMs(task, now);
     const n = now || new Date();
     if (isTaskCycleEnded(task, n, game)) return 0;
     const bounds = getWeeklyCycleBoundsForMoment(task, n, game);
@@ -1785,8 +1807,231 @@
   }
 
   function getWeeklyTimeRemainingText(task, now, game) {
+    if (task && task.manualReset) return getManualResetRemainingText(task, now);
     if (isTaskCycleEnded(task, now, game)) return "Ended";
     return formatRemainingMs(getWeeklyTimeRemainingMs(task, now, game));
+  }
+
+  function isManualResetTask(task) {
+    return !!(task && task.manualReset);
+  }
+
+  /** Calendar-only placeholder duration when manual due is TBD. Weeklies: 7d, Endgame: 4 weeks. */
+  function getManualResetPlaceholderMs(taskType) {
+    if (taskType === "endgame") return 28 * 24 * 60 * 60 * 1000;
+    return 7 * 24 * 60 * 60 * 1000;
+  }
+
+  /** Due end ms for manual-reset tasks. null = TBD (unknown) — not a calendar placeholder. */
+  function getManualResetDueMs(task) {
+    if (!task || !task.manualReset) return null;
+    if (task.manualDueTbd || !task.manualDueDateStr || !isValidDateStr(task.manualDueDateStr)) return null;
+    const tz = getRecordingTimezone();
+    const parts = String(task.manualDueDateStr).split("-").map(Number);
+    const y = parts[0];
+    const m = (parts[1] || 1) - 1;
+    const d = parts[2] || 1;
+    // End of due calendar day at task reset time when available, else 23:59.
+    const hour = Number.isFinite(task.weekStartHour) ? task.weekStartHour : 23;
+    const minute = Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 59;
+    const end = createDateInTimezone(y, m, d, hour, minute, tz);
+    // If using midnight-ish reset, treat due as that clock on the due day; if 23:59, fine as-is.
+    return end.getTime();
+  }
+
+  /**
+   * Cycle bounds for manual-reset tasks (calendar / completion membership).
+   * Remaining UI still shows TBD when due is unset; this only scaffolds calendar/history windows.
+   */
+  function getManualResetCycleBounds(task, game, taskType) {
+    if (!isManualResetTask(task)) return null;
+    const cycleStart = getEndgameAnchorDate(task, game);
+    const dueMs = getManualResetDueMs(task);
+    let cycleEndMs = dueMs != null ? dueMs : (cycleStart.getTime() + getManualResetPlaceholderMs(taskType));
+    if (!(cycleEndMs > cycleStart.getTime())) {
+      cycleEndMs = cycleStart.getTime() + getManualResetPlaceholderMs(taskType);
+    }
+    const cycleEnd = new Date(cycleEndMs);
+    return {
+      cycleStart,
+      cycleEnd,
+      nextCycleStart: new Date(cycleEndMs),
+    };
+  }
+
+  /** Rebuild a Date at the task's reset clock for a YYYY-MM-DD (used for closed-cycle history). */
+  function getManualResetMomentOnDate(task, dateStr, game) {
+    if (!isValidDateStr(dateStr)) return null;
+    return getEndgameAnchorDate(Object.assign({}, task, { dateStarted: dateStr }), game);
+  }
+
+  /**
+   * Remove calendar marks (+ matching timestamps) for key in [fromMoment, toMomentExclusive)
+   * so assumed TBD fill beyond the new cycle start cannot complete the next window.
+   */
+  function clearManualResetMarksInRange(key, type, fromMoment, toMomentExclusive) {
+    if (!(fromMoment instanceof Date) || !(toMomentExclusive instanceof Date)) return;
+    if (fromMoment.getTime() >= toMomentExclusive.getTime()) return;
+    const dates = getCalendarDatesInCycleRange(fromMoment, toMomentExclusive, toMomentExclusive);
+    if (!dates.length) return;
+    const dateSet = new Set(dates);
+    dates.forEach((ds) => {
+      const dayData = state.completionByDate[ds];
+      if (!dayData || !Array.isArray(dayData[type])) return;
+      const idx = dayData[type].indexOf(key);
+      if (idx >= 0) dayData[type].splice(idx, 1);
+    });
+    if (Array.isArray(state.completionTimestamps) && state.completionTimestamps.length) {
+      const dot = key.indexOf(".");
+      const gameId = dot > 0 ? key.slice(0, dot) : key;
+      const taskId = dot > 0 ? key.slice(dot + 1) : "";
+      state.completionTimestamps = state.completionTimestamps.filter((t) => {
+        if (!t || !dateSet.has(t.dateStr)) return true;
+        if (t.taskType !== type) return true;
+        if (t.gameId !== gameId) return true;
+        if (type !== "dailies" && (t.taskId || t.taskLabel) !== taskId && t.taskId !== taskId) return true;
+        return false;
+      });
+    }
+  }
+
+  function getManualResetRemainingMs(task, now) {
+    const dueMs = getManualResetDueMs(task);
+    if (dueMs == null) return null;
+    const n = now || getSimulatedNow();
+    return dueMs - n.getTime();
+  }
+
+  function getManualResetRemainingText(task, now) {
+    if (task && task.manualAwaitingRestart) return "Awaiting restart";
+    const ms = getManualResetRemainingMs(task, now);
+    if (ms == null) return "TBD";
+    if (ms <= 0) return "Due";
+    return formatRemainingMs(ms);
+  }
+
+  function isManualResetExpired(task, now) {
+    if (!isManualResetTask(task) || task.manualDueTbd || task.manualAwaitingRestart) return false;
+    if (!task.manualDueDateStr || !isValidDateStr(task.manualDueDateStr)) return false;
+    const ms = getManualResetRemainingMs(task, now);
+    return ms != null && ms <= 0;
+  }
+
+  /**
+   * Finalize previous manual window tallies (if any) and open a new window.
+   * When prior was TBD (or calendar end is past the new start), clamp previous end to
+   * the new cycle start [oldStart, newStart) so history/calendar ranges never overlap.
+   * After Start/confirm the new window always begins incomplete (calendar marks + pending earned cleared).
+   * reason: "create" | "reset" | "expiry"
+   */
+  function startManualResetWindow(game, task, taskType, opts) {
+    if (!game || !task || !isManualResetTask(task)) return false;
+    const o = opts || {};
+    const key = game.id + "." + (task.id || task.label);
+    const type = taskType === "endgame" ? "endgame" : "weeklies";
+    const now = getSimulatedNow();
+    const todayStr = getDateStr(now);
+    const reason = o.reason || "reset";
+    const newStartStr = isValidDateStr(o.dateStarted) ? o.dateStarted : todayStr;
+    const newStartMoment = getManualResetMomentOnDate(task, newStartStr, game) || getEndgameAnchorDate(
+      Object.assign({}, task, { dateStarted: newStartStr }),
+      game
+    );
+
+    if (reason !== "create") {
+      const prevBounds = getManualResetCycleBounds(task, game, type);
+      if (prevBounds && prevBounds.cycleStart.getTime() <= newStartMoment.getTime()) {
+        const sameStart = prevBounds.cycleStart.getTime() === newStartMoment.getTime();
+        let cycleEnd = prevBounds.cycleEnd;
+        let nextCycleStart = prevBounds.nextCycleStart;
+        const endBeyondNewStart = cycleEnd.getTime() > newStartMoment.getTime();
+        let completedMark = null;
+
+        if (sameStart) {
+          // Same calendar start: board toggle already counted tallies; only archive the window.
+          completedMark = findCompletionDateInBounds(key, type, prevBounds);
+          cycleEnd = new Date(newStartMoment.getTime());
+          nextCycleStart = new Date(newStartMoment.getTime());
+        } else {
+          if (endBeyondNewStart) {
+            // Drop assumed-TBD / overshoot marks that would bleed into the new window.
+            clearManualResetMarksInRange(key, type, newStartMoment, cycleEnd);
+            cycleEnd = new Date(newStartMoment.getTime());
+            nextCycleStart = new Date(newStartMoment.getTime());
+          }
+          completedMark = findCompletionDateInBounds(key, type, {
+            cycleStart: prevBounds.cycleStart,
+            cycleEnd,
+            nextCycleStart,
+          });
+        }
+
+        const closedBounds = {
+          cycleStart: prevBounds.cycleStart,
+          cycleEnd,
+          nextCycleStart,
+        };
+        if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
+        task.manualClosedCycles.push({
+          start: getDateStr(closedBounds.cycleStart),
+          end: getDateStr(closedBounds.cycleEnd),
+          completed: completedMark ? 1 : 0,
+        });
+        if (completedMark && !sameStart) {
+          if (type === "weeklies") {
+            state.weekliesCompleted[key] = getCompletedAmount(state.weekliesCompleted, key) + 1;
+          } else {
+            state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
+            ensureEndgameEarnedArrayLength(game.id, task.id || task.label, getCompletedAmount(state.endgameCompleted, key));
+            if (!state.endgameCompletionDates) state.endgameCompletionDates = {};
+            if (!state.endgameCompletionDates[key]) state.endgameCompletionDates[key] = [];
+            state.endgameCompletionDates[key].push({
+              start: getDateStr(closedBounds.cycleStart),
+              end: getDateStr(closedBounds.cycleEnd),
+            });
+          }
+        }
+      }
+    }
+
+    task.dateStarted = newStartStr;
+    if (o.tbd) {
+      task.manualDueTbd = true;
+      task.manualDueDateStr = null;
+    } else if (isValidDateStr(o.dueDateStr)) {
+      task.manualDueTbd = false;
+      task.manualDueDateStr = o.dueDateStr;
+    } else {
+      task.manualDueTbd = true;
+      task.manualDueDateStr = null;
+    }
+    task.manualAwaitingRestart = false;
+
+    // New cycle must start incomplete — same as a calendar reset opening an empty window.
+    const newBounds = getManualResetCycleBounds(task, game, type);
+    if (newBounds) {
+      clearManualResetMarksInRange(key, type, newBounds.cycleStart, newBounds.cycleEnd);
+    }
+    if (type === "endgame") {
+      if (!state.endgamePendingCurrency) state.endgamePendingCurrency = {};
+      if (!state.endgamePendingCycleStartMs) state.endgamePendingCycleStartMs = {};
+      state.endgamePendingCurrency[key] = 0;
+      state.endgamePendingCycleStartMs[key] = newBounds
+        ? newBounds.cycleStart.getTime()
+        : newStartMoment.getTime();
+    }
+
+    if (type === "weeklies") {
+      state.weekliesAttempted[key] = getAttemptedAmount(state.weekliesAttempted, key) + 1;
+    } else {
+      const attemptIdx = getAttemptedAmount(state.endgameAttempted, key);
+      state.endgameAttempted[key] = attemptIdx + 1;
+      snapshotEndgamePotentialAt(game.id, task.id || task.label, attemptIdx, getEndgamePotential(task));
+      ensureEndgamePotentialArrayLength(game.id, task.id || task.label, getAttemptedAmount(state.endgameAttempted, key));
+    }
+
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    return true;
   }
 
   function getWeekDates() {
@@ -1853,6 +2098,13 @@
   }
 
   function getWeeklyCycleBoundsForMoment(task, moment, game) {
+    if (isManualResetTask(task)) {
+      const bounds = getManualResetCycleBounds(task, game, "weeklies");
+      if (!bounds) return null;
+      const d = moment instanceof Date ? moment : new Date();
+      if (d.getTime() < bounds.cycleStart.getTime()) return null;
+      return bounds;
+    }
     const d = moment instanceof Date ? moment : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const { intervalMs } = getCycleParams(task);
@@ -1870,6 +2122,13 @@
   }
 
   function getEndgameCycleBoundsForMoment(task, moment, game) {
+    if (isManualResetTask(task)) {
+      const bounds = getManualResetCycleBounds(task, game, "endgame");
+      if (!bounds) return null;
+      const d = moment instanceof Date ? moment : new Date();
+      if (d.getTime() < bounds.cycleStart.getTime()) return null;
+      return bounds;
+    }
     const d = moment instanceof Date ? moment : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const intervalMs = getIntervalMs(task.frequencyEvery, (task && task.frequencyUnit === "day") ? "day" : "week");
@@ -5435,8 +5694,9 @@
       }
 
       (game.weeklies || []).forEach((task) => {
+        // Manual Reset/Start tasks never auto-advance cycles.
+        if (isManualResetTask(task)) return;
         const key = game.id + "." + (task.id || task.label);
-        const anchor = getEndgameAnchorDate(task, game);
         const { intervalMs, timeLimitMs } = getCycleParams(task);
         let lastMs = state.lastProcessedResets.weeklies[key];
         let cycleStartMs;
@@ -5475,8 +5735,9 @@
       });
 
       (game.endgame || []).forEach((task) => {
+        // Manual Reset/Start tasks never auto-advance cycles.
+        if (isManualResetTask(task)) return;
         const key = game.id + "." + (task.id || task.label);
-        const anchor = getEndgameAnchorDate(task, game);
         const { intervalMs, timeLimitMs } = getCycleParams(task);
         let lastMs = state.lastProcessedResets.endgame[key];
         let cycleStartMs;
@@ -5738,6 +5999,9 @@
 
   /** Get cycle start for a cycle-based task (weekly, endgame) given a date. Uses dateStarted anchor. */
   function getCycleStartForDate(task, dateStr, game) {
+    if (isManualResetTask(task)) {
+      return getEndgameAnchorDate(task, game);
+    }
     const d = isValidDateStr(dateStr) ? new Date(dateStr + "T12:00:00") : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const { intervalMs } = getCycleParams(task);
@@ -5816,6 +6080,33 @@
     } else if (type === "weeklies") {
       const task = (game.weeklies || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
       if (!task) return result;
+      if (isManualResetTask(task)) {
+        const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+        closed.forEach((c) => {
+          if (!c || !isValidDateStr(c.start) || !isValidDateStr(c.end)) return;
+          const periodStart = getManualResetMomentOnDate(task, c.start, game);
+          const periodEnd = getManualResetMomentOnDate(task, c.end, game);
+          if (!periodStart || !periodEnd) return;
+          result.push({
+            periodStart,
+            periodEnd,
+            nextCycleStart: new Date(periodEnd.getTime()),
+            completed: c.completed ? 1 : 0,
+          });
+        });
+        const bounds = getManualResetCycleBounds(task, game, "weeklies");
+        if (bounds) {
+          const completed = isPeriodCompletedFromCalendar(key, "weeklies", bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart) ? 1 : 0;
+          result.push({
+            periodStart: bounds.cycleStart,
+            periodEnd: bounds.cycleEnd,
+            nextCycleStart: bounds.nextCycleStart,
+            completed,
+          });
+        }
+        tallyCacheSet(cacheKey, result);
+        return result;
+      }
       const { intervalMs, timeLimitMs } = getCycleParams(task);
       let earliestStr = null;
       Object.keys(state.completionByDate || {}).forEach((dateStr) => {
@@ -5841,6 +6132,33 @@
     } else if (type === "endgame") {
       const task = (game.endgame || []).find((t) => (game.id + "." + (t.id || t.label)) === key);
       if (!task) return result;
+      if (isManualResetTask(task)) {
+        const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+        closed.forEach((c) => {
+          if (!c || !isValidDateStr(c.start) || !isValidDateStr(c.end)) return;
+          const periodStart = getManualResetMomentOnDate(task, c.start, game);
+          const periodEnd = getManualResetMomentOnDate(task, c.end, game);
+          if (!periodStart || !periodEnd) return;
+          result.push({
+            periodStart,
+            periodEnd,
+            nextCycleStart: new Date(periodEnd.getTime()),
+            completed: c.completed ? 1 : 0,
+          });
+        });
+        const bounds = getManualResetCycleBounds(task, game, "endgame");
+        if (bounds) {
+          const completed = isPeriodCompletedFromCalendar(key, "endgame", bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart) ? 1 : 0;
+          result.push({
+            periodStart: bounds.cycleStart,
+            periodEnd: bounds.cycleEnd,
+            nextCycleStart: bounds.nextCycleStart,
+            completed,
+          });
+        }
+        tallyCacheSet(cacheKey, result);
+        return result;
+      }
       const { intervalMs, timeLimitMs } = getCycleParams(task);
       let earliestStr = null;
       Object.keys(state.completionByDate || {}).forEach((dateStr) => {

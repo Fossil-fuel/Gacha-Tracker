@@ -138,9 +138,11 @@
     setDateLabels();
     initTabs();
     initTaskModal();
+    initManualResetModal();
     initGameModal();
     initGameIdentityModal();
     initDeleteGameModal();
+    initDeleteTaskModal();
     initClearGameDataModal();
     initCalendarDayModal();
     initEarningsModal();
@@ -169,14 +171,19 @@
         window.flushPendingSave();
       }
       // Phase 5: catch up sidebar clock as soon as the tab is focused again.
-      if (document.visibilityState === "visible" && typeof updateSidebarTime === "function") {
-        updateSidebarTime();
+      if (document.visibilityState === "visible") {
+        if (typeof updateSidebarTime === "function") updateSidebarTime();
+        if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
       }
+    });
+    window.addEventListener("focus", () => {
+      if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
     });
     setInterval(() => {
       const changed = processResets();
       updateTaskRemainingTexts();
       if (changed) renderActiveTab();
+      if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
     }, 60000);
     // Pause sidebar clock while the page is in a background tab (saves work; resets timer unchanged).
     setInterval(() => {
@@ -196,6 +203,7 @@
 
     // Cold start: active tab + chrome only. Full renderAll stays for import/repair/cloud/dev skips.
     renderActiveTab();
+    if (typeof checkManualResetExpiries === "function") checkManualResetExpiries();
 
     // Opt-in live probe surface for localhost regression (URL: ?liveProbe=1).
     if (typeof location !== "undefined" && /(?:\?|&)liveProbe=1(?:&|$)/.test(String(location.search || ""))) {
