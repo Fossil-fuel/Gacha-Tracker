@@ -6381,6 +6381,12 @@ input[type="date"] {
   width: 100%;
 }
 
+#extracurricularTaskModal .task-banner-target-label {
+  text-align: center;
+  line-height: 1.2;
+  max-width: 7.5rem;
+}
+
 #extracurricularTaskModal #extracurricularTaskDescription {
   resize: vertical;
   min-height: 4rem;

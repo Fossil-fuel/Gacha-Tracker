@@ -17014,6 +17014,10 @@
         commitTaskBannerCrop();
       }
       if (typeof applyTaskBannersToSavePayload === "function") applyTaskBannersToSavePayload(payload);
+      // Extracurricular: Board crop is also used on the Games page (no separate Games crop).
+      if (payload.bannerViews && payload.bannerViews.board && typeof cloneBannerView === "function") {
+        payload.bannerViews.games = cloneBannerView(payload.bannerViews.board, payload.bannerViews.board.aspect);
+      }
 
       if (task) {
         const idx = (state.extracurricularTasks || []).findIndex((t) => t.id === task.id);
@@ -18159,7 +18163,7 @@
           const activeList = document.createElement("div");
           activeList.className = "task-grid task-grid-knot";
           activeList.dataset.masonryMax = "3";
-          activeTasks.forEach((task) => activeList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "games" })));
+          activeTasks.forEach((task) => activeList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "board" })));
           section.appendChild(activeList);
           scheduleTaskMasonry(activeList);
         }
@@ -18172,7 +18176,7 @@
           const archivedList = document.createElement("div");
           archivedList.className = "task-grid task-grid-knot";
           archivedList.dataset.masonryMax = "3";
-          archivedTasks.forEach((task) => archivedList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "games" })));
+          archivedTasks.forEach((task) => archivedList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "board" })));
           section.appendChild(archivedList);
           scheduleTaskMasonry(archivedList);
         }

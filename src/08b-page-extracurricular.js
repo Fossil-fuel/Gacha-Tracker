@@ -954,6 +954,10 @@
         commitTaskBannerCrop();
       }
       if (typeof applyTaskBannersToSavePayload === "function") applyTaskBannersToSavePayload(payload);
+      // Extracurricular: Board crop is also used on the Games page (no separate Games crop).
+      if (payload.bannerViews && payload.bannerViews.board && typeof cloneBannerView === "function") {
+        payload.bannerViews.games = cloneBannerView(payload.bannerViews.board, payload.bannerViews.board.aspect);
+      }
 
       if (task) {
         const idx = (state.extracurricularTasks || []).findIndex((t) => t.id === task.id);

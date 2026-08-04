@@ -655,7 +655,7 @@
           const activeList = document.createElement("div");
           activeList.className = "task-grid task-grid-knot";
           activeList.dataset.masonryMax = "3";
-          activeTasks.forEach((task) => activeList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "games" })));
+          activeTasks.forEach((task) => activeList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "board" })));
           section.appendChild(activeList);
           scheduleTaskMasonry(activeList);
         }
@@ -668,7 +668,7 @@
           const archivedList = document.createElement("div");
           archivedList.className = "task-grid task-grid-knot";
           archivedList.dataset.masonryMax = "3";
-          archivedTasks.forEach((task) => archivedList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "games" })));
+          archivedTasks.forEach((task) => archivedList.appendChild(buildExtracurricularTaskItem(task, "div", { surface: "board" })));
           section.appendChild(archivedList);
           scheduleTaskMasonry(archivedList);
         }
