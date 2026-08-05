@@ -1538,7 +1538,8 @@
       }
 
       function loadApp() {
-        return loadScript("app.js");
+        // Cache-bust so GitHub Pages / browser caches pick up catalog path fixes.
+        return loadScript("app.js?v=1e087d2-wuwa");
       }
 
       // Phase 2: only pull Firebase SDK when a real project config is present.
