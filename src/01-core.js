@@ -106,7 +106,7 @@
   /** Bundled profile pictures (Settings gallery; not offered in the task banner picker). */
   const STOCK_PFP_ASSETS = [
     { id: "pfp-pgr-official", path: "assets/PFP - PGR - Official.png", kind: "pfp", label: "PGR — Official" },
-    { id: "pfp-wuwa-official", path: "assets/PFP - Wuwa - Official.png", kind: "pfp", label: "WuWa — Official" },
+    { id: "pfp-wuwa-official", path: "assets/PFP - WuWa - Official.png", kind: "pfp", label: "WuWa — Official" },
     { id: "pfp-hsr-official", path: "assets/PFP - HSR - Official.png", kind: "pfp", label: "HSR — Official" },
     { id: "pfp-hi3rd-official", path: "assets/PFP - HI3rd - Official.png", kind: "pfp", label: "HI3rd — Official" },
     { id: "pfp-zzz-official", path: "assets/PFP - ZZZ - Official.png", kind: "pfp", label: "ZZZ — Official" },
