@@ -71,6 +71,7 @@
       previewWrap: "taskBannerPreviewWrap",
       cardPreview: "taskBannerCardPreview",
       nameInput: "taskNameInput",
+      overlayTextInput: "taskBannerOverlayText",
     },
     extra: {
       root: "extracurricularTaskModal",
@@ -86,6 +87,7 @@
       previewWrap: "extraBannerPreviewWrap",
       cardPreview: "extraBannerCardPreview",
       nameInput: "extracurricularTaskName",
+      overlayTextInput: "extraBannerOverlayText",
     },
   };
   let activeBannerUiKey = "task";
@@ -93,31 +95,22 @@
 
   /** Bundled stock banners (relative paths; stored as URL strings on tasks). */
   const STOCK_BANNER_ASSETS = [
-    { id: "story-castorice-fields", path: "assets/Story - Castorice fields.png", kind: "story", label: "Castorice Fields" },
-    { id: "story-qingming", path: "assets/Story - QingMing.png", kind: "story", label: "Qingming" },
-    { id: "story-startorch", path: "assets/Story - Startorch.png", kind: "story", label: "Startorch" },
-    { id: "story-wuling", path: "assets/Story - Wuling.png", kind: "story", label: "Wuling" },
-    { id: "event-acheron", path: "assets/Event - Acheron.png", kind: "event", label: "Acheron" },
-    { id: "event-endfield", path: "assets/Event - Endfield.png", kind: "event", label: "Endfield" },
-    { id: "event-excostrider", path: "assets/Event - Excostrider.png", kind: "event", label: "Excostrider" },
-    { id: "event-stellar-jade", path: "assets/Event - Stellar Jade.png", kind: "event", label: "Stellar Jade" },
-    { id: "event-zzz", path: "assets/Event - ZZZ.png", kind: "event", label: "ZZZ" },
+    { id: "story-castorice-fields", path: "assets/Castorice fields.png", kind: "story", label: "Castorice Fields" },
+    { id: "story-startorch", path: "assets/Startorch.png", kind: "story", label: "Startorch" },
+    { id: "story-wuling", path: "assets/Wuling.png", kind: "story", label: "Wuling" },
+    { id: "event-endfield", path: "assets/Endfield.png", kind: "event", label: "Endfield" },
+    { id: "event-stellar-jade", path: "assets/Stellar Jade.png", kind: "event", label: "Stellar Jade" },
+    { id: "event-zzz", path: "assets/ZZZ.png", kind: "event", label: "ZZZ" },
   ];
 
   /** Bundled profile pictures (Settings gallery; not offered in the task banner picker). */
   const STOCK_PFP_ASSETS = [
     { id: "pfp-pgr-official", path: "assets/PFP - PGR - Official.png", kind: "pfp", label: "PGR — Official" },
-    { id: "pfp-wuwa-official", path: "assets/PFP - WuWa - Official.png", kind: "pfp", label: "WuWa — Official" },
+    { id: "pfp-wuwa-official", path: "assets/PFP - Wuwa - Official.png", kind: "pfp", label: "WuWa — Official" },
     { id: "pfp-hsr-official", path: "assets/PFP - HSR - Official.png", kind: "pfp", label: "HSR — Official" },
     { id: "pfp-hi3rd-official", path: "assets/PFP - HI3rd - Official.png", kind: "pfp", label: "HI3rd — Official" },
     { id: "pfp-zzz-official", path: "assets/PFP - ZZZ - Official.png", kind: "pfp", label: "ZZZ — Official" },
     { id: "pfp-endfield-official", path: "assets/PFP - Endfield - Official.png", kind: "pfp", label: "Endfield — Official" },
-    { id: "pfp-endfield-arcane", path: "assets/PFP - Endfield - Arcane.png", kind: "pfp", label: "Endfield — Arcane" },
-    { id: "pfp-hi3rd-seele", path: "assets/PFP - HI3rd - Seele.png", kind: "pfp", label: "HI3rd — Seele" },
-    { id: "pfp-hsr-castorice", path: "assets/PFP - HSR - Castorice.png", kind: "pfp", label: "HSR — Castorice" },
-    { id: "pfp-pgr-alpha", path: "assets/PFP - PGR - Alpha.png", kind: "pfp", label: "PGR — Alpha" },
-    { id: "pfp-wuwa-hsin", path: "assets/PFP - WuWa - Hsin.png", kind: "pfp", label: "WuWa — Hsin" },
-    { id: "pfp-zzz-shungus", path: "assets/PFP - ZZZ - Shungus.png", kind: "pfp", label: "ZZZ — Shungus" },
   ];
 
   function getStockBannerAssets() {

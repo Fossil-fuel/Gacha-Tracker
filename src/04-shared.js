@@ -333,6 +333,22 @@
     img.style.objectPosition = "center";
   }
 
+  function getTaskBannerOverlayText(task) {
+    if (!task) return "";
+    return String(task.bannerOverlayText || "").trim();
+  }
+
+  /** Optional CSS label over a banner image container. */
+  function appendBannerOverlayLabel(parent, task) {
+    const text = getTaskBannerOverlayText(task);
+    if (!parent || !text) return null;
+    const el = document.createElement("span");
+    el.className = "task-banner-overlay";
+    el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  }
+
   /** Banner strip/thumb for weekly & endgame task cards. variant: "card" | "thumb" */
   function appendTaskBanner(parent, task, variant) {
     if (!parent || !task) return null;
@@ -350,6 +366,7 @@
     img.draggable = false;
     applyBannerViewportImgStyles(img, banner.view);
     wrap.appendChild(img);
+    appendBannerOverlayLabel(wrap, task);
     parent.insertBefore(wrap, parent.firstChild);
     parent.classList.add(variant === "thumb" ? "has-task-banner-thumb" : "has-task-banner");
     return img;
@@ -390,6 +407,7 @@
       img.draggable = false;
       applyBannerViewportImgStyles(img, banner.view);
       stage.appendChild(img);
+      appendBannerOverlayLabel(stage, task);
       media.appendChild(stage);
       cardEl.classList.add("has-games-task-media");
     } else {
@@ -490,6 +508,7 @@
       img.draggable = false;
       applyBannerViewportImgStyles(img, banner.view);
       media.appendChild(img);
+      appendBannerOverlayLabel(media, task);
       cardEl.classList.add("has-task-banner");
     } else if (!shrinkEmpty) {
       const ph = document.createElement("div");

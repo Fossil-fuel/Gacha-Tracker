@@ -6123,6 +6123,58 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   color: var(--text-muted);
 }
 
+.task-banner-overlay-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.55rem;
+}
+
+.task-banner-overlay-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.task-banner-overlay-field input[type="text"] {
+  width: 100%;
+}
+
+.task-banner-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 1;
+  padding: 0.4rem 0.5rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.45);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.58), rgba(0, 0, 0, 0.14) 72%, transparent);
+  pointer-events: none;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  word-break: break-word;
+}
+
+.task-card-media .task-banner-overlay {
+  right: 2.6rem;
+}
+
+.task-banner-thumb-wrap .task-banner-overlay {
+  font-size: 0.65rem;
+  padding: 0.28rem 0.35rem 0.45rem;
+}
+
+.games-task-media-stage .task-banner-overlay {
+  font-size: 0.7rem;
+}
+
 .task-banner-targets {
   display: flex;
   flex-wrap: wrap;

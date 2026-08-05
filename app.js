@@ -194,6 +194,7 @@
       previewWrap: "taskBannerPreviewWrap",
       cardPreview: "taskBannerCardPreview",
       nameInput: "taskNameInput",
+      overlayTextInput: "taskBannerOverlayText",
     },
     extra: {
       root: "extracurricularTaskModal",
@@ -209,6 +210,7 @@
       previewWrap: "extraBannerPreviewWrap",
       cardPreview: "extraBannerCardPreview",
       nameInput: "extracurricularTaskName",
+      overlayTextInput: "extraBannerOverlayText",
     },
   };
   let activeBannerUiKey = "task";
@@ -216,31 +218,22 @@
 
   /** Bundled stock banners (relative paths; stored as URL strings on tasks). */
   const STOCK_BANNER_ASSETS = [
-    { id: "story-castorice-fields", path: "assets/Story - Castorice fields.png", kind: "story", label: "Castorice Fields" },
-    { id: "story-qingming", path: "assets/Story - QingMing.png", kind: "story", label: "Qingming" },
-    { id: "story-startorch", path: "assets/Story - Startorch.png", kind: "story", label: "Startorch" },
-    { id: "story-wuling", path: "assets/Story - Wuling.png", kind: "story", label: "Wuling" },
-    { id: "event-acheron", path: "assets/Event - Acheron.png", kind: "event", label: "Acheron" },
-    { id: "event-endfield", path: "assets/Event - Endfield.png", kind: "event", label: "Endfield" },
-    { id: "event-excostrider", path: "assets/Event - Excostrider.png", kind: "event", label: "Excostrider" },
-    { id: "event-stellar-jade", path: "assets/Event - Stellar Jade.png", kind: "event", label: "Stellar Jade" },
-    { id: "event-zzz", path: "assets/Event - ZZZ.png", kind: "event", label: "ZZZ" },
+    { id: "story-castorice-fields", path: "assets/Castorice fields.png", kind: "story", label: "Castorice Fields" },
+    { id: "story-startorch", path: "assets/Startorch.png", kind: "story", label: "Startorch" },
+    { id: "story-wuling", path: "assets/Wuling.png", kind: "story", label: "Wuling" },
+    { id: "event-endfield", path: "assets/Endfield.png", kind: "event", label: "Endfield" },
+    { id: "event-stellar-jade", path: "assets/Stellar Jade.png", kind: "event", label: "Stellar Jade" },
+    { id: "event-zzz", path: "assets/ZZZ.png", kind: "event", label: "ZZZ" },
   ];
 
   /** Bundled profile pictures (Settings gallery; not offered in the task banner picker). */
   const STOCK_PFP_ASSETS = [
     { id: "pfp-pgr-official", path: "assets/PFP - PGR - Official.png", kind: "pfp", label: "PGR — Official" },
-    { id: "pfp-wuwa-official", path: "assets/PFP - WuWa - Official.png", kind: "pfp", label: "WuWa — Official" },
+    { id: "pfp-wuwa-official", path: "assets/PFP - Wuwa - Official.png", kind: "pfp", label: "WuWa — Official" },
     { id: "pfp-hsr-official", path: "assets/PFP - HSR - Official.png", kind: "pfp", label: "HSR — Official" },
     { id: "pfp-hi3rd-official", path: "assets/PFP - HI3rd - Official.png", kind: "pfp", label: "HI3rd — Official" },
     { id: "pfp-zzz-official", path: "assets/PFP - ZZZ - Official.png", kind: "pfp", label: "ZZZ — Official" },
     { id: "pfp-endfield-official", path: "assets/PFP - Endfield - Official.png", kind: "pfp", label: "Endfield — Official" },
-    { id: "pfp-endfield-arcane", path: "assets/PFP - Endfield - Arcane.png", kind: "pfp", label: "Endfield — Arcane" },
-    { id: "pfp-hi3rd-seele", path: "assets/PFP - HI3rd - Seele.png", kind: "pfp", label: "HI3rd — Seele" },
-    { id: "pfp-hsr-castorice", path: "assets/PFP - HSR - Castorice.png", kind: "pfp", label: "HSR — Castorice" },
-    { id: "pfp-pgr-alpha", path: "assets/PFP - PGR - Alpha.png", kind: "pfp", label: "PGR — Alpha" },
-    { id: "pfp-wuwa-hsin", path: "assets/PFP - WuWa - Hsin.png", kind: "pfp", label: "WuWa — Hsin" },
-    { id: "pfp-zzz-shungus", path: "assets/PFP - ZZZ - Shungus.png", kind: "pfp", label: "ZZZ — Shungus" },
   ];
 
   function getStockBannerAssets() {
@@ -10406,6 +10399,8 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerSource = loaded.source;
     taskModal.bannerViews = loaded.views;
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    const overlayInput = bannerEl("overlayTextInput");
+    if (overlayInput) overlayInput.value = (task && task.bannerOverlayText) ? String(task.bannerOverlayText) : "";
     resetTaskBannerCropState();
     syncTaskBannerTargetButtons();
     syncTaskBannerPreview();
@@ -10436,6 +10431,8 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerSource = null;
     taskModal.bannerViews = emptyTaskBannerViews();
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    const overlayInput = bannerEl("overlayTextInput");
+    if (overlayInput) overlayInput.value = "";
     resetTaskBannerCropState();
     syncTaskBannerPreview();
     syncTaskBannerTargetButtons();
@@ -13334,9 +13331,13 @@ function syncTaskCycleEndTimeUI() {
         games: ensureView("games", TASK_BANNER_TARGETS.games.aspect),
         board: ensureView("board", TASK_BANNER_TARGETS.board.aspect),
       };
+      const overlayInput = bannerEl("overlayTextInput");
+      const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
+      next.bannerOverlayText = overlayText || undefined;
     } else {
       next.bannerSourceImage = undefined;
       next.bannerViews = undefined;
+      next.bannerOverlayText = undefined;
     }
     next.bannerImage = undefined;
     next.bannerAspect = undefined;
@@ -13351,6 +13352,9 @@ function syncTaskCycleEndTimeUI() {
     if (!taskModal.bannerSource) {
       delete merged.bannerSourceImage;
       delete merged.bannerViews;
+      delete merged.bannerOverlayText;
+    } else if (!merged.bannerOverlayText) {
+      delete merged.bannerOverlayText;
     }
     delete merged.bannerImage;
     delete merged.bannerAspect;
@@ -13702,10 +13706,13 @@ function syncTaskCycleEndTimeUI() {
 
   function getTaskBannerPreviewTaskStub() {
     const nameInput = bannerEl("nameInput");
+    const overlayInput = bannerEl("overlayTextInput");
     const label = (nameInput && nameInput.value.trim()) || "Task name";
+    const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
     return {
       label: label,
       bannerSourceImage: taskModal.bannerSource || null,
+      bannerOverlayText: overlayText || undefined,
       bannerViews: {
         home: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.home, TASK_BANNER_TARGETS.home.aspect),
         games: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.games, TASK_BANNER_TARGETS.games.aspect),
@@ -13908,16 +13915,7 @@ function syncTaskCycleEndTimeUI() {
   async function setTaskBannerFromFile(file) {
     try {
       const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: 1400, quality: 0.92 });
-      let source = dataUrl;
-      if (typeof addUserImage === "function") {
-        const base = (file && file.name ? String(file.name).replace(/\.[^.]+$/, "") : "") || "Banner";
-        const entry = addUserImage({ kind: "banner", label: base, dataUrl: dataUrl });
-        if (entry && entry.id && typeof makeUserImageRef === "function") {
-          source = makeUserImageRef(entry.id);
-          if (typeof save === "function") save();
-        }
-      }
-      await loadTaskBannerSourceFromUrl(source);
+      await loadTaskBannerSourceFromUrl(dataUrl);
     } catch (err) {
       alert((err && err.message) || "Could not use that image.");
     }
@@ -14015,7 +14013,7 @@ function syncTaskCycleEndTimeUI() {
     } else {
       const hint = document.createElement("p");
       hint.className = "settings-hint";
-      hint.textContent = "No personal images yet — upload from Settings → My Images, or Choose image (banners save to My Images automatically).";
+      hint.textContent = "No personal images yet — upload from Settings → My Images, or use Save to My Images after choosing a banner.";
       host.appendChild(hint);
     }
 
@@ -14527,6 +14525,7 @@ function syncTaskCycleEndTimeUI() {
       const imgFrame = bannerEl("imgFrame");
       const cropFrame = bannerEl("cropFrame");
       const nameInput = bannerEl("nameInput");
+      const overlayTextInput = bannerEl("overlayTextInput");
       const root = bannerRootEl();
       setActiveBannerUi(prev);
       if (!fileInput || !root) return;
@@ -14619,6 +14618,8 @@ function syncTaskCycleEndTimeUI() {
           taskModal.bannerSource = null;
           taskModal.bannerViews = emptyTaskBannerViews();
           taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+          const overlayInput = bannerEl("overlayTextInput");
+          if (overlayInput) overlayInput.value = "";
           resizeTaskBannerCropStage();
           drawTaskBannerCrop();
           syncTaskBannerPreview();
@@ -14628,6 +14629,13 @@ function syncTaskCycleEndTimeUI() {
 
       if (nameInput) {
         nameInput.addEventListener("input", () => {
+          if (activeBannerUiKey !== uiKey) return;
+          if (taskModal.bannerSource) syncTaskBannerPreview();
+        });
+      }
+
+      if (overlayTextInput) {
+        overlayTextInput.addEventListener("input", () => {
           if (activeBannerUiKey !== uiKey) return;
           if (taskModal.bannerSource) syncTaskBannerPreview();
         });
@@ -16119,6 +16127,22 @@ function syncTaskCycleEndTimeUI() {
     img.style.objectPosition = "center";
   }
 
+  function getTaskBannerOverlayText(task) {
+    if (!task) return "";
+    return String(task.bannerOverlayText || "").trim();
+  }
+
+  /** Optional CSS label over a banner image container. */
+  function appendBannerOverlayLabel(parent, task) {
+    const text = getTaskBannerOverlayText(task);
+    if (!parent || !text) return null;
+    const el = document.createElement("span");
+    el.className = "task-banner-overlay";
+    el.textContent = text;
+    parent.appendChild(el);
+    return el;
+  }
+
   /** Banner strip/thumb for weekly & endgame task cards. variant: "card" | "thumb" */
   function appendTaskBanner(parent, task, variant) {
     if (!parent || !task) return null;
@@ -16136,6 +16160,7 @@ function syncTaskCycleEndTimeUI() {
     img.draggable = false;
     applyBannerViewportImgStyles(img, banner.view);
     wrap.appendChild(img);
+    appendBannerOverlayLabel(wrap, task);
     parent.insertBefore(wrap, parent.firstChild);
     parent.classList.add(variant === "thumb" ? "has-task-banner-thumb" : "has-task-banner");
     return img;
@@ -16176,6 +16201,7 @@ function syncTaskCycleEndTimeUI() {
       img.draggable = false;
       applyBannerViewportImgStyles(img, banner.view);
       stage.appendChild(img);
+      appendBannerOverlayLabel(stage, task);
       media.appendChild(stage);
       cardEl.classList.add("has-games-task-media");
     } else {
@@ -16276,6 +16302,7 @@ function syncTaskCycleEndTimeUI() {
       img.draggable = false;
       applyBannerViewportImgStyles(img, banner.view);
       media.appendChild(img);
+      appendBannerOverlayLabel(media, task);
       cardEl.classList.add("has-task-banner");
     } else if (!shrinkEmpty) {
       const ph = document.createElement("div");
@@ -19652,6 +19679,8 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerSource = loaded.source;
     taskModal.bannerViews = loaded.views;
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    const overlayInput = typeof bannerEl === "function" ? bannerEl("overlayTextInput") : document.getElementById("extraBannerOverlayText");
+    if (overlayInput) overlayInput.value = (task && task.bannerOverlayText) ? String(task.bannerOverlayText) : "";
     if (typeof resetTaskBannerCropState === "function") resetTaskBannerCropState();
     if (typeof syncTaskBannerTargetButtons === "function") syncTaskBannerTargetButtons();
     if (typeof syncTaskBannerPreview === "function") syncTaskBannerPreview();
@@ -19691,6 +19720,8 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerSource = null;
     taskModal.bannerViews = typeof emptyTaskBannerViews === "function" ? emptyTaskBannerViews() : { home: null, games: null, board: null };
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    const overlayInput = document.getElementById("extraBannerOverlayText");
+    if (overlayInput) overlayInput.value = "";
   }
 
   function deleteExtracurricularTask(taskId) {

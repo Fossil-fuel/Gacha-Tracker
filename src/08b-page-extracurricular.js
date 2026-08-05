@@ -429,6 +429,8 @@
     taskModal.bannerSource = loaded.source;
     taskModal.bannerViews = loaded.views;
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    const overlayInput = typeof bannerEl === "function" ? bannerEl("overlayTextInput") : document.getElementById("extraBannerOverlayText");
+    if (overlayInput) overlayInput.value = (task && task.bannerOverlayText) ? String(task.bannerOverlayText) : "";
     if (typeof resetTaskBannerCropState === "function") resetTaskBannerCropState();
     if (typeof syncTaskBannerTargetButtons === "function") syncTaskBannerTargetButtons();
     if (typeof syncTaskBannerPreview === "function") syncTaskBannerPreview();
@@ -468,6 +470,8 @@
     taskModal.bannerSource = null;
     taskModal.bannerViews = typeof emptyTaskBannerViews === "function" ? emptyTaskBannerViews() : { home: null, games: null, board: null };
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    const overlayInput = document.getElementById("extraBannerOverlayText");
+    if (overlayInput) overlayInput.value = "";
   }
 
   function deleteExtracurricularTask(taskId) {

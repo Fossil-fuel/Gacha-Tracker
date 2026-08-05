@@ -2070,6 +2070,8 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerSource = loaded.source;
     taskModal.bannerViews = loaded.views;
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    const overlayInput = bannerEl("overlayTextInput");
+    if (overlayInput) overlayInput.value = (task && task.bannerOverlayText) ? String(task.bannerOverlayText) : "";
     resetTaskBannerCropState();
     syncTaskBannerTargetButtons();
     syncTaskBannerPreview();
@@ -2100,6 +2102,8 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerSource = null;
     taskModal.bannerViews = emptyTaskBannerViews();
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+    const overlayInput = bannerEl("overlayTextInput");
+    if (overlayInput) overlayInput.value = "";
     resetTaskBannerCropState();
     syncTaskBannerPreview();
     syncTaskBannerTargetButtons();
@@ -4998,9 +5002,13 @@ function syncTaskCycleEndTimeUI() {
         games: ensureView("games", TASK_BANNER_TARGETS.games.aspect),
         board: ensureView("board", TASK_BANNER_TARGETS.board.aspect),
       };
+      const overlayInput = bannerEl("overlayTextInput");
+      const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
+      next.bannerOverlayText = overlayText || undefined;
     } else {
       next.bannerSourceImage = undefined;
       next.bannerViews = undefined;
+      next.bannerOverlayText = undefined;
     }
     next.bannerImage = undefined;
     next.bannerAspect = undefined;
@@ -5015,6 +5023,9 @@ function syncTaskCycleEndTimeUI() {
     if (!taskModal.bannerSource) {
       delete merged.bannerSourceImage;
       delete merged.bannerViews;
+      delete merged.bannerOverlayText;
+    } else if (!merged.bannerOverlayText) {
+      delete merged.bannerOverlayText;
     }
     delete merged.bannerImage;
     delete merged.bannerAspect;
@@ -5366,10 +5377,13 @@ function syncTaskCycleEndTimeUI() {
 
   function getTaskBannerPreviewTaskStub() {
     const nameInput = bannerEl("nameInput");
+    const overlayInput = bannerEl("overlayTextInput");
     const label = (nameInput && nameInput.value.trim()) || "Task name";
+    const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
     return {
       label: label,
       bannerSourceImage: taskModal.bannerSource || null,
+      bannerOverlayText: overlayText || undefined,
       bannerViews: {
         home: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.home, TASK_BANNER_TARGETS.home.aspect),
         games: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.games, TASK_BANNER_TARGETS.games.aspect),
@@ -5572,16 +5586,7 @@ function syncTaskCycleEndTimeUI() {
   async function setTaskBannerFromFile(file) {
     try {
       const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: 1400, quality: 0.92 });
-      let source = dataUrl;
-      if (typeof addUserImage === "function") {
-        const base = (file && file.name ? String(file.name).replace(/\.[^.]+$/, "") : "") || "Banner";
-        const entry = addUserImage({ kind: "banner", label: base, dataUrl: dataUrl });
-        if (entry && entry.id && typeof makeUserImageRef === "function") {
-          source = makeUserImageRef(entry.id);
-          if (typeof save === "function") save();
-        }
-      }
-      await loadTaskBannerSourceFromUrl(source);
+      await loadTaskBannerSourceFromUrl(dataUrl);
     } catch (err) {
       alert((err && err.message) || "Could not use that image.");
     }
@@ -5679,7 +5684,7 @@ function syncTaskCycleEndTimeUI() {
     } else {
       const hint = document.createElement("p");
       hint.className = "settings-hint";
-      hint.textContent = "No personal images yet — upload from Settings → My Images, or Choose image (banners save to My Images automatically).";
+      hint.textContent = "No personal images yet — upload from Settings → My Images, or use Save to My Images after choosing a banner.";
       host.appendChild(hint);
     }
 
@@ -6191,6 +6196,7 @@ function syncTaskCycleEndTimeUI() {
       const imgFrame = bannerEl("imgFrame");
       const cropFrame = bannerEl("cropFrame");
       const nameInput = bannerEl("nameInput");
+      const overlayTextInput = bannerEl("overlayTextInput");
       const root = bannerRootEl();
       setActiveBannerUi(prev);
       if (!fileInput || !root) return;
@@ -6283,6 +6289,8 @@ function syncTaskCycleEndTimeUI() {
           taskModal.bannerSource = null;
           taskModal.bannerViews = emptyTaskBannerViews();
           taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+          const overlayInput = bannerEl("overlayTextInput");
+          if (overlayInput) overlayInput.value = "";
           resizeTaskBannerCropStage();
           drawTaskBannerCrop();
           syncTaskBannerPreview();
@@ -6292,6 +6300,13 @@ function syncTaskCycleEndTimeUI() {
 
       if (nameInput) {
         nameInput.addEventListener("input", () => {
+          if (activeBannerUiKey !== uiKey) return;
+          if (taskModal.bannerSource) syncTaskBannerPreview();
+        });
+      }
+
+      if (overlayTextInput) {
+        overlayTextInput.addEventListener("input", () => {
           if (activeBannerUiKey !== uiKey) return;
           if (taskModal.bannerSource) syncTaskBannerPreview();
         });
