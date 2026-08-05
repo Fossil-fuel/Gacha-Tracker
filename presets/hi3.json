@@ -3,7 +3,6 @@
   "name": "Honkai Impact 3rd",
   "server": "america",
   "resetHour": 4,
-  "resetMinute": 0,
   "dailies": true,
   "dailyCurrency": 40,
   "currencyPerPull": 280,
@@ -16,11 +15,11 @@
       "weekStartHour": 4,
       "weekStartMinute": 0,
       "currency": 30,
+      "dateStarted": "2026-03-10",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
       "timeLimitEvery": 1,
       "timeLimitUnit": "week",
-      "dateStarted": "2026-03-10",
       "adjustForDST": true
     },
     {
@@ -30,12 +29,15 @@
       "weekStartHour": 4,
       "weekStartMinute": 0,
       "currency": 500,
+      "dateStarted": "2026-03-10",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
       "timeLimitEvery": 1,
       "timeLimitUnit": "week",
-      "dateStarted": "2026-03-10",
-      "adjustForDST": true
+      "adjustForDST": true,
+      "earliestCompleteDays": 0,
+      "earliestCompleteHour": 10,
+      "earliestCompleteMinute": 0
     },
     {
       "id": "armata_contribution",
@@ -44,56 +46,65 @@
       "weekStartHour": 4,
       "weekStartMinute": 0,
       "currency": 25,
+      "dateStarted": "2026-03-10",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
       "timeLimitEvery": 1,
       "timeLimitUnit": "week",
-      "dateStarted": "2026-03-10",
-      "adjustForDST": true
+      "adjustForDST": true,
+      "countFromDateStarted": true
     }
   ],
   "endgame": [
     {
       "id": "memorial_arena",
       "label": "Memorial Arena",
-      "currency": 140,
       "weekStartDay": 2,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 140,
       "dateStarted": "2026-03-10",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
       "timeLimitEvery": 6,
       "timeLimitUnit": "day",
-      "adjustForDST": true
+      "adjustForDST": true,
+      "earliestCompleteDays": 2
     },
     {
       "id": "superstring_p1",
       "label": "Superstring Dimension P1",
-      "currency": 520,
       "weekStartDay": 1,
-      "weekStartHour": 20,
+      "weekStartHour": 15,
       "weekStartMinute": 0,
-      "dateStarted": "2026-03-23",
+      "currency": 520,
+      "dateStarted": "2026-03-10",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
       "timeLimitEvery": 2,
       "timeLimitUnit": "day",
-      "adjustForDST": true
+      "adjustForDST": true,
+      "cycleEndTimeSameAsBegin": false,
+      "cycleEndHour": 22,
+      "cycleEndMinute": 0
     },
     {
       "id": "superstring_p2",
       "label": "Superstring Dimension P2",
-      "currency": 520,
       "weekStartDay": 5,
-      "weekStartHour": 20,
+      "weekStartHour": 15,
       "weekStartMinute": 0,
+      "currency": 520,
       "dateStarted": "2026-03-06",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
       "timeLimitEvery": 2,
       "timeLimitUnit": "day",
-      "adjustForDST": true
+      "adjustForDST": true,
+      "cycleEndTimeSameAsBegin": false,
+      "cycleEndHour": 22,
+      "cycleEndMinute": 0
     }
-  ]
+  ],
+  "iconStockId": "pfp-hi3rd-official"
 }

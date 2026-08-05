@@ -1002,17 +1002,24 @@
     parent.appendChild(maxSpan);
   }
 
-  function createTaskCurrencyInfoIcon(taskType) {
+  function createTaskOptionInfoIcon(title) {
     const infoIcon = document.createElement("span");
     infoIcon.className = "currency-info-icon";
     infoIcon.setAttribute("aria-label", "More information");
     infoIcon.textContent = "ⓘ";
-    if (taskType === "endgame") {
-      infoIcon.title = "Maximum currency earnable per cycle. Changing this only affects new cycles—the max for past cycles is saved when each cycle is attempted or completed, so your Data page history stays accurate.";
-    } else {
-      infoIcon.title = "Maximum currency earnable when this weekly is completed. Changing this updates the potential cap shown on the Data page for all cycles.";
-    }
+    if (title) infoIcon.title = title;
     return infoIcon;
+  }
+
+  function createTaskCurrencyInfoIcon(taskType) {
+    if (taskType === "endgame") {
+      return createTaskOptionInfoIcon(
+        "Maximum currency earnable per cycle. Changing this only affects new cycles—the max for past cycles is saved when each cycle is attempted or completed, so your Data page history stays accurate."
+      );
+    }
+    return createTaskOptionInfoIcon(
+      "Maximum currency earnable when this weekly is completed. Changing this updates the potential cap shown on the Data page for all cycles."
+    );
   }
 
   function setEarningsModalSkippedLayout(hasSkipped) {
@@ -1724,8 +1731,6 @@
         timeLimitEvery: Math.max(1, Number(limEvery && limEvery.value) || 1),
         timeLimitUnit: taskModal.timeLimitUnit || "week",
         adjustForDST: dstToggle ? dstToggle.checked : true,
-        cycleEndEnabled: !!(qs("taskCycleEndEnabled") && qs("taskCycleEndEnabled").checked),
-        cycleEndDate: qs("taskCycleEndDate") && qs("taskCycleEndDate").value ? qs("taskCycleEndDate").value : null,
         manualReset: !!(manualResetToggle && manualResetToggle.checked),
       },
       readCycleEndTimeFieldsFromModal(hour, minute)
@@ -1733,42 +1738,65 @@
   }
 
   function updateTaskCycleEndPreview() {
-    const preview = qs("taskCycleEndPreview");
-    const dateInput = qs("taskCycleEndDate");
-    const toggle = qs("taskCycleEndEnabled");
-    if (!preview || !dateInput || !toggle) return;
-    if (!toggle.checked) {
-      preview.textContent = "";
-      preview.hidden = true;
-      return;
-    }
-    const endDate = dateInput.value;
-    if (!isValidDateStr(endDate)) {
-      preview.textContent = "Pick a date for the final cycle.";
-      preview.hidden = false;
-      return;
-    }
-    const game = taskModal.gameId ? getGame(taskModal.gameId) : null;
-    const tempTask = buildTempTaskFromModal();
-    tempTask.cycleEndDate = endDate;
-    tempTask.cycleEndEnabled = true;
-    const bounds = getLastCycleBounds(tempTask, game);
-    if (!bounds) {
-      preview.textContent = "";
-      preview.hidden = true;
-      return;
-    }
-    const startDate = new Date(bounds.startStr + "T12:00:00");
-    const endDayDate = new Date(bounds.endStr + "T12:00:00");
-    preview.textContent = "Final cycle: " + formatDate(startDate) + " – " + formatDate(endDayDate);
-    preview.hidden = false;
+    // Stop-cycle preview removed from task menu; keep no-op for legacy callers.
   }
 
-  function setTaskCycleEndFieldsVisible(show) {
-    const dateInput = qs("taskCycleEndDate");
-    const wrap = qs("taskCycleEndDateWrap");
-    if (dateInput) dateInput.disabled = !show;
-    if (wrap) wrap.classList.toggle("task-cycle-end-disabled", !show);
+  function setTaskCycleEndFieldsVisible() {
+    // Stop-cycle fields removed from task menu; keep no-op for legacy callers.
+  }
+
+  function setTaskMenuSectionExpanded(toggleBtn, bodyEl, expanded) {
+    if (!toggleBtn || !bodyEl) return;
+    const open = !!expanded;
+    toggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    toggleBtn.classList.toggle("is-expanded", open);
+    bodyEl.hidden = !open;
+  }
+
+  const TASK_BANNER_SECTION_PREF_KEY = "gacha.taskBannerSectionExpanded";
+
+  function getTaskBannerSectionPreferExpanded() {
+    try {
+      const raw = localStorage.getItem(TASK_BANNER_SECTION_PREF_KEY);
+      if (raw === "1") return true;
+      if (raw === "0") return false;
+    } catch (_) {}
+    return null;
+  }
+
+  function setTaskBannerSectionPreferExpanded(expanded) {
+    try {
+      localStorage.setItem(TASK_BANNER_SECTION_PREF_KEY, expanded ? "1" : "0");
+    } catch (_) {}
+  }
+
+  /** Expand Card banners only until a banner image exists (or user collapsed it themselves). */
+  function syncTaskBannerSectionOpenState(task) {
+    const toggleBtn = qs("taskBannerSectionToggle");
+    const bodyEl = qs("taskBannerSectionBody");
+    const hasImage = !!(task && typeof resolveTaskBannerSource === "function" && resolveTaskBannerSource(task))
+      || !!(taskModal && taskModal.bannerSource);
+    const pref = getTaskBannerSectionPreferExpanded();
+    let expanded;
+    if (hasImage) {
+      // After first saved/used image: keep collapsed unless the user explicitly prefers open.
+      expanded = pref === true;
+    } else if (pref == null) {
+      expanded = true;
+    } else {
+      expanded = pref;
+    }
+    setTaskMenuSectionExpanded(toggleBtn, bodyEl, expanded);
+  }
+
+  function syncTaskModalManualResetUI() {
+    const manualToggle = qs("taskManualReset");
+    const manual = !!(manualToggle && manualToggle.checked);
+    document.querySelectorAll(".task-menu-scheduled-only").forEach((el) => {
+      el.hidden = manual;
+      if (manual) el.setAttribute("aria-hidden", "true");
+      else el.removeAttribute("aria-hidden");
+    });
   }
 
   function updateUnitToggles(kind, unit) {
@@ -1834,27 +1862,48 @@
       const rowCountFrom = document.createElement("div");
       rowCountFrom.className = "task-menu-extra-row task-cycle-end-row";
       const countFromLabel = document.createElement("label");
-      countFromLabel.className = "task-cycle-end-toggle-label";
+      countFromLabel.setAttribute("for", "taskCountFromDateStarted");
+      countFromLabel.textContent = "Count from cycle start date (even if incomplete)";
+      countFromLabel.appendChild(
+        createTaskOptionInfoIcon(
+          "When on, completed/attempted tallies start at the cycle start date above, including skipped cycles before the first calendar completion."
+        )
+      );
       const countFromToggle = document.createElement("input");
       countFromToggle.type = "checkbox";
       countFromToggle.id = "taskCountFromDateStarted";
-      countFromToggle.className = "fill-toggle";
+      countFromToggle.className = "settings-toggle";
       countFromToggle.checked = !!(task && task.countFromDateStarted);
       countFromToggle.setAttribute("aria-label", "Count from cycle start date even without a completion");
-      const countFromText = document.createElement("span");
-      countFromText.textContent = "Count from cycle start date (even if incomplete)";
-      countFromLabel.appendChild(countFromToggle);
-      countFromLabel.appendChild(countFromText);
-      countFromLabel.title = "When on, completed/attempted tallies start at the cycle start date above, including skipped cycles before the first calendar completion.";
       rowCountFrom.appendChild(countFromLabel);
+      rowCountFrom.appendChild(countFromToggle);
       extra.appendChild(rowCountFrom);
+
+      const unlockSection = document.createElement("div");
+      unlockSection.className = "task-menu-section task-menu-extra-section";
+      unlockSection.dataset.section = "unlock";
+      const unlockToggle = document.createElement("button");
+      unlockToggle.type = "button";
+      unlockToggle.className = "task-menu-section-toggle";
+      unlockToggle.id = "taskUnlockSectionToggle";
+      unlockToggle.setAttribute("aria-expanded", "false");
+      unlockToggle.setAttribute("aria-controls", "taskUnlockSectionBody");
+      unlockToggle.innerHTML = "<span class=\"task-menu-section-title\">Unlock / earliest complete</span><span class=\"task-menu-section-chevron\" aria-hidden=\"true\"></span>";
+      const unlockBody = document.createElement("div");
+      unlockBody.id = "taskUnlockSectionBody";
+      unlockBody.className = "task-menu-section-body";
+      unlockBody.hidden = true;
 
       const rowUnlock = document.createElement("div");
       rowUnlock.className = "task-menu-extra-row";
       const labelUnlockDays = document.createElement("label");
       labelUnlockDays.textContent = "Earliest complete (days after reset)";
       labelUnlockDays.setAttribute("for", "taskEarliestCompleteDays");
-      labelUnlockDays.title = "How many days after the cycle reset before this task can be marked complete. 0 = same day as reset. Pain Cage uses 2 (day 3).";
+      labelUnlockDays.appendChild(
+        createTaskOptionInfoIcon(
+          "How many days after the cycle reset before this task can be marked complete. 0 = same day as reset. Pain Cage uses 2 (day 3)."
+        )
+      );
       const inputUnlockDays = document.createElement("input");
       inputUnlockDays.id = "taskEarliestCompleteDays";
       inputUnlockDays.type = "number";
@@ -1863,14 +1912,18 @@
       inputUnlockDays.value = String(Math.max(0, Number(task && task.earliestCompleteDays) || 0));
       rowUnlock.appendChild(labelUnlockDays);
       rowUnlock.appendChild(inputUnlockDays);
-      extra.appendChild(rowUnlock);
+      unlockBody.appendChild(rowUnlock);
 
       const rowUnlockTime = document.createElement("div");
       rowUnlockTime.className = "task-menu-extra-row";
       const labelUnlockTime = document.createElement("label");
       labelUnlockTime.textContent = "Unlock time on that day";
       labelUnlockTime.setAttribute("for", "taskEarliestCompleteTime");
-      labelUnlockTime.title = "Time on the unlock day when completion becomes allowed. Leave blank to use the task reset time.";
+      labelUnlockTime.appendChild(
+        createTaskOptionInfoIcon(
+          "Time on the unlock day when completion becomes allowed. Leave blank to use the task reset time."
+        )
+      );
       const inputUnlockTime = document.createElement("input");
       inputUnlockTime.id = "taskEarliestCompleteTime";
       inputUnlockTime.type = "time";
@@ -1883,10 +1936,22 @@
       }
       rowUnlockTime.appendChild(labelUnlockTime);
       rowUnlockTime.appendChild(inputUnlockTime);
-      extra.appendChild(rowUnlockTime);
+      unlockBody.appendChild(rowUnlockTime);
+
+      unlockToggle.addEventListener("click", () => {
+        const open = unlockToggle.getAttribute("aria-expanded") !== "true";
+        setTaskMenuSectionExpanded(unlockToggle, unlockBody, open);
+      });
+      const hasUnlock = !!(task && ((Number(task.earliestCompleteDays) || 0) > 0
+        || Number.isFinite(task.earliestCompleteHour)
+        || Number.isFinite(task.earliestCompleteMinute)));
+      setTaskMenuSectionExpanded(unlockToggle, unlockBody, hasUnlock);
+      unlockSection.appendChild(unlockToggle);
+      unlockSection.appendChild(unlockBody);
+      extra.appendChild(unlockSection);
 
       const rowRemaining = document.createElement("div");
-      rowRemaining.className = "task-menu-extra-row task-menu-time-remaining";
+      rowRemaining.className = "task-menu-extra-row task-menu-time-remaining task-menu-scheduled-only";
       const labelRem = document.createElement("label");
       labelRem.textContent = "Time remaining";
       labelRem.setAttribute("for", "taskTimeRemainingInput");
@@ -1914,59 +1979,12 @@
         }
       });
 
-      const rowStop = document.createElement("div");
-      rowStop.className = "task-menu-extra-row task-cycle-end-row";
-      const stopLabel = document.createElement("label");
-      stopLabel.className = "task-cycle-end-toggle-label";
-      const stopToggle = document.createElement("input");
-      stopToggle.type = "checkbox";
-      stopToggle.id = "taskCycleEndEnabled";
-      stopToggle.className = "fill-toggle";
-      stopToggle.checked = !!(task && task.cycleEndEnabled);
-      stopToggle.setAttribute("aria-label", "Stop repeating cycles");
-      const stopText = document.createElement("span");
-      stopText.textContent = "Stop repeating cycles";
-      stopLabel.appendChild(stopToggle);
-      stopLabel.appendChild(stopText);
-      rowStop.appendChild(stopLabel);
-      extra.appendChild(rowStop);
-
-      const rowEndDate = document.createElement("div");
-      rowEndDate.className = "task-menu-extra-row task-cycle-end-row";
-      rowEndDate.id = "taskCycleEndDateWrap";
-      const labelEnd = document.createElement("label");
-      labelEnd.textContent = "Last cycle ends";
-      labelEnd.setAttribute("for", "taskCycleEndDate");
-      const inputEnd = document.createElement("input");
-      inputEnd.id = "taskCycleEndDate";
-      inputEnd.type = "date";
-      inputEnd.value = isValidDateStr(task && task.cycleEndDate) ? task.cycleEndDate : getDateStr();
-      inputEnd.disabled = !stopToggle.checked;
-      rowEndDate.appendChild(labelEnd);
-      rowEndDate.appendChild(inputEnd);
-      extra.appendChild(rowEndDate);
-
-      const rowPreview = document.createElement("p");
-      rowPreview.id = "taskCycleEndPreview";
-      rowPreview.className = "task-menu-desc task-cycle-end-preview";
-      rowPreview.hidden = true;
-      extra.appendChild(rowPreview);
-
-      const onCycleEndChange = () => {
-        setTaskCycleEndFieldsVisible(stopToggle.checked);
-        if (stopToggle.checked && !isValidDateStr(inputEnd.value)) inputEnd.value = getDateStr();
-        updateTaskCycleEndPreview();
-        updateTaskTimeRemainingDisplay();
-      };
-      stopToggle.addEventListener("change", onCycleEndChange);
-      inputEnd.addEventListener("change", onCycleEndChange);
-      input2.addEventListener("change", () => { updateTaskCycleEndPreview(); updateTaskTimeRemainingDisplay(); });
+      input2.addEventListener("change", () => { updateTaskTimeRemainingDisplay(); });
       remainingInput.addEventListener("input", () => updateTaskTimeRemainingDisplay());
-      onCycleEndChange();
     }
   }
 
-  function syncTaskCycleEndTimeUI() {
+function syncTaskCycleEndTimeUI() {
     const sameToggle = qs("taskCycleEndTimeSameAsBegin");
     const endTime = qs("taskCycleEndTime");
     const beginTime = qs("taskResetTime");
@@ -2045,6 +2063,7 @@
     updateUnitToggles("timeLimit", lUnit);
 
     setExtraFields(taskType, task);
+    syncTaskModalManualResetUI();
     setActiveBannerUi("task");
     taskModal.bannerTarget = "board";
     const loaded = loadTaskBannersFromTask(task);
@@ -2054,6 +2073,7 @@
     resetTaskBannerCropState();
     syncTaskBannerTargetButtons();
     syncTaskBannerPreview();
+    syncTaskBannerSectionOpenState(task);
     setModalOpen(true);
     requestAnimationFrame(() => {
       resizeTaskBannerCropStage();
@@ -2112,10 +2132,83 @@
   function syncManualResetDueInputs() {
     const tbd = qs("manualResetDueTbd");
     const due = qs("manualResetDueDate");
+    const dueTime = qs("manualResetDueTime");
+    const remaining = qs("manualResetTimeRemainingInput");
     if (!due) return;
     const isTbd = !!(tbd && tbd.checked);
     due.disabled = isTbd;
     due.setAttribute("aria-disabled", isTbd ? "true" : "false");
+    if (dueTime) {
+      dueTime.disabled = isTbd;
+      dueTime.setAttribute("aria-disabled", isTbd ? "true" : "false");
+    }
+    if (remaining) {
+      remaining.disabled = isTbd;
+      remaining.setAttribute("aria-disabled", isTbd ? "true" : "false");
+      if (isTbd) {
+        remaining.value = "";
+        remaining.placeholder = "e.g. 6d 7hr";
+      }
+    }
+    if (!isTbd) updateManualResetTimeRemainingDisplay();
+  }
+
+  function getManualResetModalEndMoment() {
+    const dueInput = qs("manualResetDueDate");
+    const dueTime = qs("manualResetDueTime");
+    const tbd = qs("manualResetDueTbd");
+    if (tbd && tbd.checked) return null;
+    const dueStr = dueInput && dueInput.value ? dueInput.value.trim() : "";
+    if (!isValidDateStr(dueStr)) return null;
+    const timeParts = parseTimeStr((dueTime && dueTime.value) || "23:59");
+    const m = dueStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    return new Date(
+      parseInt(m[1], 10),
+      parseInt(m[2], 10) - 1,
+      parseInt(m[3], 10),
+      timeParts.hour,
+      timeParts.minute,
+      0
+    );
+  }
+
+  function updateManualResetTimeRemainingDisplay() {
+    const remaining = qs("manualResetTimeRemainingInput");
+    const tbd = qs("manualResetDueTbd");
+    if (!remaining) return;
+    if (tbd && tbd.checked) {
+      remaining.value = "";
+      remaining.placeholder = "e.g. 6d 7hr";
+      return;
+    }
+    const endMoment = getManualResetModalEndMoment();
+    if (!endMoment) {
+      remaining.value = "";
+      remaining.placeholder = "e.g. 6d 7hr";
+      return;
+    }
+    const ms = endMoment.getTime() - getSimulatedNow().getTime();
+    remaining.value = ms > 0 ? formatRemainingMs(ms) : "Not Available";
+  }
+
+  function applyManualResetTimeRemainingFromInput() {
+    const remaining = qs("manualResetTimeRemainingInput");
+    const dueInput = qs("manualResetDueDate");
+    const dueTime = qs("manualResetDueTime");
+    const tbd = qs("manualResetDueTbd");
+    if (!remaining || !dueInput) return;
+    if (tbd && tbd.checked) return;
+    const remainingMs = parseTimeRemainingToMs(remaining.value.trim());
+    if (remainingMs == null || remainingMs <= 0) return;
+    const endDate = new Date(getSimulatedNow().getTime() + remainingMs);
+    dueInput.value = getDateStr(endDate);
+    if (dueTime) dueTime.value = timeToStr(endDate.getHours(), endDate.getMinutes());
+    if (tbd) {
+      tbd.checked = false;
+      syncManualResetDueInputs();
+    }
+    remaining.value = formatRemainingMs(remainingMs);
   }
 
   function openManualResetModal(opts) {
@@ -2134,29 +2227,61 @@
 
     const title = qs("manualResetModalTitle");
     const desc = qs("manualResetModalDesc");
+    const startInput = qs("manualResetStartDate");
+    const startTime = qs("manualResetStartTime");
     const dueInput = qs("manualResetDueDate");
+    const dueTime = qs("manualResetDueTime");
     const tbdToggle = qs("manualResetDueTbd");
     const label = task.label || (manualResetModalState.taskType === "endgame" ? "Endgame" : "Weekly");
+    const now = getSimulatedNow();
 
+    const isEdit = manualResetModalState.reason === "edit";
     if (title) {
-      title.textContent = manualResetModalState.reason === "expiry"
-        ? "Cycle due — set next window"
-        : "Manual Reset / Start";
+      if (manualResetModalState.reason === "expiry") title.textContent = "Cycle due — set next window";
+      else if (isEdit) title.textContent = "Edit current window";
+      else title.textContent = "Manual Reset / Start";
     }
     if (desc) {
-      desc.textContent = manualResetModalState.reason === "expiry"
-        ? ("\"" + label + "\" is past due. Set the next due date, or TBD if you do not know yet.")
-        : ("Set when \"" + label + "\" is due, or leave TBD if you do not know yet.");
+      if (manualResetModalState.reason === "expiry") {
+        desc.textContent = ("\"" + label + "\" is past due. Set the next start and due time, or leave due TBD if you do not know yet.");
+      } else if (isEdit) {
+        desc.textContent = ("Edit the current window for \"" + label + "\". This does not archive the cycle or start a new one.");
+      } else {
+        desc.textContent = ("Set when \"" + label + "\" starts and when it is due, or leave due TBD if you do not know yet.");
+      }
+    }
+    const confirmBtnLabel = qs("manualResetModalConfirm");
+    if (confirmBtnLabel) confirmBtnLabel.textContent = isEdit ? "Save" : "Start";
+
+    if (startInput) {
+      startInput.value = isEdit && isValidDateStr(task.dateStarted) ? task.dateStarted : getDateStr(now);
+    }
+    if (startTime) {
+      if (isEdit && Number.isFinite(task.weekStartHour)) {
+        startTime.value = timeToStr(task.weekStartHour, Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0);
+      } else {
+        startTime.value = timeToStr(now.getHours(), now.getMinutes());
+      }
     }
 
     const hasDue = !task.manualDueTbd && isValidDateStr(task.manualDueDateStr);
-    if (tbdToggle) tbdToggle.checked = false;
+    if (tbdToggle) tbdToggle.checked = isEdit ? !!task.manualDueTbd : false;
     if (dueInput) {
-      dueInput.value = hasDue && manualResetModalState.reason === "reset"
-        ? task.manualDueDateStr
-        : getDateStr();
+      dueInput.value = hasDue ? task.manualDueDateStr : getDateStr(now);
+    }
+    if (dueTime) {
+      const dueH = Number.isFinite(task.manualDueHour)
+        ? task.manualDueHour
+        : (Number.isFinite(task.weekStartHour) ? task.weekStartHour : 23);
+      const dueM = Number.isFinite(task.manualDueMinute)
+        ? task.manualDueMinute
+        : (Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 59);
+      dueTime.value = hasDue
+        ? timeToStr(dueH, dueM)
+        : timeToStr(now.getHours(), now.getMinutes());
     }
     syncManualResetDueInputs();
+    updateManualResetTimeRemainingDisplay();
     setManualResetModalOpen(true);
   }
 
@@ -2181,22 +2306,54 @@
       return;
     }
     const tbdToggle = qs("manualResetDueTbd");
+    const startInput = qs("manualResetStartDate");
+    const startTimeEl = qs("manualResetStartTime");
     const dueInput = qs("manualResetDueDate");
+    const dueTimeEl = qs("manualResetDueTime");
     const tbd = !!(tbdToggle && tbdToggle.checked);
+    const startDateStr = startInput && isValidDateStr(startInput.value) ? startInput.value : getDateStr();
+    const startParts = parseTimeStr((startTimeEl && startTimeEl.value) || timeToStr(getSimulatedNow().getHours(), getSimulatedNow().getMinutes()));
     const dueDateStr = !tbd && dueInput && isValidDateStr(dueInput.value) ? dueInput.value : null;
+    const dueParts = parseTimeStr((dueTimeEl && dueTimeEl.value) || "23:59");
     if (!tbd && !dueDateStr) {
       if (dueInput) dueInput.focus();
       return;
     }
+    let startWeekday = 0;
+    if (isValidDateStr(startDateStr)) {
+      startWeekday = new Date(startDateStr + "T12:00:00").getDay();
+    }
 
-    startManualResetWindow(game, task, manualResetModalState.taskType, {
-      reason: manualResetModalState.reason,
-      tbd,
-      dueDateStr,
-      dateStarted: (manualResetModalState.reason === "create" && isValidDateStr(task.dateStarted))
-        ? task.dateStarted
-        : getDateStr(),
-    });
+    if (manualResetModalState.reason === "edit") {
+      task.dateStarted = startDateStr;
+      task.weekStartHour = startParts.hour;
+      task.weekStartMinute = startParts.minute;
+      task.weekStartDay = startWeekday;
+      if (tbd) {
+        task.manualDueTbd = true;
+        task.manualDueDateStr = null;
+        delete task.manualDueHour;
+        delete task.manualDueMinute;
+      } else {
+        task.manualDueTbd = false;
+        task.manualDueDateStr = dueDateStr;
+        task.manualDueHour = dueParts.hour;
+        task.manualDueMinute = dueParts.minute;
+      }
+      task.manualAwaitingRestart = false;
+    } else {
+      startManualResetWindow(game, task, manualResetModalState.taskType, {
+        reason: manualResetModalState.reason,
+        tbd,
+        dueDateStr,
+        dueHour: dueParts.hour,
+        dueMinute: dueParts.minute,
+        dateStarted: startDateStr,
+        startHour: startParts.hour,
+        startMinute: startParts.minute,
+        startWeekday: startWeekday,
+      });
+    }
     save();
     if (typeof bumpDataVersion === "function") bumpDataVersion();
     closeManualResetModal();
@@ -2211,7 +2368,7 @@
       : [];
     const task = list.find((t) => (t.id || t.label) === manualResetModalState.taskId);
     const reason = manualResetModalState.reason;
-    // Cancel on create/expiry = "don't know next cycle yet" (pin). Cancel on mid-cycle Reset aborts with no change.
+    // Cancel on create/expiry = "don't know next cycle yet" (pin). Cancel on mid-cycle Reset / edit aborts with no change.
     if (task && task.manualReset && (reason === "create" || reason === "expiry")) {
       task.manualAwaitingRestart = true;
       if (reason === "create" && !isValidDateStr(task.manualDueDateStr)) {
@@ -2233,6 +2390,8 @@
     const closeBtn = qs("manualResetModalClose");
     const tbdToggle = qs("manualResetDueTbd");
     const dueInput = qs("manualResetDueDate");
+    const dueTime = qs("manualResetDueTime");
+    const remaining = qs("manualResetTimeRemainingInput");
 
     modalEl.addEventListener("click", (e) => {
       const target = e.target;
@@ -2245,10 +2404,25 @@
     if (closeBtn) closeBtn.addEventListener("click", cancelManualResetModal);
     if (tbdToggle) tbdToggle.addEventListener("change", syncManualResetDueInputs);
     if (dueInput) {
+      dueInput.addEventListener("change", updateManualResetTimeRemainingDisplay);
+      dueInput.addEventListener("input", updateManualResetTimeRemainingDisplay);
       dueInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
           confirmManualResetModal();
+        }
+      });
+    }
+    if (dueTime) {
+      dueTime.addEventListener("change", updateManualResetTimeRemainingDisplay);
+      dueTime.addEventListener("input", updateManualResetTimeRemainingDisplay);
+    }
+    if (remaining) {
+      remaining.addEventListener("blur", applyManualResetTimeRemainingFromInput);
+      remaining.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          applyManualResetTimeRemainingFromInput();
         }
       });
     }
@@ -2261,9 +2435,354 @@
     });
   }
 
+  const manualCompletionModalState = {
+    open: false,
+    gameId: null,
+    taskType: null, // "dailies" | "weeklies" | "endgame"
+    taskId: null,
+  };
+
+  function setManualCompletionModalOpen(open) {
+    const el = qs("manualCompletionModal");
+    if (!el) return;
+    manualCompletionModalState.open = open;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) {
+      document.body.style.overflow = "hidden";
+      activateModalFocus(el);
+    } else {
+      const otherOpen = Array.from(document.querySelectorAll(".modal")).some((m) => m !== el && !m.hidden);
+      if (!otherOpen) document.body.style.overflow = "";
+      deactivateModalFocus();
+    }
+  }
+
+  function closeManualCompletionModal() {
+    setManualCompletionModalOpen(false);
+    manualCompletionModalState.gameId = null;
+    manualCompletionModalState.taskType = null;
+    manualCompletionModalState.taskId = null;
+    const conflict = qs("manualCompletionConflict");
+    if (conflict) {
+      conflict.hidden = true;
+      conflict.textContent = "";
+    }
+  }
+
+  function getManualCompletionTaskContext() {
+    const type = manualCompletionModalState.taskType;
+    const game = getGame(manualCompletionModalState.gameId);
+    if (!game || !type) return null;
+    if (type === "dailies") {
+      return { type, game, task: null, key: game.id, label: game.name || "Dailies", isManual: false };
+    }
+    const list = type === "endgame" ? (game.endgame || []) : (game.weeklies || []);
+    const task = list.find((t) => (t.id || t.label) === manualCompletionModalState.taskId);
+    if (!task) return null;
+    return {
+      type,
+      game,
+      task,
+      key: game.id + "." + (task.id || task.label),
+      label: task.label || manualCompletionModalState.taskId,
+      isManual: !!task.manualReset,
+    };
+  }
+
+  function readManualCompletionWindowFromForm() {
+    const startDateEl = qs("manualCompletionWindowStartDate");
+    const startTimeEl = qs("manualCompletionWindowStartTime");
+    const endDateEl = qs("manualCompletionWindowEndDate");
+    const endTimeEl = qs("manualCompletionWindowEndTime");
+    const startDateStr = startDateEl && isValidDateStr(startDateEl.value) ? startDateEl.value : null;
+    const endDateStr = endDateEl && isValidDateStr(endDateEl.value) ? endDateEl.value : null;
+    if (!startDateStr || !endDateStr) return null;
+    const startParts = parseTimeStr((startTimeEl && startTimeEl.value) || "04:00");
+    const endParts = parseTimeStr((endTimeEl && endTimeEl.value) || "23:59");
+    return {
+      startDateStr,
+      endDateStr,
+      startHour: startParts.hour,
+      startMinute: startParts.minute,
+      endHour: endParts.hour,
+      endMinute: endParts.minute,
+    };
+  }
+
+  function refreshManualCompletionConflictHint() {
+    const conflict = qs("manualCompletionConflict");
+    const dateInput = qs("manualCompletionDate");
+    if (!conflict) return;
+    const ctx = getManualCompletionTaskContext();
+    if (!ctx) {
+      conflict.hidden = true;
+      conflict.textContent = "";
+      return;
+    }
+    const dateStr = dateInput && isValidDateStr(dateInput.value) ? dateInput.value : null;
+    if (!dateStr) {
+      conflict.hidden = true;
+      conflict.textContent = "";
+      return;
+    }
+    let existing = null;
+    if (ctx.type === "dailies") {
+      const dayData = state.completionByDate[dateStr] || {};
+      if ((dayData.dailies || []).includes(ctx.key)) existing = dateStr;
+    } else if (ctx.isManual && typeof buildManualResetBoundsFromParts === "function") {
+      const win = readManualCompletionWindowFromForm();
+      if (win) {
+        const bounds = buildManualResetBoundsFromParts(ctx.task, ctx.game, ctx.type, win);
+        const hit = typeof findManualWindowCompletion === "function"
+          ? findManualWindowCompletion(ctx.key, ctx.type, ctx.task, bounds)
+          : { dateStr: null };
+        existing = hit && hit.dateStr ? hit.dateStr : null;
+      }
+    } else if (typeof getCycleCompletionDateStr === "function") {
+      existing = getCycleCompletionDateStr(ctx.type, ctx.key, dateStr);
+    }
+    if (existing) {
+      conflict.hidden = false;
+      conflict.textContent = "Conflict: a completion is already marked for this cycle on "
+        + formatDate(new Date(existing + "T12:00:00"))
+        + ". Adding will replace it.";
+    } else {
+      conflict.hidden = true;
+      conflict.textContent = "";
+    }
+  }
+
+  function openManualCompletionModal(opts) {
+    const o = opts || {};
+    const game = getGame(o.gameId);
+    if (!game) return;
+    const taskType = o.taskType === "endgame" || o.taskType === "dailies" ? o.taskType : "weeklies";
+    if (taskType !== "dailies") {
+      const list = taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []);
+      if (!list.find((t) => (t.id || t.label) === o.taskId)) return;
+    }
+    if (manualCompletionModalState.open || manualResetModalState.open) return;
+
+    manualCompletionModalState.gameId = o.gameId;
+    manualCompletionModalState.taskType = taskType;
+    manualCompletionModalState.taskId = o.taskId || null;
+
+    const ctx = getManualCompletionTaskContext();
+    if (!ctx) return;
+
+    const title = qs("manualCompletionModalTitle");
+    const desc = qs("manualCompletionModalDesc");
+    const windowFields = qs("manualCompletionWindowFields");
+    const startDate = qs("manualCompletionWindowStartDate");
+    const startTime = qs("manualCompletionWindowStartTime");
+    const endDate = qs("manualCompletionWindowEndDate");
+    const endTime = qs("manualCompletionWindowEndTime");
+    const dateInput = qs("manualCompletionDate");
+    const timeInput = qs("manualCompletionTime");
+    const currencyRow = qs("manualCompletionCurrencyRow");
+    const currencyInput = qs("manualCompletionCurrency");
+    const now = getSimulatedNow();
+
+    if (title) title.textContent = "Add completion";
+    if (desc) {
+      desc.textContent = ctx.isManual
+        ? ("Log a completion for \"" + ctx.label + "\". Set the cycle window (past or current) and when you finished. Past windows are saved to history without changing the live cycle.")
+        : ("Log a completion for \"" + ctx.label + "\". The cycle is inferred from the completion date.");
+    }
+    if (windowFields) windowFields.hidden = !ctx.isManual;
+    if (ctx.isManual && ctx.task) {
+      if (startDate) startDate.value = isValidDateStr(ctx.task.dateStarted) ? ctx.task.dateStarted : getDateStr(now);
+      if (startTime) {
+        startTime.value = timeToStr(
+          Number.isFinite(ctx.task.weekStartHour) ? ctx.task.weekStartHour : now.getHours(),
+          Number.isFinite(ctx.task.weekStartMinute) ? ctx.task.weekStartMinute : now.getMinutes()
+        );
+      }
+      if (endDate) {
+        endDate.value = (!ctx.task.manualDueTbd && isValidDateStr(ctx.task.manualDueDateStr))
+          ? ctx.task.manualDueDateStr
+          : getDateStr(now);
+      }
+      if (endTime) {
+        const eh = Number.isFinite(ctx.task.manualDueHour)
+          ? ctx.task.manualDueHour
+          : (Number.isFinite(ctx.task.weekStartHour) ? ctx.task.weekStartHour : 23);
+        const em = Number.isFinite(ctx.task.manualDueMinute)
+          ? ctx.task.manualDueMinute
+          : (Number.isFinite(ctx.task.weekStartMinute) ? ctx.task.weekStartMinute : 59);
+        endTime.value = timeToStr(eh, em);
+      }
+    }
+    if (dateInput) dateInput.value = getDateStr(now);
+    if (timeInput) timeInput.value = timeToStr(now.getHours(), now.getMinutes());
+    if (currencyRow) currencyRow.hidden = ctx.type !== "endgame";
+    if (currencyInput) {
+      const pot = ctx.task && typeof getEndgamePotential === "function" ? getEndgamePotential(ctx.task) : 0;
+      currencyInput.value = String(Math.max(0, pot || 0));
+    }
+    refreshManualCompletionConflictHint();
+    setManualCompletionModalOpen(true);
+  }
+
+  function confirmManualCompletionModal() {
+    const ctx = getManualCompletionTaskContext();
+    if (!ctx) {
+      closeManualCompletionModal();
+      return;
+    }
+    const dateInput = qs("manualCompletionDate");
+    const timeInput = qs("manualCompletionTime");
+    const dateStr = dateInput && isValidDateStr(dateInput.value) ? dateInput.value : null;
+    if (!dateStr) {
+      if (dateInput) dateInput.focus();
+      return;
+    }
+    const timeParts = parseTimeStr((timeInput && timeInput.value) || timeToStr(getSimulatedNow().getHours(), getSimulatedNow().getMinutes()));
+
+    // Manual-reset: go through applyManualResetCompletion so calendar / tallies / trends / closed cycles stay consistent.
+    if (ctx.isManual && ctx.task) {
+      const win = readManualCompletionWindowFromForm();
+      if (!win) {
+        alert("Manual-reset tasks need both cycle start and end dates.");
+        return;
+      }
+      const currencyInput = qs("manualCompletionCurrency");
+      const baseOpts = {
+        dateStr,
+        hour: timeParts.hour,
+        minute: timeParts.minute,
+        startDateStr: win.startDateStr,
+        endDateStr: win.endDateStr,
+        startHour: win.startHour,
+        startMinute: win.startMinute,
+        endHour: win.endHour,
+        endMinute: win.endMinute,
+        currencyValue: ctx.type === "endgame" && currencyInput
+          ? Math.max(0, Number(currencyInput.value) || 0)
+          : undefined,
+        replace: false,
+      };
+      if (typeof applyManualResetCompletion !== "function") {
+        alert("Manual completion is unavailable.");
+        return;
+      }
+      let result = applyManualResetCompletion(ctx.game, ctx.task, ctx.type, baseOpts);
+      if (result && result.reason === "conflict") {
+        const msg = "A completion already exists for this cycle"
+          + (result.conflictDateStr
+            ? (" on " + formatDate(new Date(result.conflictDateStr + "T12:00:00")))
+            : "")
+          + ".\n\nReplace it with this new completion?";
+        if (!window.confirm(msg)) return;
+        result = applyManualResetCompletion(ctx.game, ctx.task, ctx.type, Object.assign({}, baseOpts, { replace: true }));
+      }
+      if (result && !result.ok && result.reason && result.reason !== "conflict") {
+        alert(result.reason);
+        return;
+      }
+      if (!result || !result.ok) return;
+      closeManualCompletionModal();
+      return;
+    }
+
+    // Normal dailies / scheduled weeklies / endgame: infer cycle from completion date.
+    let existing = null;
+    if (ctx.type === "dailies") {
+      const dayData = state.completionByDate[dateStr] || {};
+      if ((dayData.dailies || []).includes(ctx.key)) existing = dateStr;
+    } else if (typeof getCycleCompletionDateStr === "function") {
+      existing = getCycleCompletionDateStr(ctx.type, ctx.key, dateStr);
+    }
+
+    if (ctx.type !== "dailies" && ctx.task && typeof getCycleBoundsForTaskType === "function") {
+      const bounds = getCycleBoundsForTaskType(ctx.type, ctx.task, new Date(dateStr + "T12:00:00"), ctx.game);
+      if (!bounds) {
+        alert("That completion date is outside this task's cycles.");
+        return;
+      }
+      const completeMs = new Date(
+        dateStr + "T" + String(timeParts.hour).padStart(2, "0") + ":" + String(timeParts.minute).padStart(2, "0") + ":00"
+      ).getTime();
+      if (completeMs < bounds.cycleStart.getTime() || completeMs >= bounds.cycleEnd.getTime()) {
+        alert("Completion time must fall inside the cycle that contains that date.");
+        return;
+      }
+    }
+
+    if (existing) {
+      const msg = "A completion already exists for this cycle on "
+        + formatDate(new Date(existing + "T12:00:00"))
+        + ".\n\nReplace it with this new completion?";
+      if (!window.confirm(msg)) return;
+      removeTaskCompletion(ctx.type, ctx.key, {
+        dateStr: existing,
+        skipUnlockGate: true,
+        recordUndo: false,
+        save: false,
+        render: false,
+        processResets: false,
+      });
+    }
+
+    const opts = {
+      dateStr,
+      hour: timeParts.hour,
+      minute: timeParts.minute,
+      skipUnlockGate: true,
+    };
+    if (ctx.type === "endgame") {
+      const currencyInput = qs("manualCompletionCurrency");
+      if (currencyInput) opts.currencyValue = Math.max(0, Number(currencyInput.value) || 0);
+    }
+    const result = applyTaskCompletion(ctx.type, ctx.key, opts);
+    if (result && !result.ok && result.reason) {
+      alert(result.reason);
+      return;
+    }
+    closeManualCompletionModal();
+  }
+
+  function initManualCompletionModal() {
+    const modalEl = qs("manualCompletionModal");
+    if (!modalEl) return;
+    const confirmBtn = qs("manualCompletionModalConfirm");
+    const cancelBtn = qs("manualCompletionModalCancel");
+    const closeBtn = qs("manualCompletionModalClose");
+    const dateInput = qs("manualCompletionDate");
+
+    modalEl.addEventListener("click", (e) => {
+      const target = e.target;
+      if (target && target.getAttribute && target.getAttribute("data-close") === "manualCompletionModal") {
+        closeManualCompletionModal();
+      }
+    });
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmManualCompletionModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeManualCompletionModal);
+    if (closeBtn) closeBtn.addEventListener("click", closeManualCompletionModal);
+    if (dateInput) {
+      dateInput.addEventListener("change", refreshManualCompletionConflictHint);
+      dateInput.addEventListener("input", refreshManualCompletionConflictHint);
+    }
+    ["manualCompletionWindowStartDate", "manualCompletionWindowEndDate", "manualCompletionWindowStartTime", "manualCompletionWindowEndTime", "manualCompletionTime"].forEach((id) => {
+      const el = qs(id);
+      if (el) {
+        el.addEventListener("change", refreshManualCompletionConflictHint);
+        el.addEventListener("input", refreshManualCompletionConflictHint);
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!manualCompletionModalState.open) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeManualCompletionModal();
+      }
+    });
+  }
+
   /** Scan for expired manual-reset due windows and open the start popup (once per task). */
   function checkManualResetExpiries() {
-    if (manualResetModalState.open) return false;
+    if (manualResetModalState.open || manualCompletionModalState.open) return false;
     const now = getSimulatedNow();
     const games = typeof getAllGames === "function" ? getAllGames() : (state.games || []);
     for (let gi = 0; gi < games.length; gi++) {
@@ -2297,6 +2816,40 @@
     return GAME_PRESETS.find((p) => p.id === presetId) || null;
   }
 
+  function decorateGameAddPresetIcons() {
+    document.querySelectorAll(".game-add-options .game-add-option").forEach((btn) => {
+      const presetId = btn.getAttribute("data-preset") || "custom";
+      if (presetId === "custom") return;
+      const preset = getPreset(presetId);
+      const iconPath =
+        typeof resolvePresetIconPath === "function"
+          ? resolvePresetIconPath(preset || { id: presetId, presetId })
+          : null;
+      if (!iconPath) return;
+      const url = typeof resolveStockBannerUrl === "function" ? resolveStockBannerUrl(iconPath) : iconPath;
+      let iconEl = btn.querySelector(".game-add-option-icon");
+      if (!iconEl) {
+        iconEl = document.createElement("img");
+        iconEl.className = "game-add-option-icon";
+        iconEl.alt = "";
+        iconEl.setAttribute("aria-hidden", "true");
+        btn.insertBefore(iconEl, btn.firstChild);
+      }
+      if (iconEl.tagName === "IMG") {
+        iconEl.src = url;
+        iconEl.classList.remove("game-add-option-icon-placeholder");
+      } else {
+        const img = document.createElement("img");
+        img.className = "game-add-option-icon";
+        img.src = url;
+        img.alt = "";
+        img.setAttribute("aria-hidden", "true");
+        img.draggable = false;
+        iconEl.replaceWith(img);
+      }
+    });
+  }
+
   function updatePresetButtons(selectedId) {
     document.querySelectorAll(".game-add-options .game-add-option").forEach((btn) => {
       const id = btn.getAttribute("data-preset");
@@ -2309,6 +2862,7 @@
   function openGameModal() {
     gameModal.selectedPresetId = "custom";
     updatePresetButtons("custom");
+    decorateGameAddPresetIcons();
     const nameInput = qs("gameNameInput");
     if (nameInput) nameInput.value = "";
     setGameModalOpen(true);
@@ -3522,6 +4076,8 @@
   const shareCardSelected = new Set();
   /** Once the user Clears or toggles pills, empty selection must stay empty (do not re-select all). */
   let shareCardSelectionTouched = false;
+  /** @type {Record<string, string>} gameId -> banner source | "none" */
+  const shareCardHeroByGame = Object.create(null);
 
   function syncShareCardCustomRow() {
     const daysEl = qs("settingsShareCardDays");
@@ -3545,6 +4101,85 @@
     }
   }
 
+  function renderShareCardHeroPickers() {
+    const host = qs("settingsShareCardHeroPick");
+    const hint = qs("settingsShareCardHeroHint");
+    if (!host) return;
+    host.innerHTML = "";
+    const games = (typeof getAllGames === "function" ? getAllGames() : []).filter((g) =>
+      shareCardSelected.has(g.id)
+    );
+    let anyChoices = false;
+    games.forEach((game) => {
+      const choices =
+        typeof collectShareCardBannerChoices === "function"
+          ? collectShareCardBannerChoices(game)
+          : [];
+      if (!choices.length) {
+        if (shareCardHeroByGame[game.id] && shareCardHeroByGame[game.id] !== "none") {
+          delete shareCardHeroByGame[game.id];
+        }
+        return;
+      }
+      anyChoices = true;
+      if (shareCardHeroByGame[game.id] == null) {
+        shareCardHeroByGame[game.id] = choices[0].source;
+      }
+      const block = document.createElement("div");
+      block.className = "settings-share-card-hero-game";
+      const title = document.createElement("div");
+      title.className = "settings-share-card-hero-game-title";
+      title.textContent = (game.name || "Game") + " — hero banner";
+      const row = document.createElement("div");
+      row.className = "settings-share-card-hero-row";
+      row.setAttribute("role", "group");
+      row.setAttribute("aria-label", "Hero banner for " + (game.name || "game"));
+
+      function addThumb(label, source, kind) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "settings-share-card-hero-thumb";
+        const selected =
+          source === "none"
+            ? shareCardHeroByGame[game.id] === "none"
+            : shareCardHeroByGame[game.id] === source;
+        btn.setAttribute("aria-pressed", selected ? "true" : "false");
+        if (selected) btn.classList.add("is-selected");
+        btn.title = label;
+        if (source === "none") {
+          btn.classList.add("is-none");
+          btn.textContent = "None";
+        } else {
+          const img = document.createElement("img");
+          img.alt = "";
+          img.loading = "lazy";
+          img.src =
+            typeof resolveStockBannerUrl === "function"
+              ? resolveStockBannerUrl(source)
+              : source;
+          const cap = document.createElement("span");
+          cap.textContent = label;
+          btn.appendChild(img);
+          btn.appendChild(cap);
+          if (kind) btn.dataset.kind = kind;
+        }
+        btn.addEventListener("click", () => {
+          shareCardHeroByGame[game.id] = source;
+          renderShareCardHeroPickers();
+        });
+        row.appendChild(btn);
+      }
+
+      addThumb("None", "none");
+      choices.forEach((c) => addThumb(c.label, c.source, c.kind));
+      block.appendChild(title);
+      block.appendChild(row);
+      host.appendChild(block);
+    });
+    host.hidden = !anyChoices;
+    if (hint) hint.hidden = !anyChoices;
+  }
+
   function renderShareCardGamePills() {
     const wrap = qs("settingsShareCardGames");
     if (!wrap) return;
@@ -3557,12 +4192,16 @@
     Array.from(shareCardSelected).forEach((id) => {
       if (!games.some((g) => g.id === id)) shareCardSelected.delete(id);
     });
+    Object.keys(shareCardHeroByGame).forEach((id) => {
+      if (!shareCardSelected.has(id)) delete shareCardHeroByGame[id];
+    });
     wrap.innerHTML = "";
     if (!games.length) {
       const p = document.createElement("p");
       p.className = "settings-hint";
       p.textContent = "No games yet. Add one in Games first.";
       wrap.appendChild(p);
+      renderShareCardHeroPickers();
       return;
     }
     games.forEach((game) => {
@@ -3581,12 +4220,16 @@
       });
       wrap.appendChild(btn);
     });
+    renderShareCardHeroPickers();
   }
 
   function getShareCardExportOpts() {
     const daysEl = qs("settingsShareCardDays");
     const mode = daysEl ? daysEl.value : "90";
-    const opts = { gameIds: Array.from(shareCardSelected) };
+    const opts = {
+      gameIds: Array.from(shareCardSelected),
+      heroByGameId: Object.assign({}, shareCardHeroByGame),
+    };
     if (mode === "custom") {
       const startEl = qs("settingsShareCardStart");
       const endEl = qs("settingsShareCardEnd");
@@ -3681,6 +4324,7 @@
       syncSettingsSectionDropdown(section);
       setSettingsSectionDropdownOpen(false);
       if (section === "stock-assets") fillSettingsStockAssetsGallery();
+      if (section === "my-images") fillSettingsMyImagesGallery();
     }
 
     document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((btn) => {
@@ -3797,6 +4441,41 @@
       save();
     });
 
+    let myImagesUploadKind = "banner";
+    const myImagesFile = qs("settingsMyImagesFile");
+    const myImagesBannerBtn = qs("settingsMyImagesUploadBannerBtn");
+    const myImagesPfpBtn = qs("settingsMyImagesUploadPfpBtn");
+    if (myImagesBannerBtn && myImagesFile) {
+      myImagesBannerBtn.addEventListener("click", () => {
+        myImagesUploadKind = "banner";
+        myImagesFile.click();
+      });
+    }
+    if (myImagesPfpBtn && myImagesFile) {
+      myImagesPfpBtn.addEventListener("click", () => {
+        myImagesUploadKind = "pfp";
+        myImagesFile.click();
+      });
+    }
+    if (myImagesFile) {
+      myImagesFile.addEventListener("change", async () => {
+        const file = myImagesFile.files && myImagesFile.files[0];
+        myImagesFile.value = "";
+        if (!file) return;
+        try {
+          const maxW = myImagesUploadKind === "pfp" ? 1200 : 1400;
+          const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: maxW, quality: 0.92 });
+          const base = (file.name ? String(file.name).replace(/\.[^.]+$/, "") : "") || (myImagesUploadKind === "pfp" ? "Profile" : "Banner");
+          const entry = addUserImage({ kind: myImagesUploadKind, label: base, dataUrl: dataUrl });
+          if (!entry) throw new Error("Could not add image.");
+          save();
+          fillSettingsMyImagesGallery();
+        } catch (err) {
+          alert((err && err.message) || "Could not add that image.");
+        }
+      });
+    }
+
     const exportBtn = qs("settingsExportBtn");
     if (exportBtn) exportBtn.addEventListener("click", () => {
       // Ensure debounced edits are flushed, then export the in-memory full payload (includes images).
@@ -3826,6 +4505,18 @@
       downloadTextFile("gacha-tracker-completions-" + new Date().toISOString().slice(0, 10) + ".csv", csv, "text/csv;charset=utf-8");
     });
 
+    function bindSettingsCollapseToggle(toggleId, bodyId) {
+      const toggleBtn = qs(toggleId);
+      const bodyEl = qs(bodyId);
+      if (!toggleBtn || !bodyEl) return;
+      toggleBtn.addEventListener("click", () => {
+        const open = toggleBtn.getAttribute("aria-expanded") !== "true";
+        setTaskMenuSectionExpanded(toggleBtn, bodyEl, open);
+      });
+    }
+    bindSettingsCollapseToggle("settingsShareCardToggle", "settingsShareCardBody");
+    bindSettingsCollapseToggle("settingsSimulatedToggle", "settingsSimulatedBody");
+
     const shareDaysEl = qs("settingsShareCardDays");
     if (shareDaysEl) shareDaysEl.addEventListener("change", syncShareCardCustomRow);
     const shareAllBtn = qs("settingsShareCardSelectAllBtn");
@@ -3843,16 +4534,22 @@
       renderShareCardGamePills();
     });
     const shareExportBtn = qs("settingsShareCardExportBtn");
-    if (shareExportBtn) shareExportBtn.addEventListener("click", () => {
-      if (typeof downloadShareCardPng !== "function") {
-        alert("Share card export is unavailable.");
-        return;
-      }
-      const result = downloadShareCardPng(getShareCardExportOpts());
-      if (!result.ok) alert(result.reason || "Could not export share card.");
-    });
+    if (shareExportBtn) {
+      shareExportBtn.addEventListener("click", async () => {
+        if (typeof downloadShareCardPng !== "function") {
+          alert("Share card export is unavailable.");
+          return;
+        }
+        try {
+          const result = await downloadShareCardPng(getShareCardExportOpts());
+          if (!result.ok) alert(result.reason || "Could not export share card.");
+        } catch (err) {
+          alert((err && err.message) || "Could not export share card.");
+        }
+      });
+    }
 
-    function updateShareCardPreview() {
+    async function updateShareCardPreview() {
       const wrap = qs("settingsShareCardPreview");
       const img = qs("settingsShareCardPreviewImg");
       const meta = qs("settingsShareCardPreviewMeta");
@@ -3869,7 +4566,15 @@
         if (meta) meta.textContent = model.reason || "Nothing to preview.";
         return;
       }
-      const rendered = renderShareCardCanvas(model);
+      let rendered;
+      try {
+        rendered = await renderShareCardCanvas(model);
+      } catch (err) {
+        wrap.hidden = false;
+        img.removeAttribute("src");
+        if (meta) meta.textContent = (err && err.message) || "Could not render preview.";
+        return;
+      }
       if (!rendered.ok) {
         wrap.hidden = false;
         img.removeAttribute("src");
@@ -3891,7 +4596,9 @@
     }
 
     const sharePreviewBtn = qs("settingsShareCardPreviewBtn");
-    if (sharePreviewBtn) sharePreviewBtn.addEventListener("click", () => updateShareCardPreview());
+    if (sharePreviewBtn) sharePreviewBtn.addEventListener("click", () => {
+      updateShareCardPreview();
+    });
 
     const undoCompletionBtn = qs("settingsUndoCompletionBtn");
     if (undoCompletionBtn) undoCompletionBtn.addEventListener("click", () => {
@@ -4611,7 +5318,14 @@
       taskModal.bannerViews = emptyTaskBannerViews();
       taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     } else {
-      taskModal.bannerSource = taskBannerCrop.sourceImg.src || taskModal.bannerSource;
+      // Keep stock paths / userimg: refs; only adopt img.src for raw data/blob uploads.
+      const prev = String(taskModal.bannerSource || "");
+      const isRef =
+        (typeof isUserImageRef === "function" && isUserImageRef(prev)) ||
+        (/^assets\//i.test(prev) && prev.indexOf("data:") !== 0);
+      if (!isRef) {
+        taskModal.bannerSource = taskBannerCrop.sourceImg.src || taskModal.bannerSource;
+      }
       const view = captureBannerViewFromStage();
       if (key === "home" || key === "games") {
         view.aspect = TASK_BANNER_TARGETS[key].aspect;
@@ -4733,8 +5447,15 @@
     const wrap = bannerEl("previewWrap");
     const cardHost = bannerEl("cardPreview");
     const clearBtn = bannerEl("clearBtn");
+    const saveLibBtn = bannerEl("saveLibraryBtn");
     const has = !!taskModal.bannerSource;
     if (clearBtn) clearBtn.hidden = !(has || taskBannerCrop.sourceImg);
+    if (saveLibBtn) {
+      const src = String(taskModal.bannerSource || "");
+      const alreadyLibrary = typeof isUserImageRef === "function" && isUserImageRef(src);
+      const isStockPath = /^assets\//i.test(src);
+      saveLibBtn.hidden = !(has && taskBannerCrop.sourceImg && !alreadyLibrary && !isStockPath);
+    }
     if (wrap) wrap.hidden = !has;
     if (!cardHost) return;
     cardHost.innerHTML = "";
@@ -4851,54 +5572,137 @@
   async function setTaskBannerFromFile(file) {
     try {
       const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: 1400, quality: 0.92 });
-      await loadTaskBannerSourceFromUrl(dataUrl);
+      let source = dataUrl;
+      if (typeof addUserImage === "function") {
+        const base = (file && file.name ? String(file.name).replace(/\.[^.]+$/, "") : "") || "Banner";
+        const entry = addUserImage({ kind: "banner", label: base, dataUrl: dataUrl });
+        if (entry && entry.id && typeof makeUserImageRef === "function") {
+          source = makeUserImageRef(entry.id);
+          if (typeof save === "function") save();
+        }
+      }
+      await loadTaskBannerSourceFromUrl(source);
     } catch (err) {
       alert((err && err.message) || "Could not use that image.");
     }
   }
 
+  function saveCurrentBannerToUserLibrary() {
+    if (!taskBannerCrop.sourceImg || !taskModal.bannerSource) {
+      alert("Load an image first.");
+      return;
+    }
+    if (typeof isUserImageRef === "function" && isUserImageRef(taskModal.bannerSource)) {
+      alert("This image is already in My Images.");
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    const img = taskBannerCrop.sourceImg;
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+    if (!canvas.width || !canvas.height) {
+      alert("Could not read that image.");
+      return;
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    let dataUrl = "";
+    try {
+      dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+    } catch (_) {
+      alert("Could not save that image.");
+      return;
+    }
+    const label = window.prompt("Name for My Images", "Banner") || "Banner";
+    const entry = addUserImage({ kind: "banner", label: label, dataUrl: dataUrl });
+    if (!entry) {
+      alert("Could not add to My Images.");
+      return;
+    }
+    taskModal.bannerSource = makeUserImageRef(entry.id);
+    save();
+    syncTaskBannerPreview();
+    alert("Saved to My Images. This task now references the library copy.");
+  }
+
+  function appendPickerSection(host, title, assets, onPick) {
+    if (!assets || !assets.length) return;
+    const heading = document.createElement("h4");
+    heading.className = "stock-banner-picker-heading";
+    heading.textContent = title;
+    host.appendChild(heading);
+    const row = document.createElement("div");
+    row.className = "stock-banner-picker-row";
+    assets.forEach((asset) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "stock-banner-picker-card";
+      if (asset.id) btn.setAttribute("data-stock-id", asset.id);
+      btn.setAttribute("aria-label", "Use image " + (asset.label || asset.id || ""));
+      const img = document.createElement("img");
+      img.src = asset.previewUrl || resolveStockBannerUrl(asset.path || asset.ref || "");
+      img.alt = "";
+      img.loading = "lazy";
+      const cap = document.createElement("span");
+      cap.className = "stock-banner-picker-label";
+      cap.textContent = asset.label || asset.id || "Image";
+      btn.appendChild(img);
+      btn.appendChild(cap);
+      btn.addEventListener("click", () => onPick(asset));
+      row.appendChild(btn);
+    });
+    host.appendChild(row);
+  }
+
   function fillStockBannerPickerGrid(host) {
     if (!host) return;
     host.innerHTML = "";
-    const assets = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
-    if (!assets.length) {
-      host.innerHTML = '<p class="settings-hint">No stock banners bundled.</p>';
-      return;
+    const mode = (stockPickerContext && stockPickerContext.mode) || "banner";
+    const wantBanner = mode === "banner" || mode === "all";
+    const wantPfp = mode === "pfp" || mode === "all";
+
+    const userEntries = typeof getUserImageLibrary === "function" ? getUserImageLibrary() : [];
+    const userAssets = userEntries
+      .filter((e) => e && e.dataUrl && ((wantBanner && e.kind !== "pfp") || (wantPfp && e.kind === "pfp") || mode === "all"))
+      .map((e) => ({
+        id: e.id,
+        label: e.label || e.id,
+        ref: makeUserImageRef(e.id),
+        path: makeUserImageRef(e.id),
+        previewUrl: e.dataUrl,
+        user: true,
+        kind: e.kind,
+      }));
+
+    if (userAssets.length) {
+      appendPickerSection(host, "My Images", userAssets, applyPickerImageAsset);
+    } else {
+      const hint = document.createElement("p");
+      hint.className = "settings-hint";
+      hint.textContent = "No personal images yet — upload from Settings → My Images, or Choose image (banners save to My Images automatically).";
+      host.appendChild(hint);
     }
-    const byKind = { story: [], event: [], other: [] };
-    assets.forEach((a) => {
-      const k = a.kind === "story" || a.kind === "event" ? a.kind : "other";
-      byKind[k].push(a);
-    });
-    [["story", "Story"], ["event", "Event"], ["other", "Other"]].forEach(([kind, title]) => {
-      const list = byKind[kind];
-      if (!list.length) return;
-      const heading = document.createElement("h4");
-      heading.className = "stock-banner-picker-heading";
-      heading.textContent = title;
-      host.appendChild(heading);
-      const row = document.createElement("div");
-      row.className = "stock-banner-picker-row";
-      list.forEach((asset) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "stock-banner-picker-card";
-        btn.setAttribute("data-stock-id", asset.id);
-        btn.setAttribute("aria-label", "Use stock image " + asset.label);
-        const img = document.createElement("img");
-        img.src = resolveStockBannerUrl(asset.path);
-        img.alt = "";
-        img.loading = "lazy";
-        const cap = document.createElement("span");
-        cap.className = "stock-banner-picker-label";
-        cap.textContent = asset.label;
-        btn.appendChild(img);
-        btn.appendChild(cap);
-        btn.addEventListener("click", () => applyStockBannerAsset(asset));
-        row.appendChild(btn);
+
+    if (wantBanner) {
+      const assets = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
+      const byKind = { story: [], event: [], other: [] };
+      assets.forEach((a) => {
+        const k = a.kind === "story" || a.kind === "event" ? a.kind : "other";
+        byKind[k].push(Object.assign({ path: a.path, label: a.label, id: a.id }, a));
       });
-      host.appendChild(row);
-    });
+      [["story", "Stock · Story"], ["event", "Stock · Event"], ["other", "Stock · Other"]].forEach(([kind, title]) => {
+        appendPickerSection(host, title, byKind[kind], applyPickerImageAsset);
+      });
+    }
+    if (wantPfp) {
+      const pfps = typeof getStockPfpAssets === "function" ? getStockPfpAssets() : [];
+      appendPickerSection(
+        host,
+        "Stock · Profile pictures",
+        pfps.map((a) => Object.assign({}, a, { path: a.path })),
+        applyPickerImageAsset
+      );
+    }
   }
 
   function appendStockAssetCard(grid, asset, kindLabel) {
@@ -4917,6 +5721,84 @@
     card.appendChild(fig);
     card.appendChild(path);
     grid.appendChild(card);
+  }
+
+  function fillSettingsMyImagesGallery() {
+    const host = qs("settingsMyImagesList");
+    if (!host) return;
+    host.innerHTML = "";
+    const list = typeof getUserImageLibrary === "function" ? getUserImageLibrary() : [];
+    if (!list.length) {
+      host.innerHTML = '<p class="settings-hint">No personal images yet. Add a banner or profile picture above.</p>';
+      return;
+    }
+    const banners = list.filter((e) => e && e.kind !== "pfp");
+    const pfps = list.filter((e) => e && e.kind === "pfp");
+
+    function renderBlock(title, entries, galleryClass) {
+      if (!entries.length) return;
+      const block = document.createElement("div");
+      block.className = "stock-assets-block";
+      const heading = document.createElement("h5");
+      heading.className = "stock-assets-section-heading";
+      heading.textContent = title + " (" + entries.length + ")";
+      const grid = document.createElement("div");
+      grid.className = "stock-assets-gallery" + (galleryClass ? " " + galleryClass : "");
+      entries.forEach((entry) => {
+        const card = document.createElement("figure");
+        card.className = "stock-assets-card my-images-card";
+        const img = document.createElement("img");
+        img.src = entry.dataUrl || "";
+        img.alt = entry.label || entry.id;
+        img.loading = "lazy";
+        const fig = document.createElement("figcaption");
+        fig.textContent = entry.label || entry.id;
+        const ref = document.createElement("code");
+        ref.className = "stock-assets-path";
+        ref.textContent = makeUserImageRef(entry.id);
+        const actions = document.createElement("div");
+        actions.className = "my-images-card-actions";
+        const renameBtn = document.createElement("button");
+        renameBtn.type = "button";
+        renameBtn.className = "btn btn-ghost btn-sm";
+        renameBtn.textContent = "Rename";
+        renameBtn.addEventListener("click", () => {
+          const next = window.prompt("Rename image", entry.label || "");
+          if (next == null) return;
+          updateUserImageMeta(entry.id, { label: next });
+          save();
+          fillSettingsMyImagesGallery();
+        });
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn btn-ghost btn-sm";
+        delBtn.textContent = "Delete";
+        delBtn.addEventListener("click", () => {
+          if (!window.confirm("Remove “" + (entry.label || entry.id) + "” from My Images? Tasks still using it will lose the picture until you pick another.")) return;
+          removeUserImage(entry.id);
+          save();
+          fillSettingsMyImagesGallery();
+        });
+        actions.appendChild(renameBtn);
+        actions.appendChild(delBtn);
+        card.appendChild(img);
+        card.appendChild(fig);
+        card.appendChild(ref);
+        card.appendChild(actions);
+        grid.appendChild(card);
+      });
+      block.appendChild(heading);
+      block.appendChild(grid);
+      host.appendChild(block);
+    }
+
+    renderBlock("Banners", banners, "");
+    if (banners.length && pfps.length) {
+      const divider = document.createElement("hr");
+      divider.className = "stock-assets-divider";
+      host.appendChild(divider);
+    }
+    renderBlock("Profile pictures", pfps, "stock-assets-gallery--pfp");
   }
 
   function fillSettingsStockAssetsGallery() {
@@ -4971,19 +5853,26 @@
     }
   }
 
+  let stockPickerContext = { mode: "banner", uiKey: "task", onPick: null };
+
   function closeStockBannerPicker() {
     const el = qs("stockBannerPickerModal");
     if (!el || el.hidden) return;
     el.hidden = true;
     el.setAttribute("aria-hidden", "true");
     if (typeof deactivateModalFocus === "function") deactivateModalFocus(el);
+    stockPickerContext = { mode: "banner", uiKey: "task", onPick: null };
   }
 
   function openStockBannerPicker(uiKey) {
-    stockBannerPickerUiKey = TASK_BANNER_UI[uiKey] ? uiKey : "task";
+    stockPickerContext = { mode: "banner", uiKey: TASK_BANNER_UI[uiKey] ? uiKey : "task", onPick: null };
     const el = qs("stockBannerPickerModal");
     const grid = qs("stockBannerPickerGrid");
+    const title = qs("stockBannerPickerModalTitle");
+    const desc = qs("stockBannerPickerDesc");
     if (!el || !grid) return;
+    if (title) title.textContent = "Image library";
+    if (desc) desc.textContent = "Pick one of your images or a bundled stock banner. You can still crop after applying.";
     fillStockBannerPickerGrid(grid);
     el.hidden = false;
     el.setAttribute("aria-hidden", "false");
@@ -4992,19 +5881,63 @@
     if (closeBtn) closeBtn.focus();
   }
 
-  async function applyStockBannerAsset(asset) {
-    if (!asset || !asset.path) return;
-    const uiKey = stockBannerPickerUiKey || "task";
+  function openImageLibraryPicker(opts) {
+    const o = opts || {};
+    stockPickerContext = {
+      mode: o.mode === "pfp" || o.mode === "all" ? o.mode : "banner",
+      uiKey: o.uiKey || "task",
+      onPick: typeof o.onPick === "function" ? o.onPick : null,
+    };
+    const el = qs("stockBannerPickerModal");
+    const grid = qs("stockBannerPickerGrid");
+    const title = qs("stockBannerPickerModalTitle");
+    const desc = qs("stockBannerPickerDesc");
+    if (!el || !grid) return;
+    if (title) title.textContent = o.title || "Image library";
+    if (desc) {
+      desc.textContent =
+        o.desc ||
+        (stockPickerContext.mode === "pfp"
+          ? "Pick a profile picture from My Images or stock Official icons."
+          : "Pick one of your images or a bundled stock asset.");
+    }
+    fillStockBannerPickerGrid(grid);
+    el.hidden = false;
+    el.setAttribute("aria-hidden", "false");
+    if (typeof activateModalFocus === "function") activateModalFocus(el);
+    const closeBtn = qs("stockBannerPickerModalClose");
+    if (closeBtn) closeBtn.focus();
+  }
+
+  async function applyPickerImageAsset(asset) {
+    if (!asset) return;
+    const path = asset.ref || asset.path;
+    if (!path) return;
+    if (typeof stockPickerContext.onPick === "function") {
+      const cb = stockPickerContext.onPick;
+      closeStockBannerPicker();
+      try {
+        await cb(asset);
+      } catch (err) {
+        alert((err && err.message) || "Could not load that image.");
+      }
+      return;
+    }
+    const uiKey = (stockPickerContext && stockPickerContext.uiKey) || "task";
     setActiveBannerUi(uiKey);
     closeStockBannerPicker();
     try {
-      await loadTaskBannerSourceFromUrl(asset.path);
+      await loadTaskBannerSourceFromUrl(path);
       drawTaskBannerCrop();
       syncTaskBannerPreview();
       syncTaskBannerTargetButtons();
     } catch (err) {
-      alert((err && err.message) || "Could not load that stock image.");
+      alert((err && err.message) || "Could not load that image.");
     }
+  }
+
+  async function applyStockBannerAsset(asset) {
+    return applyPickerImageAsset(asset);
   }
 
   async function switchTaskBannerTarget(target) {
@@ -5252,6 +6185,7 @@
       const fileInput = bannerEl("file");
       const chooseBtn = bannerEl("chooseBtn");
       const stockBtn = bannerEl("stockBtn");
+      const saveLibraryBtn = bannerEl("saveLibraryBtn");
       const clearBtn = bannerEl("clearBtn");
       const wrap = bannerEl("wrap");
       const imgFrame = bannerEl("imgFrame");
@@ -5292,6 +6226,13 @@
           e.preventDefault();
           activate();
           openStockBannerPicker(uiKey);
+        });
+      }
+      if (saveLibraryBtn) {
+        saveLibraryBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          activate();
+          saveCurrentBannerToUserLibrary();
         });
       }
       fileInput.addEventListener("change", () => {

@@ -482,6 +482,11 @@
     delete state.extracurricularCompleted[taskId];
     if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
     if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[taskId];
+    if (Array.isArray(state.completionTimestamps)) {
+      state.completionTimestamps = state.completionTimestamps.filter(
+        (t) => !(t && t.taskType === "extracurricular" && String(t.taskId || "") === String(taskId))
+      );
+    }
     save();
     renderActiveTab();
   }

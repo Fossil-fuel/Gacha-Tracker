@@ -131,6 +131,71 @@
     btn.addEventListener("click", onSync);
   }
 
+  /**
+   * Games card action rows:
+   * Row 1: Completion History | Add completion
+   * Row 2: Sync with Calendar | Edit current (manual-reset only)
+   */
+  function appendGamesTaskActionButtons(main, selected, t, taskType, key) {
+    const historyRow = document.createElement("div");
+    historyRow.className = "games-changer-row games-action-btn-row";
+
+    const historyBtn = document.createElement("button");
+    historyBtn.type = "button";
+    historyBtn.className = "btn btn-ghost";
+    historyBtn.textContent = "Completion History";
+    historyBtn.addEventListener("click", () => openEarningsModal(selected.id, t, taskType));
+    historyRow.appendChild(historyBtn);
+
+    const addCompletionBtn = document.createElement("button");
+    addCompletionBtn.type = "button";
+    addCompletionBtn.className = "btn btn-ghost";
+    addCompletionBtn.textContent = "Add completion";
+    addCompletionBtn.title = "Manually log a completion for a cycle";
+    addCompletionBtn.addEventListener("click", () => {
+      if (typeof openManualCompletionModal === "function") {
+        openManualCompletionModal({
+          gameId: selected.id,
+          taskType: taskType,
+          taskId: t.id || t.label,
+        });
+      }
+    });
+    historyRow.appendChild(addCompletionBtn);
+    main.appendChild(historyRow);
+
+    const syncRow = document.createElement("div");
+    syncRow.className = "games-changer-row games-action-btn-row";
+
+    const syncBtn = document.createElement("button");
+    syncBtn.type = "button";
+    syncBtn.className = "btn btn-ghost";
+    syncBtn.textContent = "Sync with Calendar";
+    syncBtn.title = "Update Completed/Attempted from calendar history (tally from first complete to today)";
+    bindSyncButton(syncBtn, () => syncTaskWithCalendar(selected, taskType, key));
+    syncRow.appendChild(syncBtn);
+
+    if (t && t.manualReset) {
+      const editCurrentBtn = document.createElement("button");
+      editCurrentBtn.type = "button";
+      editCurrentBtn.className = "btn btn-ghost";
+      editCurrentBtn.textContent = "Edit current";
+      editCurrentBtn.title = "Edit the current manual-reset window without starting a new cycle";
+      editCurrentBtn.addEventListener("click", () => {
+        if (typeof openManualResetModal === "function") {
+          openManualResetModal({
+            gameId: selected.id,
+            taskType: taskType,
+            taskId: t.id || t.label,
+            reason: "edit",
+          });
+        }
+      });
+      syncRow.appendChild(editCurrentBtn);
+    }
+    main.appendChild(syncRow);
+  }
+
   const gameIdentityModalState = {
     open: false,
     gameId: null,
@@ -273,7 +338,7 @@
         resolve();
       };
       img.onerror = () => reject(new Error("Could not load image."));
-      img.src = url;
+      img.src = typeof resolveStockBannerUrl === "function" ? resolveStockBannerUrl(url) : url;
     });
   }
 
@@ -345,10 +410,35 @@
         if (!file) return;
         try {
           const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: 1200, quality: 0.92 });
-          await loadGameIdentitySourceFromUrl(dataUrl);
+          let source = dataUrl;
+          if (typeof addUserImage === "function") {
+            const base = (file.name ? String(file.name).replace(/\.[^.]+$/, "") : "") || "Profile";
+            const entry = addUserImage({ kind: "pfp", label: base, dataUrl: dataUrl });
+            if (entry && entry.id && typeof makeUserImageRef === "function") {
+              source = makeUserImageRef(entry.id);
+              if (typeof save === "function") save();
+            }
+          }
+          await loadGameIdentitySourceFromUrl(source);
         } catch (err) {
           alert((err && err.message) || "Could not use that image.");
         }
+      });
+    }
+    const libraryBtn = document.getElementById("gameIdentityLibraryBtn");
+    if (libraryBtn) {
+      libraryBtn.addEventListener("click", () => {
+        if (typeof openImageLibraryPicker !== "function") return;
+        openImageLibraryPicker({
+          mode: "pfp",
+          title: "Profile pictures",
+          desc: "Pick from My Images or a bundled Official icon. You can still crop after applying.",
+          onPick: async (asset) => {
+            const path = asset.ref || asset.path;
+            if (!path) return;
+            await loadGameIdentitySourceFromUrl(path);
+          },
+        });
       });
     }
     if (clearBtn) {
@@ -635,7 +725,7 @@
       content.appendChild(countingRow);
 
       const syncRow = document.createElement("div");
-      syncRow.className = "endgame-currency-row games-changer-row";
+      syncRow.className = "endgame-currency-row games-changer-row games-action-btn-row";
       const syncBtn = document.createElement("button");
       syncBtn.type = "button";
       syncBtn.className = "btn btn-ghost";
@@ -643,6 +733,20 @@
       syncBtn.title = "Update Completed/Attempted from calendar history (tally from first complete to today)";
       bindSyncButton(syncBtn, () => syncTaskWithCalendar(selected, "dailies", selected.id));
       syncRow.appendChild(syncBtn);
+      const addCompletionBtn = document.createElement("button");
+      addCompletionBtn.type = "button";
+      addCompletionBtn.className = "btn btn-ghost";
+      addCompletionBtn.textContent = "Add completion";
+      addCompletionBtn.title = "Manually log a daily completion";
+      addCompletionBtn.addEventListener("click", () => {
+        if (typeof openManualCompletionModal === "function") {
+          openManualCompletionModal({
+            gameId: selected.id,
+            taskType: "dailies",
+          });
+        }
+      });
+      syncRow.appendChild(addCompletionBtn);
       content.appendChild(syncRow);
     } else if (state.gamesSubTab === "extracurricular") {
       const gameTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === selected.id);
@@ -804,26 +908,7 @@
         attemptRow.appendChild(attemptInput);
         main.appendChild(attemptRow);
 
-        const historyRow = document.createElement("div");
-        historyRow.className = "games-changer-row";
-        const historyBtn = document.createElement("button");
-        historyBtn.type = "button";
-        historyBtn.className = "btn btn-ghost";
-        historyBtn.textContent = "Completion History";
-        historyBtn.addEventListener("click", () => openEarningsModal(selected.id, t, "weeklies"));
-        historyRow.appendChild(historyBtn);
-        main.appendChild(historyRow);
-
-        const syncRow = document.createElement("div");
-        syncRow.className = "games-changer-row";
-        const syncBtn = document.createElement("button");
-        syncBtn.type = "button";
-        syncBtn.className = "btn btn-ghost";
-        syncBtn.textContent = "Sync with Calendar";
-        syncBtn.title = "Update Completed/Attempted from calendar history (tally from first complete to today)";
-        bindSyncButton(syncBtn, () => syncTaskWithCalendar(selected, "weeklies", key));
-        syncRow.appendChild(syncBtn);
-        main.appendChild(syncRow);
+        appendGamesTaskActionButtons(main, selected, t, "weeklies", key);
 
         appendGamesTaskBottom(main, selected, t, "weeklies", "Potential: " + getWeeklyPotential(t));
         ul.appendChild(li);
@@ -885,26 +970,7 @@
         attemptRow.appendChild(attemptInput);
         main.appendChild(attemptRow);
 
-        const earningsRow = document.createElement("div");
-        earningsRow.className = "games-changer-row";
-        const earningsBtn = document.createElement("button");
-        earningsBtn.type = "button";
-        earningsBtn.className = "btn btn-ghost";
-        earningsBtn.textContent = "Completion History";
-        earningsBtn.addEventListener("click", () => openEarningsModal(selected.id, t, "endgame"));
-        earningsRow.appendChild(earningsBtn);
-        main.appendChild(earningsRow);
-
-        const syncRow = document.createElement("div");
-        syncRow.className = "games-changer-row";
-        const syncBtn = document.createElement("button");
-        syncBtn.type = "button";
-        syncBtn.className = "btn btn-ghost";
-        syncBtn.textContent = "Sync with Calendar";
-        syncBtn.title = "Update Completed/Attempted from calendar history (tally from first complete to today)";
-        bindSyncButton(syncBtn, () => syncTaskWithCalendar(selected, "endgame", key));
-        syncRow.appendChild(syncBtn);
-        main.appendChild(syncRow);
+        appendGamesTaskActionButtons(main, selected, t, "endgame", key);
 
         appendGamesTaskBottom(main, selected, t, "endgame", "Potential: " + getEndgamePotential(t));
         ul.appendChild(li);

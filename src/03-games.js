@@ -14,10 +14,30 @@
     const freqWeek = qs("taskFrequencyUnitWeek");
     const limDay = qs("taskTimeLimitUnitDay");
     const limWeek = qs("taskTimeLimitUnitWeek");
-    if (freqDay) freqDay.addEventListener("click", () => { updateUnitToggles("frequency", "day"); updateTaskCycleEndPreview(); updateTaskTimeRemainingDisplay(); });
-    if (freqWeek) freqWeek.addEventListener("click", () => { updateUnitToggles("frequency", "week"); updateTaskCycleEndPreview(); updateTaskTimeRemainingDisplay(); });
-    if (limDay) limDay.addEventListener("click", () => { updateUnitToggles("timeLimit", "day"); updateTaskCycleEndPreview(); updateTaskTimeRemainingDisplay(); });
-    if (limWeek) limWeek.addEventListener("click", () => { updateUnitToggles("timeLimit", "week"); updateTaskCycleEndPreview(); updateTaskTimeRemainingDisplay(); });
+    if (freqDay) freqDay.addEventListener("click", () => { updateUnitToggles("frequency", "day"); updateTaskTimeRemainingDisplay(); });
+    if (freqWeek) freqWeek.addEventListener("click", () => { updateUnitToggles("frequency", "week"); updateTaskTimeRemainingDisplay(); });
+    if (limDay) limDay.addEventListener("click", () => { updateUnitToggles("timeLimit", "day"); updateTaskTimeRemainingDisplay(); });
+    if (limWeek) limWeek.addEventListener("click", () => { updateUnitToggles("timeLimit", "week"); updateTaskTimeRemainingDisplay(); });
+
+    const manualResetToggle = qs("taskManualReset");
+    if (manualResetToggle) {
+      manualResetToggle.addEventListener("change", syncTaskModalManualResetUI);
+    }
+    const bannerSectionToggle = qs("taskBannerSectionToggle");
+    if (bannerSectionToggle) {
+      bannerSectionToggle.addEventListener("click", () => {
+        const body = qs("taskBannerSectionBody");
+        const open = bannerSectionToggle.getAttribute("aria-expanded") !== "true";
+        setTaskMenuSectionExpanded(bannerSectionToggle, body, open);
+        setTaskBannerSectionPreferExpanded(open);
+        if (open) {
+          requestAnimationFrame(() => {
+            if (typeof resizeTaskBannerCropStage === "function") resizeTaskBannerCropStage();
+            if (typeof drawTaskBannerCrop === "function") drawTaskBannerCrop();
+          });
+        }
+      });
+    }
 
     document.addEventListener("keydown", (e) => {
       if (!taskModal.open) return;
@@ -59,9 +79,6 @@
       const timeLimitEvery = Math.max(1, Number(limEvery && limEvery.value) || 1);
       const currency = Math.max(0, Number(currencyInput && currencyInput.value) || 0);
       const dateStarted = isValidDateStr(dateStartedInput && dateStartedInput.value) ? dateStartedInput.value : getDateStr();
-      const cycleEndToggle = qs("taskCycleEndEnabled");
-      const cycleEndDateInput = qs("taskCycleEndDate");
-      const cycleEndEnabled = !!(cycleEndToggle && cycleEndToggle.checked);
       const countFromToggle = qs("taskCountFromDateStarted");
       const countFromDateStarted = !!(countFromToggle && countFromToggle.checked);
       const unlockDaysInput = qs("taskEarliestCompleteDays");
@@ -75,18 +92,6 @@
         earliestCompleteHour = parts.hour;
         earliestCompleteMinute = parts.minute;
         hasUnlockTime = true;
-      }
-      let cycleEndDate = cycleEndEnabled && cycleEndDateInput && isValidDateStr(cycleEndDateInput.value)
-        ? cycleEndDateInput.value
-        : null;
-      if (cycleEndEnabled && !cycleEndDate) {
-        if (cycleEndDateInput) cycleEndDateInput.focus();
-        return;
-      }
-      if (cycleEndEnabled && cycleEndDate < dateStarted) {
-        alert("Last cycle end date must be on or after the cycle start date.");
-        if (cycleEndDateInput) cycleEndDateInput.focus();
-        return;
       }
 
       if (taskModal.taskType === "weeklies") {
@@ -118,23 +123,20 @@
           earliestCompleteDays: earliestCompleteDays || undefined,
           earliestCompleteHour: hasUnlockTime ? earliestCompleteHour : undefined,
           earliestCompleteMinute: hasUnlockTime ? earliestCompleteMinute : undefined,
-          cycleEndEnabled: cycleEndEnabled || undefined,
-          cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
           manualReset: manualReset || undefined,
           manualDueDateStr: manualReset
             ? (prevTask && isValidDateStr(prevTask.manualDueDateStr) ? prevTask.manualDueDateStr : null)
             : null,
           manualDueTbd: manualReset ? !!(prevTask && prevTask.manualDueTbd) || !(prevTask && isValidDateStr(prevTask.manualDueDateStr)) : undefined,
+          manualDueHour: manualReset && prevTask && Number.isFinite(prevTask.manualDueHour) ? prevTask.manualDueHour : undefined,
+          manualDueMinute: manualReset && prevTask && Number.isFinite(prevTask.manualDueMinute) ? prevTask.manualDueMinute : undefined,
           manualAwaitingRestart: manualReset ? !!(prevTask && prevTask.manualAwaitingRestart) : undefined,
         };
         if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
         applyTaskBannersToSavePayload(next);
+        if (taskModal.bannerSource) setTaskBannerSectionPreferExpanded(false);
         if (existingIdx >= 0) {
           const merged = { ...game.weeklies[existingIdx], ...next };
-          if (!cycleEndEnabled) {
-            delete merged.cycleEndEnabled;
-            delete merged.cycleEndDate;
-          }
           if (!countFromDateStarted) delete merged.countFromDateStarted;
           if (!earliestCompleteDays) delete merged.earliestCompleteDays;
           if (!hasUnlockTime) {
@@ -150,6 +152,8 @@
             delete merged.manualReset;
             delete merged.manualDueDateStr;
             delete merged.manualDueTbd;
+            delete merged.manualDueHour;
+            delete merged.manualDueMinute;
             delete merged.manualAwaitingRestart;
             delete merged.manualClosedCycles;
           }
@@ -201,17 +205,18 @@
           earliestCompleteDays: earliestCompleteDays || undefined,
           earliestCompleteHour: hasUnlockTime ? earliestCompleteHour : undefined,
           earliestCompleteMinute: hasUnlockTime ? earliestCompleteMinute : undefined,
-          cycleEndEnabled: cycleEndEnabled || undefined,
-          cycleEndDate: cycleEndEnabled ? cycleEndDate : null,
           manualReset: manualReset || undefined,
           manualDueDateStr: manualReset
             ? (prevTask && isValidDateStr(prevTask.manualDueDateStr) ? prevTask.manualDueDateStr : null)
             : null,
           manualDueTbd: manualReset ? !!(prevTask && prevTask.manualDueTbd) || !(prevTask && isValidDateStr(prevTask.manualDueDateStr)) : undefined,
+          manualDueHour: manualReset && prevTask && Number.isFinite(prevTask.manualDueHour) ? prevTask.manualDueHour : undefined,
+          manualDueMinute: manualReset && prevTask && Number.isFinite(prevTask.manualDueMinute) ? prevTask.manualDueMinute : undefined,
           manualAwaitingRestart: manualReset ? !!(prevTask && prevTask.manualAwaitingRestart) : undefined,
         };
         if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
         applyTaskBannersToSavePayload(next);
+        if (taskModal.bannerSource) setTaskBannerSectionPreferExpanded(false);
         if (existingIdx >= 0) {
           const prev = game.endgame[existingIdx];
           const oldCurrency = getEndgamePotential(prev);
@@ -224,10 +229,6 @@
             }
           }
           const merged = { ...game.endgame[existingIdx], ...next };
-          if (!cycleEndEnabled) {
-            delete merged.cycleEndEnabled;
-            delete merged.cycleEndDate;
-          }
           if (!countFromDateStarted) delete merged.countFromDateStarted;
           if (!earliestCompleteDays) delete merged.earliestCompleteDays;
           if (!hasUnlockTime) {
@@ -243,6 +244,8 @@
             delete merged.manualReset;
             delete merged.manualDueDateStr;
             delete merged.manualDueTbd;
+            delete merged.manualDueHour;
+            delete merged.manualDueMinute;
             delete merged.manualAwaitingRestart;
             delete merged.manualClosedCycles;
           }
@@ -302,6 +305,20 @@
       endgame,
     });
     const game = getGame(id);
+    if (game) {
+      const iconPath =
+        (typeof resolvePresetIconPath === "function"
+          ? resolvePresetIconPath({ id: o.presetId, presetId: o.presetId, iconStockId: o.iconStockId })
+          : null) ||
+        (o.iconImage && String(o.iconImage).trim()) ||
+        null;
+      if (iconPath) {
+        game.iconImage = iconPath;
+        game.iconShape = (o.iconShape === "circle" || o.iconShape === "square" || o.iconShape === "rounded")
+          ? o.iconShape
+          : "rounded";
+      }
+    }
     if (game && o.presetId) {
       const now = getSimulatedNow();
       const todayStr = getDateStr();
@@ -549,7 +566,27 @@
     state.extracurricularCurrencyEarned[taskId] = Math.max(0, Number(currencyValue) || 0);
     state.extracurricularCompleted[taskId] = true;
     if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
-    state.extracurricularCompletedAt[taskId] = getSimulatedNow().toISOString();
+    const completedAt = getSimulatedNow().toISOString();
+    state.extracurricularCompletedAt[taskId] = completedAt;
+    if (typeof recordCompletionTimestamp === "function") {
+      const tz = typeof getAppTimezone === "function" ? getAppTimezone() : Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const d = new Date(completedAt);
+      const parts = typeof getDatePartsInTimezone === "function"
+        ? getDatePartsInTimezone(d, tz)
+        : { year: d.getFullYear(), month: d.getMonth(), day: d.getDate(), hour: d.getHours(), minute: d.getMinutes() };
+      const dateStr =
+        String(parts.year) +
+        "-" +
+        String(parts.month + 1).padStart(2, "0") +
+        "-" +
+        String(parts.day).padStart(2, "0");
+      const key = (task.gameId || "") + "." + taskId;
+      recordCompletionTimestamp("extracurricular", key, {
+        dateStr,
+        hour: parts.hour,
+        minute: parts.minute,
+      });
+    }
     save();
     renderActiveTab();
   }
@@ -558,6 +595,11 @@
     delete state.extracurricularCompleted[taskId];
     if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
     if (state.extracurricularCurrencyEarned) delete state.extracurricularCurrencyEarned[taskId];
+    if (Array.isArray(state.completionTimestamps)) {
+      state.completionTimestamps = state.completionTimestamps.filter(
+        (t) => !(t && t.taskType === "extracurricular" && String(t.taskId || "") === String(taskId))
+      );
+    }
     save();
     renderActiveTab();
   }

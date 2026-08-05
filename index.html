@@ -78,25 +78,32 @@
             <section class="about-section">
               <h3 class="about-section-title">Core Features</h3>
               <ul class="about-feature-list">
-                <li><strong>Home</strong> — Overview of today's progress with progress bars for Dailies, Weeklies, and Endgame, plus a checklist ordered by due date.</li>
+                <li><strong>Home</strong> — Overview of today's progress with progress bars for Dailies, Weeklies, and Endgame, plus a checklist ordered by due date. Manual-reset tasks stay listed after a window ends (time remaining shows Cycle Ended) until you start the next cycle.</li>
                 <li><strong>Dailies</strong> — Track daily tasks per game, with server reset times and optional currency tracking.</li>
-                <li><strong>Weeklies</strong> — Track weekly content with configurable reset schedules.</li>
-                <li><strong>Endgame</strong> — Track endgame modes with partial credit and currency earned per completion.</li>
-                <li><strong>Extracurricular</strong> — Custom tasks for events, story, or other reminders with start/end dates.</li>
+                <li><strong>Weeklies</strong> — Track weekly content with configurable reset schedules, or Manual Reset/Start when the game doesn't use a fixed timer.</li>
+                <li><strong>Endgame</strong> — Track endgame modes with partial credit and currency earned per completion. Same scheduled or Manual Reset options as weeklies.</li>
+                <li><strong>Extracurricular</strong> — Custom tasks for events, story, or other reminders with start/end dates. Optional screenshot OCR fill when creating a task.</li>
                 <li><strong>Attendance</strong> — Weekly view with completion pies (hover or click a pie for skipped tasks by game), History calendar, and Time Trends.</li>
                 <li><strong>Data</strong> — Breakdown of currency earned across games and task types.</li>
-                <li><strong>Games</strong> — Add, edit, or remove games. Start from presets or build custom.</li>
+                <li><strong>Games</strong> — Add, edit, or remove games. Start from presets (with Official icons) or build custom. Edit game identity, completion history, Add completion, Sync with Calendar, and manual Edit current / Reset from each card.</li>
               </ul>
             </section>
             <section class="about-section">
               <h3 class="about-section-title">Other Features</h3>
               <ul class="about-feature-list about-feature-list-compact">
                 <li>Server regions (America, Asia, Europe) and DST handling for reset times</li>
+                <li>Manual Reset/Start — set start/due (or TBD), edit the live window, and log past completions without clobbering the current cycle</li>
+                <li>Add completion from Games — backdate a finish with date/time; updates calendar, tallies, Data, and Time Trends</li>
                 <li>Unlock windows on weeklies/endgame (e.g. earliest day/time you can mark complete)</li>
                 <li>Fill-remaining: finishing a weekly/endgame marks the rest of that cycle complete in History</li>
+                <li>Stop cycles on a Games card when a mode retires, while keeping history</li>
+                <li>Stock Image picker for task banners; Official stock PFPs for game icons (presets apply theirs automatically)</li>
+                <li>My Images — personal banner/PFP library (stored once; tasks keep short refs; included in Export)</li>
+                <li>Game identity — name, subtitle, and icon shape/crop</li>
                 <li>Custom themes (presets and custom colors)</li>
-                <li>Export/import data as JSON; Markdown/CSV summary export; Settings → Data / Debug for repair tools</li>
+                <li>Local saves in IndexedDB with a slim daily localStorage backup; export/import JSON; Markdown/CSV summary; Settings → Data / Debug repair tools</li>
                 <li>Undo last completion (Ctrl+Z) for complete/incomplete this session</li>
+                <li>Share card export (Draft 1 hero + icon; pick hero from that game’s task/extracurricular art, or None) and completion-time prompts for History / Trends</li>
                 <li>Game presets as JSON (`presets/`) — contribute a file without editing core JS</li>
                 <li>Optional 30-day simulation for testing</li>
                 <li>List and grid views for tasks</li>
@@ -105,6 +112,7 @@
             <section class="about-section">
               <h3 class="about-section-title">Supported Games (Presets)</h3>
               <p class="about-presets">Honkai Star Rail · Zenless Zone Zero · Honkai Impact 3rd · Wuthering Waves · Arknights: Endfield · Punishing Grey Raven</p>
+              <p class="about-time-hint">Adding a preset applies that game's Official stock profile picture as the game icon. You can change it anytime from Games → edit identity.</p>
             </section>
             <section class="about-section">
               <h3 class="about-section-title">How Time Works</h3>
@@ -116,6 +124,7 @@
                 <li><strong>What counts as "today"</strong> — A daily period runs from one reset to the next. So if dailies reset at 3:00 AM, then 2:59 AM still belongs to yesterday's tasks; 3:00 AM starts today's.</li>
                 <li><strong>Weeklies</strong> — Each weekly task has a start day (e.g. Monday) and time. The week runs from that moment for 7 days. The "time remaining" shows how long until the current week ends. Completing a weekly marks that day through the end of the cycle in History; Time Trends still counts only the finish day.</li>
                 <li><strong>Endgame</strong> — Endgame tasks use cycles (e.g. every 2 weeks). Each cycle has a deadline. Time remaining is until the end of the current cycle. Same fill-remaining / Trends rules as weeklies. Optional unlock fields block marking complete before a day/time in the cycle.</li>
+                <li><strong>Manual Reset/Start</strong> — Instead of a repeating schedule, you set when the window starts and when it is due (or leave due as TBD). Use Edit current to adjust the live window, or Reset / start to begin the next cycle after one ends. Past finishes can be logged with Add completion.</li>
               </ul>
               <p class="about-time-hint">The sidebar shows your current time, the next reset countdown, and a comparison of reset times with and without DST. Check Settings → Time to sync your timezone or change how dates and times are displayed.</p>
             </section>
@@ -242,8 +251,12 @@
             <input id="taskNameInput" type="text" placeholder="Task Name" autocomplete="off" />
           </div>
 
-          <div class="task-menu-cell span-7 task-banner-cell">
-            <label class="task-banner-label">Card banners</label>
+          <div class="task-menu-cell span-7 task-banner-cell task-menu-section" data-section="banners">
+            <button type="button" class="task-menu-section-toggle" id="taskBannerSectionToggle" aria-expanded="false" aria-controls="taskBannerSectionBody">
+              <span class="task-menu-section-title">Card banners</span>
+              <span class="task-menu-section-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="taskBannerSectionBody" class="task-menu-section-body" hidden>
             <div class="task-banner-targets" role="tablist" aria-label="Banner surfaces">
               <button type="button" class="task-banner-target-btn active" data-banner-target="home" aria-pressed="true">
                 <span class="task-banner-target-card" aria-hidden="true">
@@ -279,7 +292,8 @@
             </div>
             <div class="task-banner-crop-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="taskBannerChooseBtn">Choose image</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="taskBannerStockBtn">Stock Image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="taskBannerStockBtn">Library / Stock</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="taskBannerSaveLibraryBtn" hidden>Save to My Images</button>
               <button type="button" class="btn btn-ghost btn-sm" id="taskBannerClearBtn" hidden>Clear</button>
               <input type="file" id="taskBannerFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
             </div>
@@ -302,16 +316,17 @@
               <span class="task-banner-preview-label">Preview</span>
               <div id="taskBannerCardPreview" class="task-banner-card-preview"></div>
             </div>
+            </div>
           </div>
 
           <!-- Row 2: Sun-Sat -->
-          <div class="task-menu-cell day-cell" data-day="0">Sun</div>
-          <div class="task-menu-cell day-cell" data-day="1">Mon</div>
-          <div class="task-menu-cell day-cell" data-day="2">Tue</div>
-          <div class="task-menu-cell day-cell" data-day="3">Wed</div>
-          <div class="task-menu-cell day-cell" data-day="4">Thu</div>
-          <div class="task-menu-cell day-cell" data-day="5">Fri</div>
-          <div class="task-menu-cell day-cell" data-day="6">Sat</div>
+          <div class="task-menu-cell day-cell task-menu-scheduled-only" data-day="0">Sun</div>
+          <div class="task-menu-cell day-cell task-menu-scheduled-only" data-day="1">Mon</div>
+          <div class="task-menu-cell day-cell task-menu-scheduled-only" data-day="2">Tue</div>
+          <div class="task-menu-cell day-cell task-menu-scheduled-only" data-day="3">Wed</div>
+          <div class="task-menu-cell day-cell task-menu-scheduled-only" data-day="4">Thu</div>
+          <div class="task-menu-cell day-cell task-menu-scheduled-only" data-day="5">Fri</div>
+          <div class="task-menu-cell day-cell task-menu-scheduled-only" data-day="6">Sat</div>
 
           <!-- Row 3: Time of Reset (cycle begin) -->
           <div class="task-menu-cell span-2 task-menu-label">Time of Reset</div>
@@ -321,46 +336,51 @@
           </div>
 
           <!-- Row 3a: Cycle end time -->
-          <div class="task-menu-cell span-2 task-menu-label">Cycle end time</div>
-          <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-desc">
+          <div class="task-menu-cell span-2 task-menu-label task-menu-scheduled-only">Cycle end time</div>
+          <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-desc task-menu-scheduled-only">
             <input id="taskCycleEndTime" type="time" step="60" aria-label="Cycle end time" />
             <div class="form-row-toggle task-menu-toggle-row">
-              <label class="settings-label" for="taskCycleEndTimeSameAsBegin">Same as cycle begin (reset) time</label>
+              <label class="settings-label" for="taskCycleEndTimeSameAsBegin">
+                Same as cycle begin (reset) time
+                <span class="currency-info-icon" aria-label="More information" title="When on, cycle end time matches Time of Reset. Turn off to set a different end-of-cycle clock time.">ⓘ</span>
+              </label>
               <input type="checkbox" id="taskCycleEndTimeSameAsBegin" class="settings-toggle" checked aria-label="Same as cycle begin (reset) time" />
             </div>
           </div>
 
           <!-- Row 3b: DST toggle -->
-          <div class="task-menu-cell span-2 task-menu-label">Adjust for DST</div>
-          <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-desc">
-            <input id="taskAdjustForDST" type="checkbox" class="dst-toggle" checked aria-label="Adjust reset time for daylight saving" />
-            <span class="task-menu-desc">When on, displayed reset time shifts by 1 hour during DST.</span>
+          <div class="form-row-toggle task-menu-toggle-row task-menu-cell span-7" style="grid-column: 1 / -1;">
+            <label class="settings-label" for="taskAdjustForDST">
+              Adjust for DST
+              <span class="currency-info-icon" aria-label="More information" title="When on, displayed reset time shifts by 1 hour during DST.">ⓘ</span>
+            </label>
+            <input id="taskAdjustForDST" type="checkbox" class="settings-toggle" checked aria-label="Adjust reset time for daylight saving" />
           </div>
 
           <!-- Row 4: Reset frequency -->
-          <div class="task-menu-cell span-5 task-menu-label">
+          <div class="task-menu-cell span-5 task-menu-label task-menu-scheduled-only">
             <span>Reset frequency: Every:</span>
             <input id="taskFrequencyEvery" type="number" min="1" step="1" value="1" />
           </div>
-          <button type="button" class="task-menu-cell toggle-cell" id="taskFrequencyUnitDay" data-unit="day">Day</button>
-          <button type="button" class="task-menu-cell toggle-cell" id="taskFrequencyUnitWeek" data-unit="week">Week</button>
+          <button type="button" class="task-menu-cell toggle-cell task-menu-scheduled-only" id="taskFrequencyUnitDay" data-unit="day">Day</button>
+          <button type="button" class="task-menu-cell toggle-cell task-menu-scheduled-only" id="taskFrequencyUnitWeek" data-unit="week">Week</button>
 
           <!-- Row 5: Time limit -->
-          <div class="task-menu-cell span-5 task-menu-label">
+          <div class="task-menu-cell span-5 task-menu-label task-menu-scheduled-only">
             <span>Time Limit to complete task:</span>
             <input id="taskTimeLimitEvery" type="number" min="1" step="1" value="1" />
           </div>
-          <button type="button" class="task-menu-cell toggle-cell" id="taskTimeLimitUnitDay" data-unit="day">Day</button>
-          <button type="button" class="task-menu-cell toggle-cell" id="taskTimeLimitUnitWeek" data-unit="week">Week</button>
+          <button type="button" class="task-menu-cell toggle-cell task-menu-scheduled-only" id="taskTimeLimitUnitDay" data-unit="day">Day</button>
+          <button type="button" class="task-menu-cell toggle-cell task-menu-scheduled-only" id="taskTimeLimitUnitWeek" data-unit="week">Week</button>
 
           <!-- Manual reset/start (weeklies + endgame): ignores fixed cycle timers -->
           <div class="form-row-toggle task-menu-toggle-row task-menu-cell span-7" style="grid-column: 1 / -1;">
-            <label class="settings-label" for="taskManualReset">Manual Reset/Start</label>
+            <label class="settings-label" for="taskManualReset">
+              Manual Reset/Start
+              <span class="currency-info-icon" aria-label="More information" title="When on, cycle length is ignored. You set a due date (or TBD) when the task starts or when you hit Reset. TBD still uses a calendar placeholder (weeklies: 7 days, endgame: 4 weeks) until you set a real due or edit history. Off by default.">ⓘ</span>
+            </label>
             <input type="checkbox" id="taskManualReset" class="settings-toggle" />
           </div>
-          <p class="settings-hint task-menu-cell span-7" id="taskManualResetHint" style="grid-column: 1 / -1; margin: 0;">
-            When on, cycle length is ignored. You set a due date (or TBD) when the task starts or when you hit Reset. TBD still uses a calendar placeholder (weeklies: 7 days, endgame: 4 weeks) until you set a real due or edit history. Off by default.
-          </p>
         </div>
 
         <div id="taskModalExtra" class="task-menu-extra"></div>
@@ -562,7 +582,8 @@
             </div>
             <div class="task-banner-crop-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="extraBannerChooseBtn">Choose image</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="extraBannerStockBtn">Stock Image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="extraBannerStockBtn">Library / Stock</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="extraBannerSaveLibraryBtn" hidden>Save to My Images</button>
               <button type="button" class="btn btn-ghost btn-sm" id="extraBannerClearBtn" hidden>Clear</button>
               <input type="file" id="extraBannerFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
             </div>
@@ -615,32 +636,53 @@
         <div class="modal-body">
         <div class="game-add-options" role="group" aria-label="Add game">
           <button type="button" class="game-add-option" data-preset="custom" aria-pressed="true">
-            <span class="game-add-title">Custom</span>
-            <span class="game-add-sub">Start empty and configure tasks yourself.</span>
+            <span class="game-add-option-icon game-add-option-icon-placeholder" aria-hidden="true">+</span>
+            <span class="game-add-option-text">
+              <span class="game-add-title">Custom</span>
+              <span class="game-add-sub">Start empty and configure tasks yourself.</span>
+            </span>
           </button>
           <button type="button" class="game-add-option" data-preset="hsr" aria-pressed="false">
-            <span class="game-add-title">Honkai Star Rail</span>
-            <span class="game-add-sub">Divergent Universe, Currency Wars, Apocalyptic Shadow, Anomaly Arbitration, Memory of Chaos, Pure Fiction.</span>
+            <span class="game-add-option-icon game-add-option-icon-placeholder" aria-hidden="true">H</span>
+            <span class="game-add-option-text">
+              <span class="game-add-title">Honkai Star Rail</span>
+              <span class="game-add-sub">Divergent Universe, Currency Wars, Apocalyptic Shadow, Anomaly Arbitration, Memory of Chaos, Pure Fiction.</span>
+            </span>
           </button>
           <button type="button" class="game-add-option" data-preset="zzz" aria-pressed="false">
-            <span class="game-add-title">Zenless Zone Zero</span>
-            <span class="game-add-sub">Weekly Ridu, Hollow Zero, Deadly Assault, Shiyu Defense.</span>
+            <span class="game-add-option-icon game-add-option-icon-placeholder" aria-hidden="true">Z</span>
+            <span class="game-add-option-text">
+              <span class="game-add-title">Zenless Zone Zero</span>
+              <span class="game-add-sub">Weekly Ridu, Hollow Zero, Deadly Assault, Shiyu Defense.</span>
+            </span>
           </button>
           <button type="button" class="game-add-option" data-preset="hi3" aria-pressed="false">
-            <span class="game-add-title">Honkai Impact 3rd</span>
-            <span class="game-add-sub">Memorial Arena, Abyss (Superstring).</span>
+            <span class="game-add-option-icon game-add-option-icon-placeholder" aria-hidden="true">H</span>
+            <span class="game-add-option-text">
+              <span class="game-add-title">Honkai Impact 3rd</span>
+              <span class="game-add-sub">Memorial Arena, Abyss (Superstring).</span>
+            </span>
           </button>
           <button type="button" class="game-add-option" data-preset="ww" aria-pressed="false">
-            <span class="game-add-title">Wuthering Waves</span>
-            <span class="game-add-sub">Thousand Gateways, Tower of Adversity, Whimpering Wastes. Doubled Pawns Matrix as extracurricular (resets are version/update dependent).</span>
+            <span class="game-add-option-icon game-add-option-icon-placeholder" aria-hidden="true">W</span>
+            <span class="game-add-option-text">
+              <span class="game-add-title">Wuthering Waves</span>
+              <span class="game-add-sub">Thousand Gateways, Tower of Adversity, Whimpering Wastes. Doubled Pawns Matrix as extracurricular (resets are version/update dependent).</span>
+            </span>
           </button>
           <button type="button" class="game-add-option" data-preset="akendfield" aria-pressed="false">
-            <span class="game-add-title">Arknights: Endfield</span>
-            <span class="game-add-sub">Weekly Routine.</span>
+            <span class="game-add-option-icon game-add-option-icon-placeholder" aria-hidden="true">A</span>
+            <span class="game-add-option-text">
+              <span class="game-add-title">Arknights: Endfield</span>
+              <span class="game-add-sub">Weekly Routine.</span>
+            </span>
           </button>
           <button type="button" class="game-add-option" data-preset="pgr" aria-pressed="false">
-            <span class="game-add-title">Punishing Grey Raven</span>
-            <span class="game-add-sub">Missions, Operation Guardians, WarZone, Pain Cage.</span>
+            <span class="game-add-option-icon game-add-option-icon-placeholder" aria-hidden="true">P</span>
+            <span class="game-add-option-text">
+              <span class="game-add-title">Punishing Grey Raven</span>
+              <span class="game-add-sub">Missions, Operation Guardians, WarZone, Pain Cage.</span>
+            </span>
           </button>
         </div>
 
@@ -690,6 +732,7 @@
             <label>Icon image</label>
             <div class="game-icon-crop-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="gameIdentityChooseIconBtn">Choose image</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="gameIdentityLibraryBtn">Library / Stock</button>
               <button type="button" class="btn btn-ghost btn-sm" id="gameIdentityClearIconBtn">Clear</button>
               <input type="file" id="gameIdentityIconFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
             </div>
@@ -816,6 +859,7 @@
               <li role="option" tabindex="-1" data-settings-section="debug" aria-selected="false">Debug</li>
               <li role="option" tabindex="-1" data-settings-section="display" aria-selected="false">Display</li>
               <li role="option" tabindex="-1" data-settings-section="behavior" aria-selected="false">Behavior</li>
+              <li role="option" tabindex="-1" data-settings-section="my-images" aria-selected="false">My Images</li>
               <li role="option" tabindex="-1" data-settings-section="stock-assets" aria-selected="false">Stock Assets</li>
             </ul>
           </div>
@@ -826,6 +870,7 @@
           <button type="button" class="settings-nav-item" data-settings-section="debug">Debug</button>
           <button type="button" class="settings-nav-item" data-settings-section="display">Display</button>
           <button type="button" class="settings-nav-item" data-settings-section="behavior">Behavior</button>
+          <button type="button" class="settings-nav-item" data-settings-section="my-images">My Images</button>
           <button type="button" class="settings-nav-item" data-settings-section="stock-assets">Stock Assets</button>
         </nav>
         <div class="settings-content">
@@ -924,39 +969,83 @@
               <button type="button" class="btn btn-ghost" id="settingsExportSummaryCsvBtn">Export completions (CSV)</button>
             </div>
             <span class="settings-hint">Readable report / spreadsheet of finishes — not a full backup. Last 90 days for rates; CSV lists completion events.</span>
-            <div class="settings-share-card-block">
-              <h5 class="settings-subsection-title">Share card (PNG)</h5>
-              <span class="settings-hint">Rates and currency match Games completed/attempted tallies. Timeframe only filters the finish-day chart (Time Trends). Not a backup.</span>
-              <div class="settings-row">
-                <label class="settings-label" for="settingsShareCardDays">Finish-day timeframe</label>
-                <select id="settingsShareCardDays" class="settings-select" aria-label="Share card timeframe">
-                  <option value="7">Last 7 days</option>
-                  <option value="30">Last 30 days</option>
-                  <option value="90" selected>Last 90 days</option>
-                  <option value="custom">Custom dates</option>
-                </select>
-              </div>
-              <div class="settings-row settings-share-card-custom" id="settingsShareCardCustomRow" hidden>
-                <label class="settings-label" for="settingsShareCardStart">From</label>
-                <input type="date" id="settingsShareCardStart" class="settings-input" aria-label="Share card start date" />
-                <label class="settings-label" for="settingsShareCardEnd">To</label>
-                <input type="date" id="settingsShareCardEnd" class="settings-input" aria-label="Share card end date" />
-              </div>
-              <div class="settings-row">
-                <span class="settings-label">Games</span>
-                <div class="settings-share-card-game-actions">
-                  <button type="button" class="btn btn-ghost btn-sm" id="settingsShareCardSelectAllBtn">Select all</button>
-                  <button type="button" class="btn btn-ghost btn-sm" id="settingsShareCardSelectNoneBtn">Clear</button>
+            <div class="settings-row">
+              <label class="settings-label" for="settingsImportInput">Import data</label>
+              <input type="file" id="settingsImportInput" accept=".json,application/json" class="settings-file-input" />
+              <span class="settings-hint">Replace current data with an Export data JSON backup. Use Settings → Data → Export data (not the Markdown/CSV summaries). After import, use Debug → Scan if charts look wrong.</span>
+            </div>
+            <div class="settings-collapse-block settings-share-card-block">
+              <button type="button" class="settings-collapse-toggle" id="settingsShareCardToggle" aria-expanded="false" aria-controls="settingsShareCardBody">
+                <span class="settings-collapse-title">Share card (PNG)</span>
+                <span class="settings-collapse-chevron" aria-hidden="true"></span>
+              </button>
+              <div id="settingsShareCardBody" class="settings-collapse-body" hidden>
+                <span class="settings-hint">Rates and currency match Games tallies. Timeframe filters finish-day, hour, and endgame-trend charts. Hero banner is optional art from that game’s tasks/extracurriculars (None = compact header). Single-game cards include Completions by hour + Endgame trend; multi-game includes overall hour chart only. Not a backup.</span>
+                <div class="settings-row">
+                  <label class="settings-label" for="settingsShareCardDays">Finish-day timeframe</label>
+                  <select id="settingsShareCardDays" class="settings-select" aria-label="Share card timeframe">
+                    <option value="7">Last 7 days</option>
+                    <option value="30">Last 30 days</option>
+                    <option value="90" selected>Last 90 days</option>
+                    <option value="custom">Custom dates</option>
+                  </select>
+                </div>
+                <div class="settings-row settings-share-card-custom" id="settingsShareCardCustomRow" hidden>
+                  <label class="settings-label" for="settingsShareCardStart">From</label>
+                  <input type="date" id="settingsShareCardStart" class="settings-input" aria-label="Share card start date" />
+                  <label class="settings-label" for="settingsShareCardEnd">To</label>
+                  <input type="date" id="settingsShareCardEnd" class="settings-input" aria-label="Share card end date" />
+                </div>
+                <div class="settings-row">
+                  <span class="settings-label">Games</span>
+                  <div class="settings-share-card-game-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" id="settingsShareCardSelectAllBtn">Select all</button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="settingsShareCardSelectNoneBtn">Clear</button>
+                  </div>
+                </div>
+                <div id="settingsShareCardGames" class="settings-share-card-games timestamps-game-selector" role="group" aria-label="Games to include on share card"></div>
+                <div id="settingsShareCardHeroPick" class="settings-share-card-heroes" hidden></div>
+                <span class="settings-hint" id="settingsShareCardHeroHint" hidden>Hero banner: pick art from the selected game’s weeklies, endgame, or extracurricular cards. Choose None for a compact header with no banner strip.</span>
+                <div class="settings-row settings-row-actions">
+                  <button type="button" class="btn btn-ghost" id="settingsShareCardPreviewBtn">Preview</button>
+                  <button type="button" class="btn btn-ghost" id="settingsShareCardExportBtn">Export share card (PNG)</button>
+                </div>
+                <div id="settingsShareCardPreview" class="settings-share-card-preview" hidden>
+                  <img id="settingsShareCardPreviewImg" alt="Share card preview" />
+                  <span class="settings-hint" id="settingsShareCardPreviewMeta"></span>
                 </div>
               </div>
-              <div id="settingsShareCardGames" class="settings-share-card-games timestamps-game-selector" role="group" aria-label="Games to include on share card"></div>
-              <div class="settings-row settings-row-actions">
-                <button type="button" class="btn btn-ghost" id="settingsShareCardPreviewBtn">Preview</button>
-                <button type="button" class="btn btn-ghost" id="settingsShareCardExportBtn">Export share card (PNG)</button>
-              </div>
-              <div id="settingsShareCardPreview" class="settings-share-card-preview" hidden>
-                <img id="settingsShareCardPreviewImg" alt="Share card preview" />
-                <span class="settings-hint" id="settingsShareCardPreviewMeta"></span>
+            </div>
+            <div class="settings-collapse-block settings-simulated-block">
+              <button type="button" class="settings-collapse-toggle" id="settingsSimulatedToggle" aria-expanded="false" aria-controls="settingsSimulatedBody">
+                <span class="settings-collapse-title">Simulated time</span>
+                <span class="settings-collapse-chevron" aria-hidden="true"></span>
+              </button>
+              <div id="settingsSimulatedBody" class="settings-collapse-body" hidden>
+                <div class="settings-row">
+                  <button type="button" class="btn btn-ghost" id="settingsSimulateBtn">Run 30-day simulation</button>
+                  <span class="settings-hint">Populate random DWE completions for the past 30 days</span>
+                </div>
+                <div class="settings-row" id="settingsUndoSimulationRow" hidden>
+                  <button type="button" class="btn btn-ghost" id="settingsUndoSimulationBtn">Undo simulation</button>
+                  <span class="settings-hint">Revert to state before the last simulation</span>
+                </div>
+                <div class="settings-row">
+                  <button type="button" class="btn btn-ghost" id="settingsSkipDayBtn">Skip 1 day (simulate reset)</button>
+                  <span class="settings-hint">Advance "today" by one day to simulate a reset</span>
+                </div>
+                <div class="settings-row">
+                  <label class="settings-label" for="settingsSkipHoursInput">Skip time (hours)</label>
+                  <div class="settings-skip-time-wrap">
+                    <input type="number" id="settingsSkipHoursInput" min="1" max="168" value="1" class="settings-input settings-skip-hours-input" aria-label="Hours to skip" />
+                    <button type="button" class="btn btn-ghost" id="settingsSkipTimeBtn">Skip X hours</button>
+                  </div>
+                  <span class="settings-hint">Advance simulated time by the given hours</span>
+                </div>
+                <div class="settings-row" id="settingsUndoSkipDayRow" hidden>
+                  <button type="button" class="btn btn-ghost" id="settingsUndoSkipDayBtn">Undo simulated time</button>
+                  <span class="settings-hint">Revert all simulated time (days and hours) back to real time</span>
+                </div>
               </div>
             </div>
             <div class="settings-row">
@@ -964,37 +1053,8 @@
               <span class="settings-hint" id="settingsUndoCompletionHint">Ctrl+Z also undoes the last complete/incomplete (this session)</span>
             </div>
             <div class="settings-row">
-              <label class="settings-label" for="settingsImportInput">Import data</label>
-              <input type="file" id="settingsImportInput" accept=".json,application/json" class="settings-file-input" />
-              <span class="settings-hint">Replace current data with an Export data JSON backup. Use Settings → Data → Export data (not the Markdown/CSV summaries). After import, use Debug → Scan if charts look wrong.</span>
-            </div>
-            <div class="settings-row">
               <button type="button" class="btn btn-ghost" id="settingsRepairDataBtn">Repair current data</button>
               <span class="settings-hint">Fixes early unlock marks, rebuilds calendar from timestamps, fills remaining days, and syncs tallies</span>
-            </div>
-            <div class="settings-row">
-              <button type="button" class="btn btn-ghost" id="settingsSimulateBtn">Run 30-day simulation</button>
-              <span class="settings-hint">Populate random DWE completions for the past 30 days</span>
-            </div>
-            <div class="settings-row" id="settingsUndoSimulationRow" hidden>
-              <button type="button" class="btn btn-ghost" id="settingsUndoSimulationBtn">Undo simulation</button>
-              <span class="settings-hint">Revert to state before the last simulation</span>
-            </div>
-            <div class="settings-row">
-              <button type="button" class="btn btn-ghost" id="settingsSkipDayBtn">Skip 1 day (simulate reset)</button>
-              <span class="settings-hint">Advance "today" by one day to simulate a reset</span>
-            </div>
-            <div class="settings-row">
-              <label class="settings-label" for="settingsSkipHoursInput">Skip time (hours)</label>
-              <div class="settings-skip-time-wrap">
-                <input type="number" id="settingsSkipHoursInput" min="1" max="168" value="1" class="settings-input settings-skip-hours-input" aria-label="Hours to skip" />
-                <button type="button" class="btn btn-ghost" id="settingsSkipTimeBtn">Skip X hours</button>
-              </div>
-              <span class="settings-hint">Advance simulated time by the given hours</span>
-            </div>
-            <div class="settings-row" id="settingsUndoSkipDayRow" hidden>
-              <button type="button" class="btn btn-ghost" id="settingsUndoSkipDayBtn">Undo simulated time</button>
-              <span class="settings-hint">Revert all simulated time (days and hours) back to real time</span>
             </div>
             <div class="settings-row">
               <button type="button" class="btn btn-ghost btn-danger-sm" id="settingsClearDataBtn">Clear all data</button>
@@ -1125,9 +1185,22 @@
               <input type="checkbox" id="settingsConfirmBeforeDelete" class="settings-toggle" checked />
             </div>
           </section>
+          <section id="settings-section-my-images" class="settings-section" aria-labelledby="settings-my-images-heading">
+            <h4 id="settings-my-images-heading" class="settings-section-title">My Images</h4>
+            <p class="settings-hint">
+              Upload banners and profile pictures you reuse often. Tasks and games store a short reference
+              (<code>userimg:…</code>), so the file is kept once — same idea as Stock Assets. Full Export includes these images.
+            </p>
+            <div class="my-images-toolbar">
+              <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesUploadBannerBtn">Add banner</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesUploadPfpBtn">Add profile picture</button>
+              <input type="file" id="settingsMyImagesFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
+            </div>
+            <div id="settingsMyImagesList" class="stock-assets-browse" aria-live="polite"></div>
+          </section>
           <section id="settings-section-stock-assets" class="settings-section" aria-labelledby="settings-stock-assets-heading">
             <h4 id="settings-stock-assets-heading" class="settings-section-title">Stock Assets</h4>
-            <p class="settings-hint">Bundled banners (usable from <strong>Stock Image</strong> when editing a task) and profile pictures. Saved tasks store the asset path (not a copy of the file).</p>
+            <p class="settings-hint">Bundled banners (usable from <strong>Stock Image</strong> when editing a task) and profile pictures. Saved tasks store the asset path (not a copy of the file). For your own reuse library, see <strong>My Images</strong>.</p>
             <div id="settingsStockAssetsList" class="stock-assets-browse" aria-live="polite"></div>
           </section>
         </div>
@@ -1140,11 +1213,11 @@
     <div class="modal-backdrop" data-close="stockBannerPickerModal"></div>
     <div class="modal-dialog modal-dialog-md" role="dialog" aria-modal="true" aria-labelledby="stockBannerPickerModalTitle">
       <div class="modal-header">
-        <h3 id="stockBannerPickerModalTitle" class="modal-title">Stock Image</h3>
+        <h3 id="stockBannerPickerModalTitle" class="modal-title">Image library</h3>
         <button type="button" class="icon-btn" id="stockBannerPickerModalClose" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
-        <p class="settings-hint">Pick a bundled Story or Event banner. You can still crop after applying.</p>
+        <p id="stockBannerPickerDesc" class="settings-hint">Pick one of your images or a bundled stock asset. You can still crop after applying.</p>
         <div id="stockBannerPickerGrid" class="stock-banner-picker-grid"></div>
       </div>
     </div>
@@ -1159,10 +1232,26 @@
         <button type="button" class="icon-btn" id="manualResetModalClose" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
-        <p id="manualResetModalDesc" class="settings-hint">Set when this cycle is due, or leave TBD if you do not know yet.</p>
+        <p id="manualResetModalDesc" class="settings-hint">Set when this cycle starts and when it is due, or leave the due date TBD if you do not know yet.</p>
+        <div class="form-row">
+          <label for="manualResetStartDate">Start date</label>
+          <input id="manualResetStartDate" type="date" />
+        </div>
+        <div class="form-row">
+          <label for="manualResetStartTime">Start time</label>
+          <input id="manualResetStartTime" type="time" step="60" />
+        </div>
         <div class="form-row">
           <label for="manualResetDueDate">Due date</label>
           <input id="manualResetDueDate" type="date" />
+        </div>
+        <div class="form-row">
+          <label for="manualResetDueTime">Due time</label>
+          <input id="manualResetDueTime" type="time" step="60" />
+        </div>
+        <div class="form-row" id="manualResetTimeRemainingRow">
+          <label for="manualResetTimeRemainingInput">Time remaining</label>
+          <input id="manualResetTimeRemainingInput" type="text" class="task-time-remaining-input" placeholder="e.g. 6d 7hr" aria-label="Time remaining (input to set due date)" />
         </div>
         <div class="form-row-toggle">
           <label class="settings-label" for="manualResetDueTbd">TBD (no due date)</label>
@@ -1172,6 +1261,55 @@
       <div class="modal-actions">
         <button type="button" class="btn btn-ghost" id="manualResetModalCancel">Cancel</button>
         <button type="button" class="btn btn-add" id="manualResetModalConfirm">Start</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add completion (Games cards): date/time, plus window fields for manual-reset tasks -->
+  <div id="manualCompletionModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="manualCompletionModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="manualCompletionModalTitle">
+      <div class="modal-header">
+        <h3 id="manualCompletionModalTitle" class="modal-title">Add completion</h3>
+        <button type="button" class="icon-btn" id="manualCompletionModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="manualCompletionModalDesc" class="settings-hint">Log a completion for this task. If one already exists in the same cycle, you will be warned.</p>
+        <div id="manualCompletionWindowFields" hidden>
+          <div class="form-row">
+            <label for="manualCompletionWindowStartDate">Cycle start date</label>
+            <input id="manualCompletionWindowStartDate" type="date" />
+          </div>
+          <div class="form-row">
+            <label for="manualCompletionWindowStartTime">Cycle start time</label>
+            <input id="manualCompletionWindowStartTime" type="time" step="60" />
+          </div>
+          <div class="form-row">
+            <label for="manualCompletionWindowEndDate">Cycle end date</label>
+            <input id="manualCompletionWindowEndDate" type="date" />
+          </div>
+          <div class="form-row">
+            <label for="manualCompletionWindowEndTime">Cycle end time</label>
+            <input id="manualCompletionWindowEndTime" type="time" step="60" />
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="manualCompletionDate">Completion date</label>
+          <input id="manualCompletionDate" type="date" />
+        </div>
+        <div class="form-row">
+          <label for="manualCompletionTime">Completion time</label>
+          <input id="manualCompletionTime" type="time" step="60" />
+        </div>
+        <div class="form-row" id="manualCompletionCurrencyRow" hidden>
+          <label for="manualCompletionCurrency">Currency earned</label>
+          <input id="manualCompletionCurrency" type="number" min="0" step="1" />
+        </div>
+        <p id="manualCompletionConflict" class="settings-hint" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="manualCompletionModalCancel">Cancel</button>
+        <button type="button" class="btn btn-add" id="manualCompletionModalConfirm">Add</button>
       </div>
     </div>
   </div>

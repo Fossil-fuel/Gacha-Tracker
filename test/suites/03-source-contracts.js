@@ -55,6 +55,8 @@ module.exports = {
       "function pushCompletionUndo",
       "function buildExportSummaryMarkdown",
       "function buildExportSummaryCsv",
+      "function buildShareCardEndgameTrend",
+      "function collectShareCardBannerChoices",
       "function buildShareCardModel",
       "function renderShareCardCanvas",
       "function downloadShareCardPng",
@@ -79,6 +81,7 @@ module.exports = {
       "function repairCompletionTimingFromTimestamps",
       "function getEndgameCompletionEventsForTrend",
       "function getTimestampsForTimeTrends",
+      "function listExtracurricularTimestampsForTimeTrends",
       "function getCycleCompletionDateStr",
       "function isCarriedCompletionMark",
       "function previewHistoryCompact",
@@ -137,6 +140,8 @@ module.exports = {
       "historyDayModelCache",
       "data-history-shell",
       "createDocumentFragment",
+      "listExtracurricularTimestampsForTimeTrends",
+      'appendDayOfWeekChart("extracurricular"',
     ].forEach((needle) => {
       assert.ok(attendance.includes(needle), "08-page-attendance.js must contain " + needle);
     });

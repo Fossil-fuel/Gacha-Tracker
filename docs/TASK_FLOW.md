@@ -94,6 +94,32 @@ The UI disables complete until unlocked. Completing early via calendar is blocke
 
 ---
 
+## Manual Reset/Start
+
+Weeklies/endgame can opt out of fixed frequency timers (`manualReset`). Then:
+
+- **Start / Reset** opens a modal for start date/time and due date/time (or **TBD** for due).
+- **Edit current** changes the live window without archiving it or opening a new cycle.
+- When the due window ends, the task can stay on **Home** with remaining shown as **Cycle Ended** until you start the next cycle.
+- Past windows you finished late can be logged with **Add completion** (Games card). Completions inside a still-live window use the normal write path; past manual windows archive into closed-cycle history without overwriting the live window.
+- While Manual Reset is on, scheduled fields (day-of-week grid, frequency, time limit, etc.) are hidden in the task create/edit modal.
+
+---
+
+## Add completion (Games)
+
+From a Games task card, **Add completion** records a finish with date/time (and window fields for manual-reset tasks). It uses the same `applyTaskCompletion` path as calendar completes, so History, tallies (completed + attempted), Data, and Time Trends update together. If the chosen day already has a completion for that cycle, the UI warns and can replace it.
+
+---
+
+## My Images (personal library)
+
+Settings → **My Images** stores banners and profile pictures you reuse. Choosing an image for a task banner saves it into the library and the task keeps a short `userimg:<id>` reference (same idea as stock `assets/…` paths). The Image library picker shows My Images above bundled stock. Full **Export** includes library data URLs once; the slim daily localStorage backup strips image bytes.
+
+Game icons can be picked from the library/stock, then cropped; the saved icon remains a small cropped embed (not a second full-size copy of a banner).
+
+---
+
 ## Editing Prior Endgame Completions
 
 When you edit the start/end dates of a **past** endgame completion in the Earnings modal:

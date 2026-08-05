@@ -402,11 +402,16 @@
     return media;
   }
 
+  function resolveGameIconUrl(source) {
+    if (!source) return "";
+    return typeof resolveStockBannerUrl === "function" ? resolveStockBannerUrl(source) : String(source);
+  }
+
   function buildTaskCardAvatar(game) {
     if (game && game.iconImage) {
       const img = document.createElement("img");
       img.className = "task-card-avatar";
-      img.src = game.iconImage;
+      img.src = resolveGameIconUrl(game.iconImage);
       img.alt = "";
       img.draggable = false;
       return img;
@@ -430,7 +435,7 @@
     if (game && game.iconImage) {
       const img = document.createElement("img");
       img.className = "task-game-heading-icon";
-      img.src = game.iconImage;
+      img.src = resolveGameIconUrl(game.iconImage);
       img.alt = "";
       img.draggable = false;
       wrap.appendChild(img);
@@ -578,7 +583,7 @@
     if (game && game.iconImage) {
       const icon = document.createElement("img");
       icon.className = "game-identity-icon";
-      icon.src = game.iconImage;
+      icon.src = resolveGameIconUrl(game.iconImage);
       icon.alt = "";
       icon.draggable = false;
       el.appendChild(icon);

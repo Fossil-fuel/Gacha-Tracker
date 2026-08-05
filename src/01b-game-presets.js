@@ -11,42 +11,28 @@
       "currencyName": "Stellar Jade",
       "weeklies": [
         {
-          "id": "divergent",
-          "label": "Divergent Universe",
+          "id": "curwar_divuni",
+          "label": "CurWar / DivUni",
           "weekStartDay": 1,
           "weekStartHour": 4,
           "weekStartMinute": 0,
           "currency": 225,
-          "frequencyEvery": 2,
+          "dateStarted": "2026-06-15",
+          "frequencyEvery": 1,
           "frequencyUnit": "week",
-          "timeLimitEvery": 2,
+          "timeLimitEvery": 1,
           "timeLimitUnit": "week",
-          "adjustForDST": true,
-          "dateStarted": "2026-03-09"
-        },
-        {
-          "id": "currency",
-          "label": "Currency Wars",
-          "weekStartDay": 1,
-          "weekStartHour": 4,
-          "weekStartMinute": 0,
-          "currency": 225,
-          "frequencyEvery": 2,
-          "frequencyUnit": "week",
-          "timeLimitEvery": 2,
-          "timeLimitUnit": "week",
-          "adjustForDST": true,
-          "dateStarted": "2026-03-02"
+          "adjustForDST": true
         }
       ],
       "endgame": [
         {
           "id": "apocalyptic",
           "label": "Apocalyptic Shadow",
-          "currency": 800,
           "weekStartDay": 1,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 900,
           "dateStarted": "2026-02-02",
           "frequencyEvery": 6,
           "frequencyUnit": "week",
@@ -57,24 +43,31 @@
         {
           "id": "anomaly",
           "label": "Anomaly Arbitration",
-          "currency": 0,
-          "weekStartDay": 3,
+          "weekStartDay": 5,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 0,
           "dateStarted": "2026-02-11",
           "frequencyEvery": 6,
           "frequencyUnit": "week",
           "timeLimitEvery": 6,
           "timeLimitUnit": "week",
-          "adjustForDST": true
+          "adjustForDST": true,
+          "cycleEndTimeSameAsBegin": false,
+          "cycleEndHour": 17,
+          "cycleEndMinute": 0,
+          "manualReset": true,
+          "manualDueTbd": true,
+          "manualDueDateStr": null,
+          "hideInData": true
         },
         {
           "id": "moc",
           "label": "Memory of Chaos",
-          "currency": 800,
           "weekStartDay": 1,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 900,
           "dateStarted": "2026-03-02",
           "frequencyEvery": 6,
           "frequencyUnit": "week",
@@ -85,10 +78,10 @@
         {
           "id": "purefiction",
           "label": "Pure Fiction",
-          "currency": 800,
           "weekStartDay": 1,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 900,
           "dateStarted": "2026-02-16",
           "frequencyEvery": 6,
           "frequencyUnit": "week",
@@ -96,7 +89,8 @@
           "timeLimitUnit": "week",
           "adjustForDST": true
         }
-      ]
+      ],
+      "iconStockId": "pfp-hsr-official"
     },
     {
       "id": "zzz",
@@ -115,28 +109,36 @@
           "weekStartHour": 4,
           "weekStartMinute": 0,
           "currency": 60,
-          "adjustForDST": true,
-          "dateStarted": "2026-03-14"
+          "dateStarted": "2026-03-14",
+          "frequencyEvery": 1,
+          "frequencyUnit": "week",
+          "timeLimitEvery": 1,
+          "timeLimitUnit": "week",
+          "adjustForDST": true
         },
         {
-          "id": "hallow_zero",
-          "label": "Hallow Zero",
+          "id": "hollow_zero",
+          "label": "Hollow Zero",
           "weekStartDay": 1,
           "weekStartHour": 4,
           "weekStartMinute": 0,
           "currency": 160,
-          "adjustForDST": true,
-          "dateStarted": "2026-03-14"
+          "dateStarted": "2026-03-14",
+          "frequencyEvery": 1,
+          "frequencyUnit": "week",
+          "timeLimitEvery": 1,
+          "timeLimitUnit": "week",
+          "adjustForDST": true
         }
       ],
       "endgame": [
         {
           "id": "deadly_assault",
           "label": "Deadly Assault",
-          "currency": 300,
           "weekStartDay": 5,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 300,
           "dateStarted": "2026-02-13",
           "frequencyEvery": 2,
           "frequencyUnit": "week",
@@ -147,10 +149,10 @@
         {
           "id": "shiyu_defense",
           "label": "Shiyu Defense",
-          "currency": 780,
           "weekStartDay": 5,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 780,
           "dateStarted": "2026-02-06",
           "frequencyEvery": 2,
           "frequencyUnit": "week",
@@ -158,14 +160,14 @@
           "timeLimitUnit": "week",
           "adjustForDST": true
         }
-      ]
+      ],
+      "iconStockId": "pfp-zzz-official"
     },
     {
       "id": "hi3",
       "name": "Honkai Impact 3rd",
       "server": "america",
       "resetHour": 4,
-      "resetMinute": 0,
       "dailies": true,
       "dailyCurrency": 40,
       "currencyPerPull": 280,
@@ -178,11 +180,11 @@
           "weekStartHour": 4,
           "weekStartMinute": 0,
           "currency": 30,
+          "dateStarted": "2026-03-10",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
           "timeLimitEvery": 1,
           "timeLimitUnit": "week",
-          "dateStarted": "2026-03-10",
           "adjustForDST": true
         },
         {
@@ -192,12 +194,15 @@
           "weekStartHour": 4,
           "weekStartMinute": 0,
           "currency": 500,
+          "dateStarted": "2026-03-10",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
           "timeLimitEvery": 1,
           "timeLimitUnit": "week",
-          "dateStarted": "2026-03-10",
-          "adjustForDST": true
+          "adjustForDST": true,
+          "earliestCompleteDays": 0,
+          "earliestCompleteHour": 10,
+          "earliestCompleteMinute": 0
         },
         {
           "id": "armata_contribution",
@@ -206,65 +211,73 @@
           "weekStartHour": 4,
           "weekStartMinute": 0,
           "currency": 25,
+          "dateStarted": "2026-03-10",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
           "timeLimitEvery": 1,
           "timeLimitUnit": "week",
-          "dateStarted": "2026-03-10",
-          "adjustForDST": true
+          "adjustForDST": true,
+          "countFromDateStarted": true
         }
       ],
       "endgame": [
         {
           "id": "memorial_arena",
           "label": "Memorial Arena",
-          "currency": 140,
           "weekStartDay": 2,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 140,
           "dateStarted": "2026-03-10",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
           "timeLimitEvery": 6,
           "timeLimitUnit": "day",
-          "adjustForDST": true
+          "adjustForDST": true,
+          "earliestCompleteDays": 2
         },
         {
           "id": "superstring_p1",
           "label": "Superstring Dimension P1",
-          "currency": 520,
           "weekStartDay": 1,
-          "weekStartHour": 20,
+          "weekStartHour": 15,
           "weekStartMinute": 0,
-          "dateStarted": "2026-03-23",
+          "currency": 520,
+          "dateStarted": "2026-03-10",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
           "timeLimitEvery": 2,
           "timeLimitUnit": "day",
-          "adjustForDST": true
+          "adjustForDST": true,
+          "cycleEndTimeSameAsBegin": false,
+          "cycleEndHour": 22,
+          "cycleEndMinute": 0
         },
         {
           "id": "superstring_p2",
           "label": "Superstring Dimension P2",
-          "currency": 520,
           "weekStartDay": 5,
-          "weekStartHour": 20,
+          "weekStartHour": 15,
           "weekStartMinute": 0,
+          "currency": 520,
           "dateStarted": "2026-03-06",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
           "timeLimitEvery": 2,
           "timeLimitUnit": "day",
-          "adjustForDST": true
+          "adjustForDST": true,
+          "cycleEndTimeSameAsBegin": false,
+          "cycleEndHour": 22,
+          "cycleEndMinute": 0
         }
-      ]
+      ],
+      "iconStockId": "pfp-hi3rd-official"
     },
     {
       "id": "ww",
       "name": "Wuthering Waves",
       "server": "america",
       "resetHour": 4,
-      "resetMinute": 0,
       "dailies": true,
       "dailyCurrency": 60,
       "currencyPerPull": 160,
@@ -277,11 +290,11 @@
           "weekStartHour": 4,
           "weekStartMinute": 0,
           "currency": 160,
+          "dateStarted": "2026-03-10",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
           "timeLimitEvery": 1,
           "timeLimitUnit": "week",
-          "dateStarted": "2026-03-10",
           "adjustForDST": true
         }
       ],
@@ -289,10 +302,10 @@
         {
           "id": "tower_of_adversity",
           "label": "Tower of Adversity",
-          "currency": 800,
           "weekStartDay": 1,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 800,
           "dateStarted": "2026-03-02",
           "frequencyEvery": 4,
           "frequencyUnit": "week",
@@ -303,32 +316,43 @@
         {
           "id": "whimpering_wastes",
           "label": "Whimpering Wastes",
-          "currency": 800,
           "weekStartDay": 1,
           "weekStartHour": 4,
           "weekStartMinute": 0,
+          "currency": 800,
           "dateStarted": "2026-02-16",
           "frequencyEvery": 4,
           "frequencyUnit": "week",
           "timeLimitEvery": 4,
           "timeLimitUnit": "week",
           "adjustForDST": true
+        },
+        {
+          "id": "endstate_matrix",
+          "label": "Endstate Matrix",
+          "weekStartDay": 0,
+          "weekStartHour": 4,
+          "weekStartMinute": 0,
+          "currency": 400,
+          "dateStarted": "2026-07-17",
+          "frequencyEvery": 1,
+          "frequencyUnit": "week",
+          "timeLimitEvery": 1,
+          "timeLimitUnit": "week",
+          "adjustForDST": false,
+          "countFromDateStarted": true,
+          "manualReset": true,
+          "manualDueTbd": false,
+          "manualDueDateStr": "2026-08-20"
         }
       ],
-      "extracurricular": [
-        {
-          "label": "Doubled Pawns Matrix",
-          "description": "This is a Placeholder for the Doubled Pawns Matrix gamemode (GM). Starting date does not matter for this task, just change the End date. Feel free to remove this if you don't wish to track this GM. For a new rotation of this GM, a new task will have to be created for the respective rotation.",
-          "endDateTBD": true
-        }
-      ]
+      "iconStockId": "pfp-wuwa-official"
     },
     {
       "id": "akendfield",
       "name": "Arknights: Endfield",
       "server": "america",
       "resetHour": 4,
-      "resetMinute": 0,
       "dailies": true,
       "dailyCurrency": 200,
       "currencyPerPull": 500,
@@ -341,15 +365,16 @@
           "weekStartHour": 4,
           "weekStartMinute": 0,
           "currency": 500,
+          "dateStarted": "2026-03-10",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
           "timeLimitEvery": 1,
           "timeLimitUnit": "week",
-          "dateStarted": "2026-03-10",
           "adjustForDST": true
         }
       ],
-      "endgame": []
+      "endgame": [],
+      "iconStockId": "pfp-endfield-official"
     },
     {
       "id": "pgr",
@@ -374,7 +399,8 @@
           "frequencyUnit": "week",
           "timeLimitEvery": 1,
           "timeLimitUnit": "week",
-          "adjustForDST": true
+          "adjustForDST": true,
+          "earliestCompleteDays": 1
         },
         {
           "id": "operation_guardians",
@@ -395,10 +421,10 @@
         {
           "id": "warzone",
           "label": "WarZone",
-          "currency": 0,
           "weekStartDay": 1,
           "weekStartHour": 0,
           "weekStartMinute": 0,
+          "currency": 0,
           "dateStarted": "2026-03-17",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
@@ -409,10 +435,10 @@
         {
           "id": "pain_cage",
           "label": "Pain Cage",
-          "currency": 50,
           "weekStartDay": 1,
           "weekStartHour": 0,
           "weekStartMinute": 0,
+          "currency": 50,
           "dateStarted": "2026-03-17",
           "frequencyEvery": 1,
           "frequencyUnit": "week",
@@ -423,6 +449,7 @@
           "earliestCompleteHour": 0,
           "earliestCompleteMinute": 0
         }
-      ]
+      ],
+      "iconStockId": "pfp-pgr-official"
     }
   ];

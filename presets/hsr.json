@@ -9,42 +9,28 @@
   "currencyName": "Stellar Jade",
   "weeklies": [
     {
-      "id": "divergent",
-      "label": "Divergent Universe",
+      "id": "curwar_divuni",
+      "label": "CurWar / DivUni",
       "weekStartDay": 1,
       "weekStartHour": 4,
       "weekStartMinute": 0,
       "currency": 225,
-      "frequencyEvery": 2,
+      "dateStarted": "2026-06-15",
+      "frequencyEvery": 1,
       "frequencyUnit": "week",
-      "timeLimitEvery": 2,
+      "timeLimitEvery": 1,
       "timeLimitUnit": "week",
-      "adjustForDST": true,
-      "dateStarted": "2026-03-09"
-    },
-    {
-      "id": "currency",
-      "label": "Currency Wars",
-      "weekStartDay": 1,
-      "weekStartHour": 4,
-      "weekStartMinute": 0,
-      "currency": 225,
-      "frequencyEvery": 2,
-      "frequencyUnit": "week",
-      "timeLimitEvery": 2,
-      "timeLimitUnit": "week",
-      "adjustForDST": true,
-      "dateStarted": "2026-03-02"
+      "adjustForDST": true
     }
   ],
   "endgame": [
     {
       "id": "apocalyptic",
       "label": "Apocalyptic Shadow",
-      "currency": 800,
       "weekStartDay": 1,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 900,
       "dateStarted": "2026-02-02",
       "frequencyEvery": 6,
       "frequencyUnit": "week",
@@ -55,24 +41,31 @@
     {
       "id": "anomaly",
       "label": "Anomaly Arbitration",
-      "currency": 0,
-      "weekStartDay": 3,
+      "weekStartDay": 5,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 0,
       "dateStarted": "2026-02-11",
       "frequencyEvery": 6,
       "frequencyUnit": "week",
       "timeLimitEvery": 6,
       "timeLimitUnit": "week",
-      "adjustForDST": true
+      "adjustForDST": true,
+      "cycleEndTimeSameAsBegin": false,
+      "cycleEndHour": 17,
+      "cycleEndMinute": 0,
+      "manualReset": true,
+      "manualDueTbd": true,
+      "manualDueDateStr": null,
+      "hideInData": true
     },
     {
       "id": "moc",
       "label": "Memory of Chaos",
-      "currency": 800,
       "weekStartDay": 1,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 900,
       "dateStarted": "2026-03-02",
       "frequencyEvery": 6,
       "frequencyUnit": "week",
@@ -83,10 +76,10 @@
     {
       "id": "purefiction",
       "label": "Pure Fiction",
-      "currency": 800,
       "weekStartDay": 1,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 900,
       "dateStarted": "2026-02-16",
       "frequencyEvery": 6,
       "frequencyUnit": "week",
@@ -94,5 +87,6 @@
       "timeLimitUnit": "week",
       "adjustForDST": true
     }
-  ]
+  ],
+  "iconStockId": "pfp-hsr-official"
 }

@@ -3,7 +3,6 @@
   "name": "Wuthering Waves",
   "server": "america",
   "resetHour": 4,
-  "resetMinute": 0,
   "dailies": true,
   "dailyCurrency": 60,
   "currencyPerPull": 160,
@@ -16,11 +15,11 @@
       "weekStartHour": 4,
       "weekStartMinute": 0,
       "currency": 160,
+      "dateStarted": "2026-03-10",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
       "timeLimitEvery": 1,
       "timeLimitUnit": "week",
-      "dateStarted": "2026-03-10",
       "adjustForDST": true
     }
   ],
@@ -28,10 +27,10 @@
     {
       "id": "tower_of_adversity",
       "label": "Tower of Adversity",
-      "currency": 800,
       "weekStartDay": 1,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 800,
       "dateStarted": "2026-03-02",
       "frequencyEvery": 4,
       "frequencyUnit": "week",
@@ -42,23 +41,35 @@
     {
       "id": "whimpering_wastes",
       "label": "Whimpering Wastes",
-      "currency": 800,
       "weekStartDay": 1,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 800,
       "dateStarted": "2026-02-16",
       "frequencyEvery": 4,
       "frequencyUnit": "week",
       "timeLimitEvery": 4,
       "timeLimitUnit": "week",
       "adjustForDST": true
+    },
+    {
+      "id": "endstate_matrix",
+      "label": "Endstate Matrix",
+      "weekStartDay": 0,
+      "weekStartHour": 4,
+      "weekStartMinute": 0,
+      "currency": 400,
+      "dateStarted": "2026-07-17",
+      "frequencyEvery": 1,
+      "frequencyUnit": "week",
+      "timeLimitEvery": 1,
+      "timeLimitUnit": "week",
+      "adjustForDST": false,
+      "countFromDateStarted": true,
+      "manualReset": true,
+      "manualDueTbd": false,
+      "manualDueDateStr": "2026-08-20"
     }
   ],
-  "extracurricular": [
-    {
-      "label": "Doubled Pawns Matrix",
-      "description": "This is a Placeholder for the Doubled Pawns Matrix gamemode (GM). Starting date does not matter for this task, just change the End date. Feel free to remove this if you don't wish to track this GM. For a new rotation of this GM, a new task will have to be created for the respective rotation.",
-      "endDateTBD": true
-    }
-  ]
+  "iconStockId": "pfp-wuwa-official"
 }

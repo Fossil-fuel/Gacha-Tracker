@@ -947,7 +947,18 @@
     const showNone = !!selected[TIMESTAMPS_NONE];
     const gameIds = Object.keys(selected).filter((k) => k !== TIMESTAMPS_NONE);
     const showAll = !showNone && gameIds.length === 0;
-    const timestamps = showNone ? [] : (state.completionTimestamps || []).filter((t) => showAll || selected[t.gameId]);
+    // Filed extracurricular times come from extracurricularCompletedAt (via list helper).
+    // Drop any stored extracurricular stamps here so we never double-count or invent times.
+    const timestamps = showNone
+      ? []
+      : (state.completionTimestamps || [])
+          .filter((t) => t && t.taskType !== "extracurricular" && (showAll || selected[t.gameId]))
+          .concat(
+            (typeof listExtracurricularTimestampsForTimeTrends === "function"
+              ? listExtracurricularTimestampsForTimeTrends()
+              : []
+            ).filter((t) => showAll || selected[t.gameId])
+          );
 
     const header = document.createElement("div");
     header.className = "history-header";
@@ -980,7 +991,7 @@
     const trendsNote = document.createElement("p");
     trendsNote.className = "timestamps-trends-note";
     trendsNote.textContent =
-      "Charts use the day and hour you finished each weekly/endgame cycle (from completion timestamps). Days marked complete only by fill-remaining are not counted again.";
+      "Charts use the day and hour you finished each weekly/endgame cycle (from completion timestamps), plus extracurriculars that have a filed completion time. Days marked complete only by fill-remaining are not counted again. Extracurriculars without a filed time are skipped.";
     container.appendChild(trendsNote);
 
     const gameLabelRow = document.createElement("div");
@@ -1056,7 +1067,12 @@
 
     const trendTimestamps =
       typeof getTimestampsForTimeTrends === "function" ? getTimestampsForTimeTrends(timestamps) : timestamps;
-    const hourCountsByType = { dailies: Array(24).fill(0), weeklies: Array(24).fill(0), endgame: Array(24).fill(0) };
+    const hourCountsByType = {
+      dailies: Array(24).fill(0),
+      weeklies: Array(24).fill(0),
+      endgame: Array(24).fill(0),
+      extracurricular: Array(24).fill(0),
+    };
     const hourDetails = Array(24).fill(null).map(() => []);
     trendTimestamps.forEach((t) => {
       const h = Number(t.hour);
@@ -1067,7 +1083,10 @@
       }
     });
     const hourTotals = Array(24).fill(0).map((_, h) =>
-      hourCountsByType.dailies[h] + hourCountsByType.weeklies[h] + hourCountsByType.endgame[h]
+      hourCountsByType.dailies[h] +
+      hourCountsByType.weeklies[h] +
+      hourCountsByType.endgame[h] +
+      hourCountsByType.extracurricular[h]
     );
     const maxCount = Math.max(1, ...hourTotals);
 
@@ -1111,7 +1130,7 @@
     hourLegend.style.gap = "1rem";
     hourLegend.style.marginBottom = "0.5rem";
     hourLegend.style.fontSize = "0.8rem";
-    ["dailies", "weeklies", "endgame"].forEach((type) => {
+    ["dailies", "weeklies", "endgame", "extracurricular"].forEach((type) => {
       const item = document.createElement("span");
       item.style.display = "inline-flex";
       item.style.alignItems = "center";
@@ -1148,7 +1167,7 @@
       stack.style.flexDirection = "column-reverse";
       stack.style.flex = "1";
       stack.style.minHeight = "60px";
-      ["dailies", "weeklies", "endgame"].forEach((type) => {
+      ["dailies", "weeklies", "endgame", "extracurricular"].forEach((type) => {
         const count = hourCountsByType[type][h];
         if (count > 0) {
           const seg = document.createElement("div");
@@ -1168,8 +1187,24 @@
       lbl.style.color = "var(--text-muted)";
       lbl.textContent = h;
       col.appendChild(lbl);
-      const total = hourCountsByType.dailies[h] + hourCountsByType.weeklies[h] + hourCountsByType.endgame[h];
-      col.title = h + ":00 – Dailies: " + hourCountsByType.dailies[h] + ", Weeklies: " + hourCountsByType.weeklies[h] + ", Endgame: " + hourCountsByType.endgame[h] + " — Total: " + total;
+      const total =
+        hourCountsByType.dailies[h] +
+        hourCountsByType.weeklies[h] +
+        hourCountsByType.endgame[h] +
+        hourCountsByType.extracurricular[h];
+      const hourTip =
+        h +
+        ":00 – Dailies: " +
+        hourCountsByType.dailies[h] +
+        ", Weeklies: " +
+        hourCountsByType.weeklies[h] +
+        ", Endgame: " +
+        hourCountsByType.endgame[h] +
+        ", Extracurricular: " +
+        hourCountsByType.extracurricular[h] +
+        " — Total: " +
+        total;
+      col.title = hourTip;
       col.style.cursor = "pointer";
       col.addEventListener("click", () => {
         openTimeTrendsDetailModal(h + ":00 completions", hourDetails[h] || []);
@@ -1177,7 +1212,7 @@
       barWrap.appendChild(col);
       const tooltip = document.createElement("div");
       tooltip.className = "timestamps-hour-tooltip";
-      tooltip.textContent = h + ":00 – Dailies: " + hourCountsByType.dailies[h] + ", Weeklies: " + hourCountsByType.weeklies[h] + ", Endgame: " + hourCountsByType.endgame[h] + " — Total: " + total;
+      tooltip.textContent = hourTip;
       col.appendChild(tooltip);
     }
     container.appendChild(barWrap);
@@ -1256,6 +1291,7 @@
     appendDayOfWeekChart("dailies", "Dailies completed by day of week");
     appendDayOfWeekChart("weeklies", "Weeklies completed by day of week");
     appendDayOfWeekChart("endgame", "Endgame completed by day of week");
+    appendDayOfWeekChart("extracurricular", "Extracurricular completed by day of week");
 
     const endgameOnly = timestamps.filter((t) => t.taskType === "endgame");
     const allEndgameTasks = [];

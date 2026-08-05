@@ -139,6 +139,7 @@
     initTabs();
     initTaskModal();
     initManualResetModal();
+    initManualCompletionModal();
     initGameModal();
     initGameIdentityModal();
     initDeleteGameModal();

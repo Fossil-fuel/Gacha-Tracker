@@ -6,14 +6,80 @@
     const todayStr = getDateStr();
     const now = getSimulatedNow();
     const dDone = games.filter((g) => g.dailies && (state.completionByDate[getDailyPeriodDateStr(g, now)] || {}).dailies?.includes(g.id)).length;
-    const available = getTasksAvailableOnDate(todayStr);
     const dTotal = Math.max(1, games.filter((g) => g.dailies).length);
-    const weekliesList = available.weeklies || [];
-    const wTotal = Math.max(1, weekliesList.length);
-    const wDone = weekliesList.filter((item) => isWeeklyCompletedInCurrentCycle(item.key, todayStr)).length;
-    const endgameList = available.endgame || [];
-    const eTotal = Math.max(1, endgameList.length);
-    const eDone = endgameList.filter((item) => isEndgameCompletedInCurrentCycle(item.key, todayStr)).length;
+
+    // DWE checklist: incomplete first (by due date), completed at end
+    const checklistItems = [];
+    games.forEach((game, gameIdx) => {
+      if (game.dailies) {
+        const periodStr = getDailyPeriodDateStr(game, now);
+        const completed = (state.completionByDate[periodStr] || {}).dailies?.includes(game.id);
+        checklistItems.push({
+          type: "dailies",
+          key: game.id,
+          gameId: game.id,
+          taskId: null,
+          label: (game.name || game.id),
+          dueMs: now.getTime() + getDailyTimeRemainingMs(game, now),
+          gameOrder: gameIdx,
+          taskOrder: 0,
+          completed
+        });
+      }
+      (game.weeklies || []).forEach((task, taskIdx) => {
+        if (isWeeklyOnHomeChecklist(task, now, game)) {
+          const key = game.id + "." + (task.id || task.label);
+          const remMs = getWeeklyTimeRemainingMs(task, now, game);
+          checklistItems.push({
+            type: "weeklies",
+            key,
+            gameId: game.id,
+            taskId: task.id || task.label,
+            label: (game.name || game.id) + " — " + (task.label || "Weekly"),
+            // Awaiting restart / TBD have no due clock — pin after dated incomplete tasks.
+            dueMs: task.manualAwaitingRestart || remMs == null
+              ? Number.POSITIVE_INFINITY
+              : now.getTime() + remMs,
+            gameOrder: gameIdx,
+            taskOrder: taskIdx,
+            completed: isWeeklyCompletedInCurrentCycle(key, todayStr)
+          });
+        }
+      });
+      (game.endgame || []).forEach((task, taskIdx) => {
+        if (isEndgameOnHomeChecklist(task, now, game)) {
+          const key = game.id + "." + (task.id || task.label);
+          const remMs = getEndgameTimeRemainingMs(task, now, game);
+          checklistItems.push({
+            type: "endgame",
+            key,
+            gameId: game.id,
+            taskId: task.id || task.label,
+            label: (game.name || game.id) + " — " + (task.label || "Endgame"),
+            dueMs: task.manualAwaitingRestart || remMs == null
+              ? Number.POSITIVE_INFINITY
+              : now.getTime() + remMs,
+            gameOrder: gameIdx,
+            taskOrder: taskIdx,
+            completed: isEndgameCompletedInCurrentCycle(key, todayStr)
+          });
+        }
+      });
+    });
+    const sortItems = (a, b) => {
+      if (a.completed !== b.completed) return (a.completed ? 1 : 0) - (b.completed ? 1 : 0);
+      if (a.dueMs !== b.dueMs) return a.dueMs - b.dueMs;
+      if (a.gameOrder !== b.gameOrder) return a.gameOrder - b.gameOrder;
+      return a.taskOrder - b.taskOrder;
+    };
+    const dailiesItems = checklistItems.filter((i) => i.type === "dailies").sort(sortItems);
+    const weekliesItems = checklistItems.filter((i) => i.type === "weeklies").sort(sortItems);
+    const endgameItems = checklistItems.filter((i) => i.type === "endgame").sort(sortItems);
+
+    const wTotal = Math.max(1, weekliesItems.length);
+    const wDone = weekliesItems.filter((item) => item.completed).length;
+    const eTotal = Math.max(1, endgameItems.length);
+    const eDone = endgameItems.filter((item) => item.completed).length;
 
     const section = document.createElement("div");
     section.className = "home-dwe-progress";
@@ -48,67 +114,6 @@
 
     section.appendChild(barsWrap);
     container.appendChild(section);
-
-    // DWE checklist: incomplete first (by due date), completed at end
-    const checklistItems = [];
-    games.forEach((game, gameIdx) => {
-      if (game.dailies) {
-        const periodStr = getDailyPeriodDateStr(game, now);
-        const completed = (state.completionByDate[periodStr] || {}).dailies?.includes(game.id);
-        checklistItems.push({
-          type: "dailies",
-          key: game.id,
-          gameId: game.id,
-          taskId: null,
-          label: (game.name || game.id),
-          dueMs: now.getTime() + getDailyTimeRemainingMs(game, now),
-          gameOrder: gameIdx,
-          taskOrder: 0,
-          completed
-        });
-      }
-      (game.weeklies || []).forEach((task, taskIdx) => {
-        if (isWeeklyAvailableOnDate(task, now, game)) {
-          const key = game.id + "." + (task.id || task.label);
-          checklistItems.push({
-            type: "weeklies",
-            key,
-            gameId: game.id,
-            taskId: task.id || task.label,
-            label: (game.name || game.id) + " — " + (task.label || "Weekly"),
-            dueMs: now.getTime() + getWeeklyTimeRemainingMs(task, now, game),
-            gameOrder: gameIdx,
-            taskOrder: taskIdx,
-            completed: isWeeklyCompletedInCurrentCycle(key, todayStr)
-          });
-        }
-      });
-      (game.endgame || []).forEach((task, taskIdx) => {
-        if (isEndgameAvailableOnDate(task, now, game)) {
-          const key = game.id + "." + (task.id || task.label);
-          checklistItems.push({
-            type: "endgame",
-            key,
-            gameId: game.id,
-            taskId: task.id || task.label,
-            label: (game.name || game.id) + " — " + (task.label || "Endgame"),
-            dueMs: now.getTime() + getEndgameTimeRemainingMs(task, now, game),
-            gameOrder: gameIdx,
-            taskOrder: taskIdx,
-            completed: isEndgameCompletedInCurrentCycle(key, todayStr)
-          });
-        }
-      });
-    });
-    const sortItems = (a, b) => {
-      if (a.completed !== b.completed) return (a.completed ? 1 : 0) - (b.completed ? 1 : 0);
-      if (a.dueMs !== b.dueMs) return a.dueMs - b.dueMs;
-      if (a.gameOrder !== b.gameOrder) return a.gameOrder - b.gameOrder;
-      return a.taskOrder - b.taskOrder;
-    };
-    const dailiesItems = checklistItems.filter((i) => i.type === "dailies").sort(sortItems);
-    const weekliesItems = checklistItems.filter((i) => i.type === "weeklies").sort(sortItems);
-    const endgameItems = checklistItems.filter((i) => i.type === "endgame").sort(sortItems);
 
     const extracurricularItems = (state.extracurricularTasks || []).filter((task) => {
       if (isExtracurricularArchived(task)) return false;

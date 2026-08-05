@@ -21,7 +21,8 @@
       "frequencyUnit": "week",
       "timeLimitEvery": 1,
       "timeLimitUnit": "week",
-      "adjustForDST": true
+      "adjustForDST": true,
+      "earliestCompleteDays": 1
     },
     {
       "id": "operation_guardians",
@@ -42,10 +43,10 @@
     {
       "id": "warzone",
       "label": "WarZone",
-      "currency": 0,
       "weekStartDay": 1,
       "weekStartHour": 0,
       "weekStartMinute": 0,
+      "currency": 0,
       "dateStarted": "2026-03-17",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
@@ -56,10 +57,10 @@
     {
       "id": "pain_cage",
       "label": "Pain Cage",
-      "currency": 50,
       "weekStartDay": 1,
       "weekStartHour": 0,
       "weekStartMinute": 0,
+      "currency": 50,
       "dateStarted": "2026-03-17",
       "frequencyEvery": 1,
       "frequencyUnit": "week",
@@ -70,5 +71,6 @@
       "earliestCompleteHour": 0,
       "earliestCompleteMinute": 0
     }
-  ]
+  ],
+  "iconStockId": "pfp-pgr-official"
 }

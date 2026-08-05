@@ -7,7 +7,7 @@
     iconWrap.className = "task-daily-icon";
     if (game && game.iconImage) {
       const img = document.createElement("img");
-      img.src = game.iconImage;
+      img.src = typeof resolveGameIconUrl === "function" ? resolveGameIconUrl(game.iconImage) : game.iconImage;
       img.alt = "";
       img.draggable = false;
       iconWrap.appendChild(img);

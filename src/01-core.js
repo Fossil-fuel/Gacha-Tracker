@@ -7,6 +7,7 @@
   const IDB_VERSION = 1;
   const IDB_STORE = "saves";
   const IDB_FULL_RECORD = "full";
+  const USER_IMAGE_REF_PREFIX = "userimg:";
   const DEFAULT_RESET_HOUR = 4;
   const SERVER_RESET_HOUR_DST = 4;
   const SERVER_RESET_HOUR_STANDARD = 3;
@@ -60,6 +61,7 @@
       root: "taskModal",
       chooseBtn: "taskBannerChooseBtn",
       stockBtn: "taskBannerStockBtn",
+      saveLibraryBtn: "taskBannerSaveLibraryBtn",
       clearBtn: "taskBannerClearBtn",
       file: "taskBannerFile",
       wrap: "taskBannerCropWrap",
@@ -74,6 +76,7 @@
       root: "extracurricularTaskModal",
       chooseBtn: "extraBannerChooseBtn",
       stockBtn: "extraBannerStockBtn",
+      saveLibraryBtn: "extraBannerSaveLibraryBtn",
       clearBtn: "extraBannerClearBtn",
       file: "extraBannerFile",
       wrap: "extraBannerCropWrap",
@@ -103,6 +106,12 @@
 
   /** Bundled profile pictures (Settings gallery; not offered in the task banner picker). */
   const STOCK_PFP_ASSETS = [
+    { id: "pfp-pgr-official", path: "assets/PFP - PGR - Official.png", kind: "pfp", label: "PGR — Official" },
+    { id: "pfp-wuwa-official", path: "assets/PFP - WuWa - Official.png", kind: "pfp", label: "WuWa — Official" },
+    { id: "pfp-hsr-official", path: "assets/PFP - HSR - Official.png", kind: "pfp", label: "HSR — Official" },
+    { id: "pfp-hi3rd-official", path: "assets/PFP - HI3rd - Official.png", kind: "pfp", label: "HI3rd — Official" },
+    { id: "pfp-zzz-official", path: "assets/PFP - ZZZ - Official.png", kind: "pfp", label: "ZZZ — Official" },
+    { id: "pfp-endfield-official", path: "assets/PFP - Endfield - Official.png", kind: "pfp", label: "Endfield — Official" },
     { id: "pfp-endfield-arcane", path: "assets/PFP - Endfield - Arcane.png", kind: "pfp", label: "Endfield — Arcane" },
     { id: "pfp-hi3rd-seele", path: "assets/PFP - HI3rd - Seele.png", kind: "pfp", label: "HI3rd — Seele" },
     { id: "pfp-hsr-castorice", path: "assets/PFP - HSR - Castorice.png", kind: "pfp", label: "HSR — Castorice" },
@@ -119,9 +128,155 @@
     return STOCK_PFP_ASSETS.slice();
   }
 
+  /** Official stock PFP id for each bundled preset (used when adding from preset). */
+  const PRESET_OFFICIAL_PFP_IDS = {
+    hsr: "pfp-hsr-official",
+    zzz: "pfp-zzz-official",
+    hi3: "pfp-hi3rd-official",
+    ww: "pfp-wuwa-official",
+    akendfield: "pfp-endfield-official",
+    pgr: "pfp-pgr-official",
+  };
+
+  function getStockPfpAssetById(id) {
+    const key = String(id || "").trim();
+    if (!key) return null;
+    return STOCK_PFP_ASSETS.find((a) => a.id === key) || null;
+  }
+
+  /** Resolve a preset's default icon path (relative asset URL), or null. */
+  function resolvePresetIconPath(presetOrOpts) {
+    const o = presetOrOpts || {};
+    const stockId = o.iconStockId || PRESET_OFFICIAL_PFP_IDS[o.id || o.presetId] || null;
+    const asset = getStockPfpAssetById(stockId);
+    return asset && asset.path ? asset.path : null;
+  }
+
+  function isUserImageRef(path) {
+    return String(path || "").trim().toLowerCase().indexOf(USER_IMAGE_REF_PREFIX) === 0;
+  }
+
+  function makeUserImageRef(id) {
+    return USER_IMAGE_REF_PREFIX + String(id || "").trim();
+  }
+
+  function getUserImageIdFromRef(path) {
+    const raw = String(path || "").trim();
+    if (!isUserImageRef(raw)) return "";
+    return raw.slice(USER_IMAGE_REF_PREFIX.length);
+  }
+
+  function getUserImageLibrary() {
+    if (!Array.isArray(state.userImageLibrary)) state.userImageLibrary = [];
+    return state.userImageLibrary;
+  }
+
+  function getUserImageById(id) {
+    const key = String(id || "").trim();
+    if (!key) return null;
+    return getUserImageLibrary().find((e) => e && e.id === key) || null;
+  }
+
+  function resolveUserImageUrl(pathOrRef) {
+    const id = isUserImageRef(pathOrRef) ? getUserImageIdFromRef(pathOrRef) : String(pathOrRef || "").trim();
+    const entry = getUserImageById(id);
+    return entry && entry.dataUrl ? entry.dataUrl : "";
+  }
+
+  function generateUserImageId() {
+    return "uimg_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  /**
+   * Add an image to the personal library (stored once; tasks/games keep userimg:id refs).
+   * opts: { kind: "banner"|"pfp", label?, dataUrl }
+   */
+  function addUserImage(opts) {
+    const o = opts || {};
+    const dataUrl = String(o.dataUrl || "").trim();
+    if (!dataUrl || dataUrl.indexOf("data:") !== 0) return null;
+    const kind = o.kind === "pfp" ? "pfp" : "banner";
+    const label =
+      (o.label && String(o.label).trim()) ||
+      (kind === "pfp" ? "Profile picture" : "Banner") +
+        " " +
+        (getUserImageLibrary().filter((e) => e && e.kind === kind).length + 1);
+    const entry = {
+      id: generateUserImageId(),
+      kind: kind,
+      label: label.slice(0, 80),
+      createdAt: Date.now(),
+      dataUrl: dataUrl,
+    };
+    getUserImageLibrary().unshift(entry);
+    return entry;
+  }
+
+  function updateUserImageMeta(id, patch) {
+    const entry = getUserImageById(id);
+    if (!entry || !patch) return null;
+    if (patch.label != null) {
+      const label = String(patch.label).trim();
+      if (label) entry.label = label.slice(0, 80);
+    }
+    if (patch.kind === "banner" || patch.kind === "pfp") entry.kind = patch.kind;
+    return entry;
+  }
+
+  function removeUserImage(id) {
+    const key = String(id || "").trim();
+    if (!key) return false;
+    const list = getUserImageLibrary();
+    const idx = list.findIndex((e) => e && e.id === key);
+    if (idx < 0) return false;
+    list.splice(idx, 1);
+    return true;
+  }
+
+  function cloneUserImageLibraryForSave(omitData) {
+    return getUserImageLibrary().map((e) => {
+      if (!e || typeof e !== "object") return e;
+      if (!omitData) {
+        return {
+          id: e.id,
+          kind: e.kind === "pfp" ? "pfp" : "banner",
+          label: e.label || "",
+          createdAt: e.createdAt || 0,
+          dataUrl: e.dataUrl || "",
+        };
+      }
+      return {
+        id: e.id,
+        kind: e.kind === "pfp" ? "pfp" : "banner",
+        label: e.label || "",
+        createdAt: e.createdAt || 0,
+      };
+    });
+  }
+
+  function normalizeLoadedUserImageLibrary(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((e) => {
+        if (!e || typeof e !== "object") return null;
+        const id = String(e.id || "").trim();
+        const dataUrl = String(e.dataUrl || "").trim();
+        if (!id) return null;
+        return {
+          id: id,
+          kind: e.kind === "pfp" ? "pfp" : "banner",
+          label: String(e.label || id).trim().slice(0, 80) || id,
+          createdAt: Number(e.createdAt) || 0,
+          dataUrl: dataUrl.indexOf("data:") === 0 ? dataUrl : "",
+        };
+      })
+      .filter(Boolean);
+  }
+
   function resolveStockBannerUrl(path) {
     const raw = String(path || "").trim();
     if (!raw) return "";
+    if (isUserImageRef(raw)) return resolveUserImageUrl(raw) || "";
     if (/^(data:|blob:|https?:|\/\/)/i.test(raw)) return raw;
     try {
       return new URL(raw.replace(/^\.\//, ""), document.baseURI || window.location.href).href;
@@ -217,6 +372,7 @@
     historyMonth: null,
     historyYear: null,
     extracurricularTasks: [],
+    userImageLibrary: [],
     extracurricularCompleted: {},
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
     extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
@@ -689,6 +845,9 @@
         if (parsed.historyMonth != null && parsed.historyMonth >= 0 && parsed.historyMonth <= 11) state.historyMonth = parsed.historyMonth;
         if (parsed.historyYear != null && Number.isFinite(parsed.historyYear)) state.historyYear = parsed.historyYear;
         if (Array.isArray(parsed.extracurricularTasks)) state.extracurricularTasks = parsed.extracurricularTasks;
+        if (Array.isArray(parsed.userImageLibrary)) {
+          state.userImageLibrary = normalizeLoadedUserImageLibrary(parsed.userImageLibrary);
+        }
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
         if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
@@ -740,6 +899,7 @@
     // Schema migrations run once. Opinionated history repairs are Settings → Debug / Data.
     migrateSchemaIfNeeded();
     if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
+    if (!Array.isArray(state.userImageLibrary)) state.userImageLibrary = [];
     if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
     const taskIds = new Set((state.extracurricularTasks || []).map((t) => t.id));
@@ -863,6 +1023,7 @@
       extracurricularTasks: omitImages
         ? (state.extracurricularTasks || []).map(cloneTaskWithoutImages)
         : state.extracurricularTasks,
+      userImageLibrary: cloneUserImageLibraryForSave(omitImages),
       extracurricularCompleted: state.extracurricularCompleted,
       extracurricularCompletedAt: state.extracurricularCompletedAt,
       extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
@@ -1275,6 +1436,51 @@
     save();
   }
 
+  function parseCssColorToRgb(color) {
+    if (!color || typeof color !== "string") return null;
+    const s = color.trim();
+    const hex = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hex) {
+      let h = hex[1];
+      if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      return {
+        r: parseInt(h.slice(0, 2), 16),
+        g: parseInt(h.slice(2, 4), 16),
+        b: parseInt(h.slice(4, 6), 16),
+      };
+    }
+    const rgb = s.match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)/i);
+    if (rgb) {
+      return { r: Number(rgb[1]), g: Number(rgb[2]), b: Number(rgb[3]) };
+    }
+    return null;
+  }
+
+  /** Relative luminance (WCAG). Dark surface when < ~0.45. */
+  function isDarkCssColor(color) {
+    const rgb = parseCssColorToRgb(color);
+    if (!rgb) return true;
+    const lin = (c) => {
+      const v = Math.max(0, Math.min(255, c)) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    };
+    const L = 0.2126 * lin(rgb.r) + 0.7152 * lin(rgb.g) + 0.0722 * lin(rgb.b);
+    return L < 0.45;
+  }
+
+  function applyNativeControlScheme(root, bgColor) {
+    if (!root) return;
+    const dark = isDarkCssColor(bgColor);
+    root.style.colorScheme = dark ? "dark" : "light";
+    root.style.setProperty("--native-picker-icon-filter", dark ? "invert(1)" : "none");
+  }
+
+  function clearNativeControlScheme(root) {
+    if (!root) return;
+    root.style.colorScheme = "";
+    root.style.removeProperty("--native-picker-icon-filter");
+  }
+
   function applyTheme() {
     const root = document.documentElement;
     if (!root) return;
@@ -1287,12 +1493,14 @@
         const val = state.themeCustom[layer.id];
         if (val) root.style.setProperty("--" + layer.cssVar, val);
       });
+      applyNativeControlScheme(root, state.themeCustom.bg || DEFAULT_CUSTOM_THEME.bg);
     } else if (customPreset && customPreset.colors) {
       root.setAttribute("data-theme", "custom");
       COLOR_LAYERS.forEach((layer) => {
         const val = customPreset.colors[layer.id];
         if (val) root.style.setProperty("--" + layer.cssVar, val);
       });
+      applyNativeControlScheme(root, customPreset.colors.bg || DEFAULT_CUSTOM_THEME.bg);
     } else {
       root.style.removeProperty("--bg");
       root.style.removeProperty("--bg-elevated");
@@ -1307,7 +1515,9 @@
       root.style.removeProperty("--pie-dailies");
       root.style.removeProperty("--pie-weeklies");
       root.style.removeProperty("--pie-endgame");
+      root.style.removeProperty("--pie-extracurricular");
       root.style.removeProperty("--pie-missed");
+      clearNativeControlScheme(root);
       const preset = THEME_PRESET_IDS_UNIQUE.includes(state.themePreset) ? state.themePreset : "purple";
       root.setAttribute("data-theme", preset);
     }
@@ -1602,6 +1812,11 @@
 
   /** Cycle boundaries for the period containing dateStr (matches calendar/tally logic). */
   function getEndgameCycleDatesForDate(task, dateStr, game) {
+    if (isManualResetTask(task)) {
+      const bounds = getManualResetCycleBounds(task, game, "endgame");
+      if (!bounds) return { start: dateStr, end: dateStr };
+      return { start: getDateStr(bounds.cycleStart), end: getDateStr(bounds.cycleEnd) };
+    }
     const cycleStart = getCycleStartForDate(task, dateStr, game);
     const cycleEnd = new Date(cycleStart.getTime() + getEndgameTimeLimitMs(task));
     return { start: getDateStr(cycleStart), end: getDateStr(cycleEnd) };
@@ -1831,11 +2046,14 @@
     const y = parts[0];
     const m = (parts[1] || 1) - 1;
     const d = parts[2] || 1;
-    // End of due calendar day at task reset time when available, else 23:59.
-    const hour = Number.isFinite(task.weekStartHour) ? task.weekStartHour : 23;
-    const minute = Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 59;
+    // Prefer explicit due clock; fall back to cycle begin clock, else 23:59.
+    const hour = Number.isFinite(task.manualDueHour)
+      ? task.manualDueHour
+      : (Number.isFinite(task.weekStartHour) ? task.weekStartHour : 23);
+    const minute = Number.isFinite(task.manualDueMinute)
+      ? task.manualDueMinute
+      : (Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 59);
     const end = createDateInTimezone(y, m, d, hour, minute, tz);
-    // If using midnight-ish reset, treat due as that clock on the due day; if 23:59, fine as-is.
     return end.getTime();
   }
 
@@ -1906,7 +2124,7 @@
     if (task && task.manualAwaitingRestart) return "Awaiting restart";
     const ms = getManualResetRemainingMs(task, now);
     if (ms == null) return "TBD";
-    if (ms <= 0) return "Due";
+    if (ms <= 0) return "Cycle Ended";
     return formatRemainingMs(ms);
   }
 
@@ -1933,8 +2151,27 @@
     const todayStr = getDateStr(now);
     const reason = o.reason || "reset";
     const newStartStr = isValidDateStr(o.dateStarted) ? o.dateStarted : todayStr;
-    const newStartMoment = getManualResetMomentOnDate(task, newStartStr, game) || getEndgameAnchorDate(
-      Object.assign({}, task, { dateStarted: newStartStr }),
+    const startHour = Number.isFinite(o.startHour)
+      ? Math.max(0, Math.min(23, o.startHour | 0))
+      : (Number.isFinite(task.weekStartHour) ? task.weekStartHour : getResetHour(task, "weekStartHour", 4, game));
+    const startMinute = Number.isFinite(o.startMinute)
+      ? Math.max(0, Math.min(59, o.startMinute | 0))
+      : (Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0);
+    let startWeekday = Number.isFinite(o.startWeekday) ? Math.max(0, Math.min(6, o.startWeekday | 0)) : null;
+    if (startWeekday == null && isValidDateStr(newStartStr)) {
+      const tmp = new Date(newStartStr + "T12:00:00");
+      startWeekday = tmp.getDay();
+    }
+    if (startWeekday == null) {
+      startWeekday = Number.isFinite(task.weekStartDay) ? task.weekStartDay : 0;
+    }
+    const newStartMoment = getEndgameAnchorDate(
+      Object.assign({}, task, {
+        dateStarted: newStartStr,
+        weekStartHour: startHour,
+        weekStartMinute: startMinute,
+        weekStartDay: startWeekday,
+      }),
       game
     );
 
@@ -1995,15 +2232,24 @@
     }
 
     task.dateStarted = newStartStr;
+    if (Number.isFinite(o.startHour)) task.weekStartHour = Math.max(0, Math.min(23, o.startHour | 0));
+    if (Number.isFinite(o.startMinute)) task.weekStartMinute = Math.max(0, Math.min(59, o.startMinute | 0));
+    if (Number.isFinite(o.startWeekday)) task.weekStartDay = Math.max(0, Math.min(6, o.startWeekday | 0));
     if (o.tbd) {
       task.manualDueTbd = true;
       task.manualDueDateStr = null;
+      task.manualDueHour = undefined;
+      task.manualDueMinute = undefined;
     } else if (isValidDateStr(o.dueDateStr)) {
       task.manualDueTbd = false;
       task.manualDueDateStr = o.dueDateStr;
+      if (Number.isFinite(o.dueHour)) task.manualDueHour = Math.max(0, Math.min(23, o.dueHour | 0));
+      if (Number.isFinite(o.dueMinute)) task.manualDueMinute = Math.max(0, Math.min(59, o.dueMinute | 0));
     } else {
       task.manualDueTbd = true;
       task.manualDueDateStr = null;
+      task.manualDueHour = undefined;
+      task.manualDueMinute = undefined;
     }
     task.manualAwaitingRestart = false;
 
@@ -2032,6 +2278,222 @@
 
     if (typeof bumpDataVersion === "function") bumpDataVersion();
     return true;
+  }
+
+  /** Build cycle bounds from explicit manual window fields (does not mutate task). */
+  function buildManualResetBoundsFromParts(task, game, taskType, parts) {
+    const p = parts || {};
+    if (!task || !isValidDateStr(p.startDateStr) || !isValidDateStr(p.endDateStr)) return null;
+    const startHour = Number.isFinite(p.startHour) ? Math.max(0, Math.min(23, p.startHour | 0)) : 4;
+    const startMinute = Number.isFinite(p.startMinute) ? Math.max(0, Math.min(59, p.startMinute | 0)) : 0;
+    const endHour = Number.isFinite(p.endHour) ? Math.max(0, Math.min(23, p.endHour | 0)) : 23;
+    const endMinute = Number.isFinite(p.endMinute) ? Math.max(0, Math.min(59, p.endMinute | 0)) : 59;
+    const startWeekday = new Date(p.startDateStr + "T12:00:00").getDay();
+    const cycleStart = getEndgameAnchorDate(
+      Object.assign({}, task, {
+        dateStarted: p.startDateStr,
+        weekStartHour: startHour,
+        weekStartMinute: startMinute,
+        weekStartDay: startWeekday,
+      }),
+      game
+    );
+    const tz = getRecordingTimezone();
+    const ep = String(p.endDateStr).split("-").map(Number);
+    const cycleEnd = createDateInTimezone(ep[0], (ep[1] || 1) - 1, ep[2] || 1, endHour, endMinute, tz);
+    if (!(cycleEnd.getTime() > cycleStart.getTime())) return null;
+    return {
+      cycleStart,
+      cycleEnd,
+      nextCycleStart: new Date(cycleEnd.getTime()),
+      startDateStr: p.startDateStr,
+      endDateStr: p.endDateStr,
+      startHour,
+      startMinute,
+      endHour,
+      endMinute,
+      startWeekday,
+    };
+  }
+
+  function captureManualLiveWindow(task) {
+    return {
+      dateStarted: task.dateStarted,
+      weekStartHour: task.weekStartHour,
+      weekStartMinute: task.weekStartMinute,
+      weekStartDay: task.weekStartDay,
+      manualDueTbd: !!task.manualDueTbd,
+      manualDueDateStr: task.manualDueDateStr,
+      manualDueHour: task.manualDueHour,
+      manualDueMinute: task.manualDueMinute,
+      manualAwaitingRestart: !!task.manualAwaitingRestart,
+    };
+  }
+
+  function restoreManualLiveWindow(task, snap) {
+    if (!task || !snap) return;
+    task.dateStarted = snap.dateStarted;
+    task.weekStartHour = snap.weekStartHour;
+    task.weekStartMinute = snap.weekStartMinute;
+    task.weekStartDay = snap.weekStartDay;
+    task.manualDueTbd = snap.manualDueTbd;
+    task.manualDueDateStr = snap.manualDueDateStr;
+    task.manualDueHour = snap.manualDueHour;
+    task.manualDueMinute = snap.manualDueMinute;
+    task.manualAwaitingRestart = snap.manualAwaitingRestart;
+  }
+
+  function applyTemporaryManualWindow(task, bounds) {
+    task.dateStarted = bounds.startDateStr;
+    task.weekStartHour = bounds.startHour;
+    task.weekStartMinute = bounds.startMinute;
+    task.weekStartDay = bounds.startWeekday;
+    task.manualDueTbd = false;
+    task.manualDueDateStr = bounds.endDateStr;
+    task.manualDueHour = bounds.endHour;
+    task.manualDueMinute = bounds.endMinute;
+    task.manualAwaitingRestart = false;
+  }
+
+  function isSameManualLiveWindow(task, bounds) {
+    if (!task || !bounds) return false;
+    if (!isValidDateStr(task.dateStarted) || task.dateStarted !== bounds.startDateStr) return false;
+    if (task.manualDueTbd || !isValidDateStr(task.manualDueDateStr)) return false;
+    if (task.manualDueDateStr !== bounds.endDateStr) return false;
+    const sh = Number.isFinite(task.weekStartHour) ? task.weekStartHour : 4;
+    const sm = Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0;
+    const eh = Number.isFinite(task.manualDueHour) ? task.manualDueHour : sh;
+    const em = Number.isFinite(task.manualDueMinute) ? task.manualDueMinute : sm;
+    return sh === bounds.startHour && sm === bounds.startMinute && eh === bounds.endHour && em === bounds.endMinute;
+  }
+
+  function upsertManualClosedCycle(task, startStr, endStr, completed) {
+    if (!task || !isValidDateStr(startStr) || !isValidDateStr(endStr)) return;
+    if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
+    const existing = task.manualClosedCycles.find((c) => c && c.start === startStr && c.end === endStr);
+    if (existing) {
+      existing.completed = completed ? 1 : 0;
+      return existing;
+    }
+    const row = { start: startStr, end: endStr, completed: completed ? 1 : 0 };
+    task.manualClosedCycles.push(row);
+    return row;
+  }
+
+  /**
+   * Find an existing completion for a manual window (calendar/timestamps or closed-cycle flag).
+   * @returns {{ dateStr: string|null, fromClosed: boolean }}
+   */
+  function findManualWindowCompletion(key, type, task, bounds) {
+    if (!bounds) return { dateStr: null, fromClosed: false };
+    const onCal = findCompletionDateInBounds(key, type, bounds);
+    if (onCal) return { dateStr: onCal, fromClosed: false };
+    const closed = Array.isArray(task && task.manualClosedCycles) ? task.manualClosedCycles : [];
+    const hit = closed.find((c) => c && c.start === bounds.startDateStr && c.end === bounds.endDateStr && c.completed);
+    if (hit) return { dateStr: bounds.startDateStr, fromClosed: true };
+    return { dateStr: null, fromClosed: false };
+  }
+
+  /**
+   * Log a completion for a manual-reset weekly/endgame task.
+   * Past windows are archived into manualClosedCycles without clobbering the live window.
+   * Uses the same calendar fill + timestamp + tally write path as applyTaskCompletion.
+   */
+  function applyManualResetCompletion(game, task, taskType, opts) {
+    const o = opts || {};
+    if (!game || !task || !isManualResetTask(task)) return { ok: false, reason: "Task not found" };
+    const type = taskType === "endgame" ? "endgame" : "weeklies";
+    const key = game.id + "." + (task.id || task.label);
+    const dateStr = isValidDateStr(o.dateStr) ? o.dateStr : null;
+    if (!dateStr) return { ok: false, reason: "Completion date required" };
+
+    const bounds = buildManualResetBoundsFromParts(task, game, type, {
+      startDateStr: o.startDateStr,
+      endDateStr: o.endDateStr,
+      startHour: o.startHour,
+      startMinute: o.startMinute,
+      endHour: o.endHour,
+      endMinute: o.endMinute,
+    });
+    if (!bounds) return { ok: false, reason: "Cycle end must be after cycle start" };
+
+    const hour = Number.isFinite(o.hour) ? o.hour : 12;
+    const minute = Number.isFinite(o.minute) ? o.minute : 0;
+    const completeMs = new Date(
+      dateStr + "T" + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") + ":00"
+    ).getTime();
+    if (!Number.isFinite(completeMs) || completeMs < bounds.cycleStart.getTime() || completeMs >= bounds.cycleEnd.getTime()) {
+      return { ok: false, reason: "Completion time must fall inside the cycle start/end window" };
+    }
+
+    const live = isSameManualLiveWindow(task, bounds);
+    const conflict = findManualWindowCompletion(key, type, task, bounds);
+    if (conflict.dateStr && !o.replace) {
+      return {
+        ok: false,
+        reason: "conflict",
+        conflictDateStr: conflict.dateStr,
+        fromClosed: !!conflict.fromClosed,
+      };
+    }
+
+    const snap = live ? null : captureManualLiveWindow(task);
+    applyTemporaryManualWindow(task, bounds);
+
+    let result;
+    try {
+      if (conflict.dateStr) {
+        if (!conflict.fromClosed) {
+          removeTaskCompletion(type, key, {
+            dateStr: conflict.dateStr,
+            skipUnlockGate: true,
+            recordUndo: false,
+            save: false,
+            render: false,
+            processResets: false,
+          });
+        } else {
+          // Closed flag without calendar marks still counts in tallies — drop it before re-apply.
+          if (type === "weeklies") {
+            state.weekliesCompleted[key] = Math.max(0, getCompletedAmount(state.weekliesCompleted, key) - 1);
+          } else {
+            const amt = getCompletedAmount(state.endgameCompleted, key);
+            state.endgameCompleted[key] = Math.max(0, amt - 1);
+            ensureEndgameEarnedArrayLength(game.id, task.id || task.label, Math.max(0, amt - 1));
+          }
+          upsertManualClosedCycle(task, bounds.startDateStr, bounds.endDateStr, 0);
+        }
+      }
+
+      result = applyTaskCompletion(type, key, {
+        dateStr,
+        hour,
+        minute,
+        skipUnlockGate: true,
+        currencyValue: o.currencyValue,
+        recordUndo: o.recordUndo !== false,
+        undoLabel: o.undoLabel || ("Complete " + (task.label || key)),
+        save: false,
+        render: false,
+        processResets: false,
+      });
+      if (!result || !result.ok) {
+        return result || { ok: false, reason: "Could not apply completion" };
+      }
+
+      if (!live) {
+        upsertManualClosedCycle(task, bounds.startDateStr, bounds.endDateStr, 1);
+      }
+    } finally {
+      // Restore live window before save so past logs never overwrite the current cycle.
+      if (snap) restoreManualLiveWindow(task, snap);
+    }
+
+    if (o.processResets !== false) processResets();
+    if (o.save !== false) save(o.saveOptions);
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    if (o.render !== false) renderActiveTab();
+    return { ok: true, dateStr, pastWindow: !live };
   }
 
   function getWeekDates() {
@@ -2421,8 +2883,53 @@
   }
 
   /**
+   * Extracurricular stamps for Time Trends from filed completion times only.
+   * Skips completed tasks with missing/invalid extracurricularCompletedAt (does not invent times).
+   */
+  function listExtracurricularTimestampsForTimeTrends() {
+    const out = [];
+    const tz = typeof getAppTimezone === "function" ? getAppTimezone() : Intl.DateTimeFormat().resolvedOptions().timeZone;
+    (state.extracurricularTasks || []).forEach((task) => {
+      if (!task || !task.id) return;
+      if (!state.extracurricularCompleted || !state.extracurricularCompleted[task.id]) return;
+      const iso = state.extracurricularCompletedAt && state.extracurricularCompletedAt[task.id];
+      if (!iso || typeof iso !== "string") return;
+      const d = new Date(iso);
+      if (!Number.isFinite(d.getTime())) return;
+      const parts = typeof getDatePartsInTimezone === "function"
+        ? getDatePartsInTimezone(d, tz)
+        : {
+            year: d.getFullYear(),
+            month: d.getMonth(),
+            day: d.getDate(),
+            hour: d.getHours(),
+            minute: d.getMinutes(),
+          };
+      const dateStr =
+        String(parts.year) +
+        "-" +
+        String(parts.month + 1).padStart(2, "0") +
+        "-" +
+        String(parts.day).padStart(2, "0");
+      if (!isValidDateStr(dateStr)) return;
+      const hour = Number(parts.hour);
+      if (!Number.isFinite(hour) || hour < 0 || hour > 23) return;
+      out.push({
+        dateStr,
+        hour,
+        minute: Number.isFinite(Number(parts.minute)) ? Math.max(0, Math.min(59, Math.round(Number(parts.minute)))) : 0,
+        gameId: task.gameId || "",
+        taskType: "extracurricular",
+        taskId: task.id,
+        taskLabel: task.label || task.id,
+      });
+    });
+    return out;
+  }
+
+  /**
    * Timestamps for Time Trends hour / day-of-week charts.
-   * Dailies pass through; weeklies/endgame keep one entry per cycle (earliest finish).
+   * Dailies and extracurricular pass through; weeklies/endgame keep one entry per cycle (earliest finish).
    */
   function getTimestampsForTimeTrends(rawTimestamps) {
     const list = Array.isArray(rawTimestamps) ? rawTimestamps : [];
@@ -2431,7 +2938,7 @@
     list.forEach((t) => {
       if (!t || !isValidDateStr(t.dateStr)) return;
       const type = t.taskType;
-      if (type === "dailies") {
+      if (type === "dailies" || type === "extracurricular") {
         out.push(t);
         return;
       }
@@ -2724,10 +3231,103 @@
   }
 
   /**
+   * Raw banner source on a task (stock path, userimg ref, or data URL).
+   */
+  function getTaskBannerSourceRaw(task) {
+    if (!task || typeof task !== "object") return null;
+    const src =
+      task.bannerSourceImage ||
+      task.bannerImage ||
+      task.bannerHomeImage ||
+      task.bannerGamesImage ||
+      null;
+    const s = src != null ? String(src).trim() : "";
+    return s || null;
+  }
+
+  /**
+   * Banner choices for a game’s share-card hero: weeklies, endgame, extracurricular linked to the game.
+   */
+  function collectShareCardBannerChoices(game) {
+    if (!game) return [];
+    const out = [];
+    const seen = new Set();
+    function add(source, label, kind, id) {
+      const src = source != null ? String(source).trim() : "";
+      if (!src || seen.has(src)) return;
+      seen.add(src);
+      out.push({
+        id: String(id),
+        label: String(label || "Banner"),
+        kind: kind || "task",
+        source: src,
+      });
+    }
+    (game.weeklies || []).forEach((t) => {
+      add(
+        getTaskBannerSourceRaw(t),
+        t.label || t.id || "Weekly",
+        "weekly",
+        "weekly:" + (t.id || t.label || "")
+      );
+    });
+    (game.endgame || []).forEach((t) => {
+      add(
+        getTaskBannerSourceRaw(t),
+        t.label || t.id || "Endgame",
+        "endgame",
+        "endgame:" + (t.id || t.label || "")
+      );
+    });
+    (state.extracurricularTasks || []).forEach((t) => {
+      if (!t || String(t.gameId || "") !== String(game.id)) return;
+      add(
+        getTaskBannerSourceRaw(t),
+        t.name || t.label || "Extracurricular",
+        "extra",
+        "extra:" + (t.id || t.name || "")
+      );
+    });
+    return out;
+  }
+
+  function loadShareCardImage(url) {
+    return new Promise((resolve) => {
+      const raw = url != null ? String(url).trim() : "";
+      if (!raw) {
+        resolve(null);
+        return;
+      }
+      const src =
+        typeof resolveStockBannerUrl === "function" ? resolveStockBannerUrl(raw) : raw;
+      if (!src) {
+        resolve(null);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+
+  function drawShareCardImageCover(ctx, img, x, y, w, h) {
+    if (!ctx || !img || w <= 0 || h <= 0) return;
+    const iw = img.naturalWidth || img.width || 1;
+    const ih = img.naturalHeight || img.height || 1;
+    const scale = Math.max(w / iw, h / ih);
+    const sw = w / scale;
+    const sh = h / scale;
+    const sx = (iw - sw) / 2;
+    const sy = (ih - sh) / 2;
+    ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+  }
+
+  /**
    * Data model for the share-card PNG.
    * Rates + currency use the same Games completed/attempted tallies as Games / Attendance.
    * Timeframe only filters the finish-day chart (Time Trends timestamps).
-   * opts: { days?, startStr?, endStr?, todayStr?, gameIds?: string[] }
+   * opts: { days?, startStr?, endStr?, todayStr?, gameIds?: string[], heroByGameId?: { [gameId]: source|"none" } }
    */
   function buildShareCardModel(opts) {
     const o = opts || {};
@@ -2836,9 +3436,33 @@
       const wPossible = weekliesTasks.reduce((s, t) => s + t.possible, 0);
       const eDone = endgameTasks.reduce((s, t) => s + t.done, 0);
       const ePossible = endgameTasks.reduce((s, t) => s + t.possible, 0);
+      const bannerChoices = collectShareCardBannerChoices(game);
+      const heroPick =
+        o.heroByGameId && Object.prototype.hasOwnProperty.call(o.heroByGameId, game.id)
+          ? o.heroByGameId[game.id]
+          : undefined;
+      let heroSource = null;
+      if (heroPick === "none" || heroPick === "") {
+        heroSource = null;
+      } else if (heroPick != null && String(heroPick).trim()) {
+        heroSource = String(heroPick).trim();
+      } else if (bannerChoices.length) {
+        heroSource = bannerChoices[0].source;
+      }
+      const iconSource = game.iconImage ? String(game.iconImage).trim() : null;
       return {
         id: game.id,
         name: game.name || game.id,
+        subtitle: (game.subtitle && String(game.subtitle).trim()) || "",
+        iconSource: iconSource || null,
+        iconShape:
+          game.iconShape === "circle" || game.iconShape === "square" || game.iconShape === "rounded"
+            ? game.iconShape
+            : "rounded",
+        heroSource,
+        hasIcon: !!iconSource,
+        hasHero: !!heroSource,
+        bannerChoiceCount: bannerChoices.length,
         summary: {
           dailies: rateParts(dDone, dPossible),
           weeklies: rateParts(wDone, wPossible),
@@ -2878,6 +3502,11 @@
         ? getTimestampsForTimeTrends(state.completionTimestamps || [])
         : state.completionTimestamps || [];
     const finishDaysSun = [0, 0, 0, 0, 0, 0, 0];
+    const hourByType = {
+      dailies: Array(24).fill(0),
+      weeklies: Array(24).fill(0),
+      endgame: Array(24).fill(0),
+    };
     trendTs.forEach((t) => {
       if (!t || !isValidDateStr(t.dateStr)) return;
       if (t.dateStr < startStr || t.dateStr > endStr) return;
@@ -2885,7 +3514,17 @@
       if (t.taskType !== "weeklies" && t.taskType !== "endgame" && t.taskType !== "dailies") return;
       const day = new Date(t.dateStr + "T12:00:00").getDay();
       if (day >= 0 && day <= 6) finishDaysSun[day]++;
+      const h = Number(t.hour);
+      if (Number.isFinite(h) && h >= 0 && h <= 23 && hourByType[t.taskType]) {
+        hourByType[t.taskType][h]++;
+      }
     });
+    const hourMax = Math.max(
+      1,
+      ...Array.from({ length: 24 }, (_, h) =>
+        hourByType.dailies[h] + hourByType.weeklies[h] + hourByType.endgame[h]
+      )
+    );
     const dayNamesSunFirst = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const order = [1, 2, 3, 4, 5, 6, 0];
     const finishDayNames = order.map((i) => dayNamesSunFirst[i]);
@@ -2894,6 +3533,11 @@
     finishDays.forEach((n, i) => {
       if (n > finishDays[peakIdx]) peakIdx = i;
     });
+
+    let endgameTrend = null;
+    if (gameBlocks.length === 1) {
+      endgameTrend = buildShareCardEndgameTrend(gameBlocks[0].id, startStr, endStr);
+    }
 
     const dateSpan =
       formatShareCardShortDate(startStr) + " – " + formatShareCardShortDate(endStr);
@@ -2904,7 +3548,7 @@
         : isCustomRange
           ? dateSpan
           : rangeLabel;
-    const subtitle = "Games tallies · finish days " + finishWindowLabel;
+    const subtitle = "Games tallies · trends " + finishWindowLabel;
 
     return {
       ok: true,
@@ -2928,12 +3572,88 @@
         name: finishDayNames[peakIdx],
         count: finishDays[peakIdx],
       },
+      hourByType,
+      hourMax,
+      endgameTrend,
       currency: {
         earned: currencyEarned,
         potential: currencyPotential,
         currencyName,
       },
     };
+  }
+
+  /**
+   * Endgame line series for share card: completion index vs % time remaining.
+   * Filtered to cycles whose completion (or skipped end) falls in [startStr, endStr].
+   */
+  function buildShareCardEndgameTrend(gameId, startStr, endStr) {
+    const game = getGame(gameId);
+    if (!game) return { series: [], maxX: 1 };
+    const series = [];
+    (game.endgame || []).forEach((task) => {
+      const taskId = task.id || task.label;
+      const key = game.id + "." + taskId;
+      const events =
+        typeof getEndgameCompletionEventsForTrend === "function"
+          ? getEndgameCompletionEventsForTrend(key)
+          : [];
+      if (!events.length) return;
+      const limitUnit = task.timeLimitUnit === "day" ? "day" : "week";
+      const hasExplicitLimit = task.timeLimitEvery != null || task.timeLimitUnit != null;
+      const timeLimitMs = hasExplicitLimit
+        ? getIntervalMs(task.timeLimitEvery, limitUnit)
+        : getIntervalMs(task.frequencyEvery, task.frequencyUnit === "day" ? "day" : "week");
+      const byCycle = {};
+      events.forEach((t) => {
+        let cycleStartMs;
+        let cycleEndMs;
+        if (t.cycleStartStr && t.cycleEndStr) {
+          const startMom = getResetMomentForDateStr(task, game, t.cycleStartStr);
+          const endMom = getResetMomentForDateStr(task, game, t.cycleEndStr);
+          if (!startMom || !endMom || endMom.getTime() <= startMom.getTime()) return;
+          cycleStartMs = startMom.getTime();
+          cycleEndMs = endMom.getTime();
+        } else if (t.dateStr && isValidDateStr(t.dateStr)) {
+          const cycleStart = getCycleStartForDate(task, t.dateStr, game);
+          cycleStartMs = cycleStart.getTime();
+          cycleEndMs = cycleStartMs + timeLimitMs;
+        } else {
+          return;
+        }
+        const filterDate = t.skipped
+          ? t.cycleEndStr || t.cycleStartStr
+          : t.dateStr;
+        if (filterDate && isValidDateStr(filterDate)) {
+          if (filterDate < startStr || filterDate > endStr) return;
+        }
+        let pct;
+        if (t.skipped) {
+          pct = 0;
+        } else {
+          const completionMs = new Date(
+            t.dateStr + "T" + String(t.hour).padStart(2, "0") + ":00:00"
+          ).getTime();
+          const cycleLen = cycleEndMs - cycleStartMs;
+          if (cycleLen <= 0) return;
+          pct = ((cycleEndMs - completionMs) / cycleLen) * 100;
+          pct = Math.max(0, Math.min(100, pct));
+        }
+        if (byCycle[cycleStartMs] == null || pct > byCycle[cycleStartMs].pct) {
+          byCycle[cycleStartMs] = { pct: pct };
+        }
+      });
+      const sorted = Object.keys(byCycle)
+        .map(Number)
+        .sort((a, b) => a - b);
+      if (!sorted.length) return;
+      series.push({
+        label: task.label || taskId,
+        points: sorted.map((ms) => byCycle[ms]),
+      });
+    });
+    const maxX = Math.max(1, ...series.map((s) => s.points.length), 1);
+    return { series: series, maxX: maxX };
   }
 
   function getShareCardThemeColors() {
@@ -2997,7 +3717,11 @@
    * Render share card to a canvas (mockup-style layout).
    * Multi-game: grid of game panels + Overall (sketch layouts for 2–6+).
    */
-  function renderShareCardCanvas(model, themeColors) {
+  /**
+   * Render share card to a canvas (Draft 1: hero + icon header when art exists).
+   * Async — waits for icon/hero images. Missing art collapses empty bands.
+   */
+  async function renderShareCardCanvas(model, themeColors) {
     if (!model || !model.ok) return { ok: false, reason: (model && model.reason) || "Nothing to render" };
     if (typeof document === "undefined" || !document.createElement) {
       return { ok: false, reason: "Canvas unavailable" };
@@ -3017,6 +3741,19 @@
       { key: "weeklies", label: "Weeklies", color: colors.weeklies, unit: "" },
       { key: "endgame", label: "Endgame", color: colors.endgame, unit: "" },
     ];
+
+    const imageCache = new Map();
+    async function imgFor(src) {
+      const key = src != null ? String(src) : "";
+      if (!key) return null;
+      if (imageCache.has(key)) return imageCache.get(key);
+      const loaded = await loadShareCardImage(key);
+      imageCache.set(key, loaded);
+      return loaded;
+    }
+    await Promise.all(
+      games.flatMap((g) => [imgFor(g.iconSource), imgFor(g.heroSource)])
+    );
 
     function panelFill(ctx2, x, y, w, h, opts) {
       const o = opts || {};
@@ -3177,9 +3914,191 @@
       return h;
     }
 
+    function drawHourChart(ctx2, x, y, w, h) {
+      panelFill(ctx2, x, y, w, h, { radius: 12 });
+      ctx2.fillStyle = colors.muted;
+      ctx2.font = "700 10px " + font;
+      ctx2.fillText("COMPLETIONS BY HOUR (ROUNDED)", x + 12, y + 18);
+      const legend = [
+        { key: "dailies", label: "Dailies", color: colors.dailies },
+        { key: "weeklies", label: "Weeklies", color: colors.weeklies },
+        { key: "endgame", label: "Endgame", color: colors.endgame },
+      ];
+      let lx = x + 12;
+      legend.forEach((item) => {
+        ctx2.fillStyle = item.color;
+        ctx2.fillRect(lx, y + 28, 8, 8);
+        ctx2.fillStyle = colors.muted;
+        ctx2.font = "600 9px " + font;
+        ctx2.fillText(item.label, lx + 12, y + 35);
+        lx += ctx2.measureText(item.label).width + 28;
+      });
+      const byType = model.hourByType || {
+        dailies: Array(24).fill(0),
+        weeklies: Array(24).fill(0),
+        endgame: Array(24).fill(0),
+      };
+      const maxC = Math.max(1, Number(model.hourMax) || 1);
+      const padL = 12;
+      const padR = 12;
+      const padB = 22;
+      const chartTop = y + 48;
+      const chartBottom = y + h - padB;
+      const usableH = Math.max(8, chartBottom - chartTop);
+      const slotW = (w - padL - padR) / 24;
+      for (let hour = 0; hour < 24; hour++) {
+        const bx = x + padL + hour * slotW + 1;
+        const bw = Math.max(2, slotW - 2);
+        let stack = 0;
+        ["dailies", "weeklies", "endgame"].forEach((key) => {
+          const n = (byType[key] && byType[key][hour]) || 0;
+          if (n <= 0) return;
+          const bh = Math.max(2, (n / maxC) * usableH);
+          const by = chartBottom - stack - bh;
+          ctx2.fillStyle = key === "dailies" ? colors.dailies : key === "weeklies" ? colors.weeklies : colors.endgame;
+          ctx2.fillRect(bx, by, bw, bh);
+          stack += bh;
+        });
+        if (hour % 3 === 0) {
+          ctx2.fillStyle = colors.muted;
+          ctx2.font = "600 8px " + font;
+          const lab = String(hour);
+          const tw = ctx2.measureText(lab).width;
+          ctx2.fillText(lab, bx + (bw - tw) / 2, y + h - 8);
+        }
+      }
+      return h;
+    }
+
+    function drawEndgameTrendChart(ctx2, x, y, w, h) {
+      const trend = model.endgameTrend;
+      if (!trend || !trend.series || !trend.series.length) return 0;
+      panelFill(ctx2, x, y, w, h, { radius: 12 });
+      ctx2.fillStyle = colors.muted;
+      ctx2.font = "700 9px " + font;
+      ctx2.fillText(
+        "ENDGAME TREND: COMPLETION # VS % TIME REMAINING (100% = START, 0% = DEADLINE)",
+        x + 12,
+        y + 16
+      );
+      const padL = 40;
+      const padR = 14;
+      const padT = 32;
+      const padB = 36;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+      const maxX = Math.max(1, Number(trend.maxX) || 1);
+      const xDiv = maxX > 1 ? maxX - 1 : 1;
+      const seriesColors = [
+        colors.endgame,
+        colors.dailies,
+        colors.weeklies,
+        "#f472b6",
+        "#fbbf24",
+        "#a3e635",
+        "#38bdf8",
+        "#c084fc",
+      ];
+
+      // axes + grid
+      ctx2.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx2.lineWidth = 1;
+      [0, 25, 50, 75, 100].forEach((pct) => {
+        const gy = y + padT + plotH - (pct / 100) * plotH;
+        ctx2.beginPath();
+        ctx2.moveTo(x + padL, gy);
+        ctx2.lineTo(x + w - padR, gy);
+        ctx2.stroke();
+        ctx2.fillStyle = colors.muted;
+        ctx2.font = "600 9px " + font;
+        ctx2.fillText(pct + "%", x + 8, gy + 3);
+      });
+
+      trend.series.forEach((serie, sIdx) => {
+        const color = seriesColors[sIdx % seriesColors.length];
+        const pts = serie.points || [];
+        if (!pts.length) return;
+        ctx2.strokeStyle = color;
+        ctx2.lineWidth = 2;
+        ctx2.lineJoin = "round";
+        ctx2.lineCap = "round";
+        ctx2.beginPath();
+        pts.forEach((p, i) => {
+          const px = x + padL + (i / xDiv) * plotW;
+          const py = y + padT + plotH - ((Number(p.pct) || 0) / 100) * plotH;
+          if (i === 0) ctx2.moveTo(px, py);
+          else ctx2.lineTo(px, py);
+        });
+        ctx2.stroke();
+        pts.forEach((p, i) => {
+          const px = x + padL + (i / xDiv) * plotW;
+          const py = y + padT + plotH - ((Number(p.pct) || 0) / 100) * plotH;
+          ctx2.fillStyle = color;
+          ctx2.beginPath();
+          ctx2.arc(px, py, 3.5, 0, Math.PI * 2);
+          ctx2.fill();
+        });
+      });
+
+      // x labels
+      ctx2.fillStyle = colors.muted;
+      ctx2.font = "600 9px " + font;
+      const tickStep = maxX > 8 ? 2 : 1;
+      for (let i = 0; i < maxX; i += tickStep) {
+        const px = x + padL + (i / xDiv) * plotW;
+        const lab = String(i + 1);
+        const tw = ctx2.measureText(lab).width;
+        ctx2.fillText(lab, px - tw / 2, y + h - 18);
+      }
+
+      // legend
+      let lx = x + padL;
+      const ly = y + h - 6;
+      trend.series.forEach((serie, sIdx) => {
+        const color = seriesColors[sIdx % seriesColors.length];
+        ctx2.fillStyle = color;
+        ctx2.beginPath();
+        ctx2.arc(lx + 4, ly - 3, 3.5, 0, Math.PI * 2);
+        ctx2.fill();
+        ctx2.fillStyle = colors.muted;
+        ctx2.font = "600 8px " + font;
+        const label = ellipsize(ctx2, serie.label || "Task", 90);
+        ctx2.fillText(label, lx + 12, ly);
+        lx += ctx2.measureText(label).width + 28;
+      });
+      return h;
+    }
+
+    function drawAvatar(ctx2, game, x, y, size) {
+      const img = imageCache.get(game.iconSource || "") || null;
+      const shape = game.iconShape || "rounded";
+      const r = shape === "circle" ? size / 2 : shape === "square" ? 6 : Math.max(8, size * 0.22);
+      ctx2.save();
+      roundRectPath(ctx2, x, y, size, size, r);
+      ctx2.clip();
+      if (img) {
+        drawShareCardImageCover(ctx2, img, x, y, size, size);
+      } else {
+        ctx2.fillStyle = colors.panel;
+        ctx2.fillRect(x, y, size, size);
+        ctx2.fillStyle = colors.accent;
+        ctx2.font = "700 " + Math.round(size * 0.42) + "px " + font;
+        const letter = ((game.name || "?").trim().charAt(0) || "?").toUpperCase();
+        const tw = ctx2.measureText(letter).width;
+        ctx2.fillText(letter, x + (size - tw) / 2, y + size * 0.66);
+      }
+      ctx2.restore();
+      ctx2.strokeStyle = colors.border;
+      ctx2.lineWidth = 1.5;
+      roundRectPath(ctx2, x, y, size, size, r);
+      ctx2.stroke();
+    }
+
     function measureGameCardHeight(game, innerW, compact) {
       const padIn = compact ? 10 : 16;
-      let h = padIn + (compact ? 20 : 28) + 6;
+      const heroH = game.hasHero ? (compact ? 72 : 150) : 0;
+      const headerH = compact ? 52 : 64;
+      let h = (heroH ? heroH - (compact ? 18 : 28) : 0) + padIn + headerH + 6;
       h += (compact ? 48 : 72) + 8;
       cats.forEach((cat) => {
         const tasks = game[cat.key] || [];
@@ -3195,20 +4114,59 @@
       h += (compact ? 48 : 72) + 8;
       const chartH = fullWidth ? 100 : compact ? 84 : 110;
       h += chartH + 6;
+      const hourH = fullWidth ? 130 : compact ? 100 : 120;
+      h += hourH + 6;
       if (model.peakDay && model.peakDay.count > 0) h += 20;
       h += padIn;
       return h;
     }
 
+    function drawGameHeader(ctx2, game, x, y, w, compact, withHeroOverlap) {
+      const iconSize = compact ? 40 : 56;
+      const textX = x + iconSize + (compact ? 10 : 14);
+      const titleSize = compact ? 14 : 22;
+      drawAvatar(ctx2, game, x, y, iconSize);
+      ctx2.fillStyle = colors.text;
+      ctx2.font = "700 " + titleSize + "px " + font;
+      ctx2.fillText(ellipsize(ctx2, game.name || "Game", w - iconSize - 16), textX, y + (compact ? 16 : 22));
+      const sub = game.subtitle || "";
+      if (sub) {
+        ctx2.fillStyle = colors.muted;
+        ctx2.font = "500 " + (compact ? 10 : 12) + "px " + font;
+        ctx2.fillText(ellipsize(ctx2, sub, w - iconSize - 16), textX, y + (compact ? 32 : 42));
+      }
+      return withHeroOverlap ? iconSize - (compact ? 8 : 12) : iconSize + (compact ? 10 : 14);
+    }
+
     function drawGameCard(ctx2, game, x, y, w, compact, minH) {
       const padIn = compact ? 10 : 16;
+      const heroH = game.hasHero ? (compact ? 72 : 110) : 0;
       const h = Math.max(measureGameCardHeight(game, w, compact), minH || 0);
       panelFill(ctx2, x, y, w, h, { radius: 14, lineWidth: 1.5 });
-      let cy = y + padIn;
-      ctx2.fillStyle = colors.text;
-      ctx2.font = "700 " + (compact ? 14 : 18) + "px " + font;
-      ctx2.fillText(ellipsize(ctx2, game.name || "Game", w - padIn * 2), x + padIn, cy + (compact ? 12 : 16));
-      cy += compact ? 20 : 30;
+
+      let cy = y;
+      if (game.hasHero) {
+        const heroImg = imageCache.get(game.heroSource || "") || null;
+        ctx2.save();
+        roundRectPath(ctx2, x + 1, y + 1, w - 2, heroH, 13);
+        ctx2.clip();
+        if (heroImg) drawShareCardImageCover(ctx2, heroImg, x + 1, y + 1, w - 2, heroH);
+        else {
+          ctx2.fillStyle = colors.elevated;
+          ctx2.fillRect(x + 1, y + 1, w - 2, heroH);
+        }
+        const fade = ctx2.createLinearGradient(0, y + heroH * 0.35, 0, y + heroH);
+        fade.addColorStop(0, "rgba(0,0,0,0)");
+        fade.addColorStop(1, "rgba(12,10,18,0.92)");
+        ctx2.fillStyle = fade;
+        ctx2.fillRect(x + 1, y + 1, w - 2, heroH);
+        ctx2.restore();
+        cy = y + heroH - (compact ? 22 : 30);
+      } else {
+        cy = y + padIn;
+      }
+
+      cy += drawGameHeader(ctx2, game, x + padIn, cy, w - padIn * 2, compact, !!game.hasHero) + 8;
       cy += drawMiniSummary(ctx2, x + padIn, cy, w - padIn * 2, game.summary, compact) + 8;
       cats.forEach((cat) => {
         const tasks = game[cat.key] || [];
@@ -3237,6 +4195,8 @@
       cy += drawMiniSummary(ctx2, x + padIn, cy, w - padIn * 2, model.summary, compact) + 8;
       const chartH = fullWidth ? 100 : compact ? 84 : 110;
       cy += drawFinishChart(ctx2, x + padIn, cy, w - padIn * 2, chartH) + 6;
+      const hourH = fullWidth ? 130 : compact ? 100 : 120;
+      cy += drawHourChart(ctx2, x + padIn, cy, w - padIn * 2, hourH) + 6;
       if (model.peakDay && model.peakDay.count > 0) {
         ctx2.fillStyle = colors.muted;
         ctx2.font = "600 11px " + font;
@@ -3245,16 +4205,30 @@
       return h;
     }
 
+    function measureSingleGameBody(g) {
+      let h = 0;
+      const heroH = g.hasHero ? 168 : 0;
+      h += heroH ? heroH - 20 : 0;
+      h += 70;
+      h += 72 + 18;
+      cats.forEach((cat) => {
+        const tasks = g[cat.key] || [];
+        if (tasks.length) h += categoryInnerHeight(tasks, false) + 30;
+      });
+      h += 120 + 14;
+      h += 140 + 12;
+      if (model.endgameTrend && model.endgameTrend.series && model.endgameTrend.series.length) {
+        h += 200 + 12;
+      }
+      if (model.peakDay && model.peakDay.count > 0) h += 26;
+      h += 70 + 22;
+      return h;
+    }
+
     // --- height estimate ---
     let est = pad + 160;
     if (!multi) {
-      const g = games[0] || { dailies: [], weeklies: [], endgame: [] };
-      est += 130;
-      cats.forEach((cat) => {
-        const tasks = g[cat.key] || [];
-        if (tasks.length) est += categoryInnerHeight(tasks, false) + 30;
-      });
-      est += 280;
+      est += measureSingleGameBody(games[0] || { dailies: [], weeklies: [], endgame: [] });
     } else {
       const cellW = (contentW - gap * (cols - 1)) / cols;
       const compact = true;
@@ -3291,8 +4265,8 @@
 
     ctx.save();
     const orb = ctx.createRadialGradient(W * 0.86, 90, 8, W * 0.86, 130, 230);
-    orb.addColorStop(0, "rgba(124, 58, 237, 0.25)");
-    orb.addColorStop(1, "rgba(124, 58, 237, 0)");
+    orb.addColorStop(0, "rgba(45, 212, 191, 0.18)");
+    orb.addColorStop(1, "rgba(45, 212, 191, 0)");
     ctx.fillStyle = orb;
     ctx.fillRect(0, 0, W, 380);
     ctx.restore();
@@ -3302,33 +4276,66 @@
     ctx.fillStyle = colors.muted;
     ctx.font = "700 12px " + font;
     ctx.fillText("GACHA TRACKER", pad, y + 12);
-    y += 34;
-
-    ctx.fillStyle = colors.text;
-    ctx.font = "700 36px " + font;
-    const title = String(model.title || "Share card");
-    ctx.fillText(title.length > 34 ? title.slice(0, 32) + "…" : title, pad, y + 30);
-    y += 46;
-
-    ctx.fillStyle = colors.muted;
-    ctx.font = "500 14px " + font;
-    ctx.fillText(String(model.subtitle || ""), pad, y + 12);
     y += 28;
 
-    const chip = model.gameCount + " game" + (model.gameCount === 1 ? "" : "s") + " selected";
-    ctx.font = "600 12px " + font;
-    const chipW = ctx.measureText(chip).width + 22;
-    const chipH = 26;
-    roundRectPath(ctx, pad, y, chipW, chipH, 13);
-    ctx.strokeStyle = colors.accent;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = colors.text;
-    ctx.fillText(chip, pad + 11, y + 17);
-    y += chipH + 24;
-
     if (!multi) {
-      const g = games[0] || { dailies: [], weeklies: [], endgame: [], summary: model.summary, currency: model.currency };
+      const g = games[0] || {
+        dailies: [],
+        weeklies: [],
+        endgame: [],
+        summary: model.summary,
+        currency: model.currency,
+        name: model.title,
+        hasHero: false,
+        hasIcon: false,
+      };
+      const heroH = g.hasHero ? 168 : 0;
+      if (g.hasHero) {
+        const heroImg = imageCache.get(g.heroSource || "") || null;
+        ctx.save();
+        roundRectPath(ctx, pad, y, contentW, heroH, 18);
+        ctx.clip();
+        if (heroImg) drawShareCardImageCover(ctx, heroImg, pad, y, contentW, heroH);
+        else {
+          ctx.fillStyle = colors.elevated;
+          ctx.fillRect(pad, y, contentW, heroH);
+        }
+        const fade = ctx.createLinearGradient(0, y + heroH * 0.4, 0, y + heroH);
+        fade.addColorStop(0, "rgba(0,0,0,0)");
+        fade.addColorStop(1, "rgba(12,10,18,0.95)");
+        ctx.fillStyle = fade;
+        ctx.fillRect(pad, y, contentW, heroH);
+        ctx.restore();
+        y += heroH - 36;
+      }
+
+      const iconSize = 64;
+      drawAvatar(ctx, g, pad, y, iconSize);
+      const textX = pad + iconSize + 16;
+      ctx.fillStyle = colors.text;
+      ctx.font = "700 32px " + font;
+      const title = String(g.name || model.title || "Share card");
+      ctx.fillText(ellipsize(ctx, title, contentW - iconSize - 20), textX, y + 28);
+      ctx.fillStyle = colors.muted;
+      ctx.font = "500 13px " + font;
+      const subLine = g.subtitle
+        ? g.subtitle + " · " + String(model.subtitle || "")
+        : String(model.subtitle || "");
+      ctx.fillText(ellipsize(ctx, subLine, contentW - iconSize - 20), textX, y + 50);
+      y += iconSize + 18;
+
+      const chip = model.gameCount + " game selected";
+      ctx.font = "600 12px " + font;
+      const chipW = ctx.measureText(chip).width + 22;
+      const chipH = 26;
+      roundRectPath(ctx, pad, y, chipW, chipH, 13);
+      ctx.strokeStyle = colors.accent;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = colors.text;
+      ctx.fillText(chip, pad + 11, y + 17);
+      y += chipH + 18;
+
       y += drawMiniSummary(ctx, pad, y, contentW, model.summary, false) + 18;
       cats.forEach((cat) => {
         const tasks = g[cat.key] || [];
@@ -3337,6 +4344,10 @@
       });
       y += 4;
       y += drawFinishChart(ctx, pad, y, contentW, 120) + 14;
+      y += drawHourChart(ctx, pad, y, contentW, 140) + 12;
+      if (model.endgameTrend && model.endgameTrend.series && model.endgameTrend.series.length) {
+        y += drawEndgameTrendChart(ctx, pad, y, contentW, 200) + 12;
+      }
       if (model.peakDay && model.peakDay.count > 0) {
         ctx.fillStyle = colors.text;
         ctx.font = "600 13px " + font;
@@ -3344,8 +4355,29 @@
         y += 26;
       }
       const cur = model.currency || g.currency || { earned: 0, potential: 0, currencyName: "" };
-      y += drawCurrencyStrip(ctx, pad, y, contentW, cur, "Currency earned", false) + 22;
+      const curLabel = cur.currencyName ? cur.currencyName + " earned" : "Currency earned";
+      y += drawCurrencyStrip(ctx, pad, y, contentW, cur, curLabel, false) + 22;
     } else {
+      ctx.fillStyle = colors.text;
+      ctx.font = "700 28px " + font;
+      const title = String(model.title || "Share card");
+      ctx.fillText(title.length > 40 ? title.slice(0, 38) + "…" : title, pad, y + 24);
+      y += 36;
+      ctx.fillStyle = colors.muted;
+      ctx.font = "500 13px " + font;
+      ctx.fillText(String(model.subtitle || ""), pad, y + 10);
+      y += 22;
+      const chip = model.gameCount + " games selected";
+      ctx.font = "600 12px " + font;
+      const chipW = ctx.measureText(chip).width + 22;
+      roundRectPath(ctx, pad, y, chipW, 26, 13);
+      ctx.strokeStyle = colors.accent;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = colors.text;
+      ctx.fillText(chip, pad + 11, y + 17);
+      y += 40;
+
       const cellW = (contentW - gap * (cols - 1)) / cols;
       const compact = true;
       const overallInGrid = games.length % cols !== 0;
@@ -3402,10 +4434,10 @@
     return { ok: true, canvas, width: W, height: canvas.height };
   }
 
-  function downloadShareCardPng(opts) {
+  async function downloadShareCardPng(opts) {
     const model = buildShareCardModel(opts);
     if (!model.ok) return model;
-    const rendered = renderShareCardCanvas(model);
+    const rendered = await renderShareCardCanvas(model);
     if (!rendered.ok) return rendered;
     try {
       const a = document.createElement("a");
@@ -3786,12 +4818,18 @@
       const dot = key.indexOf(".");
       gameId = dot >= 0 ? key.slice(0, dot) : key;
       taskId = dot >= 0 ? key.slice(dot + 1) : "";
-      const game = getGame(gameId);
-      const task =
-        type === "weeklies"
-          ? (game?.weeklies || []).find((t) => (t.id || t.label) === taskId)
-          : (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
-      taskLabel = task ? task.label || taskId : taskId;
+      if (type === "extracurricular") {
+        const task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
+        taskLabel = task ? task.label || taskId : taskId;
+        if (task && task.gameId) gameId = task.gameId;
+      } else {
+        const game = getGame(gameId);
+        const task =
+          type === "weeklies"
+            ? (game?.weeklies || []).find((t) => (t.id || t.label) === taskId)
+            : (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
+        taskLabel = task ? task.label || taskId : taskId;
+      }
     } else {
       const game = getGame(gameId);
       taskLabel = game ? game.name : gameId;
@@ -5846,6 +6884,26 @@
     const lastBounds = getLastCycleBounds(task, game);
     if (lastBounds && bounds.cycleStart.getTime() > lastBounds.startMs) return false;
     return true;
+  }
+
+  /**
+   * Home checklist membership for weeklies/endgame.
+   * Manual-reset tasks stay listed after the window ends (and while awaiting restart)
+   * so incomplete cycles remain actionable until the next Start. Retired (Stop Cycle)
+   * tasks still hide. Normal tasks keep strict in-window membership.
+   */
+  function isWeeklyOnHomeChecklist(task, now, game) {
+    if (!task) return false;
+    if (isTaskCycleEnded(task, now, game)) return false;
+    if (isManualResetTask(task)) return true;
+    return isWeeklyAvailableOnDate(task, now, game);
+  }
+
+  function isEndgameOnHomeChecklist(task, now, game) {
+    if (!task) return false;
+    if (isTaskCycleEnded(task, now, game)) return false;
+    if (isManualResetTask(task)) return true;
+    return isEndgameAvailableOnDate(task, now, game);
   }
 
   /**

@@ -15,28 +15,36 @@
       "weekStartHour": 4,
       "weekStartMinute": 0,
       "currency": 60,
-      "adjustForDST": true,
-      "dateStarted": "2026-03-14"
+      "dateStarted": "2026-03-14",
+      "frequencyEvery": 1,
+      "frequencyUnit": "week",
+      "timeLimitEvery": 1,
+      "timeLimitUnit": "week",
+      "adjustForDST": true
     },
     {
-      "id": "hallow_zero",
-      "label": "Hallow Zero",
+      "id": "hollow_zero",
+      "label": "Hollow Zero",
       "weekStartDay": 1,
       "weekStartHour": 4,
       "weekStartMinute": 0,
       "currency": 160,
-      "adjustForDST": true,
-      "dateStarted": "2026-03-14"
+      "dateStarted": "2026-03-14",
+      "frequencyEvery": 1,
+      "frequencyUnit": "week",
+      "timeLimitEvery": 1,
+      "timeLimitUnit": "week",
+      "adjustForDST": true
     }
   ],
   "endgame": [
     {
       "id": "deadly_assault",
       "label": "Deadly Assault",
-      "currency": 300,
       "weekStartDay": 5,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 300,
       "dateStarted": "2026-02-13",
       "frequencyEvery": 2,
       "frequencyUnit": "week",
@@ -47,10 +55,10 @@
     {
       "id": "shiyu_defense",
       "label": "Shiyu Defense",
-      "currency": 780,
       "weekStartDay": 5,
       "weekStartHour": 4,
       "weekStartMinute": 0,
+      "currency": 780,
       "dateStarted": "2026-02-06",
       "frequencyEvery": 2,
       "frequencyUnit": "week",
@@ -58,5 +66,6 @@
       "timeLimitUnit": "week",
       "adjustForDST": true
     }
-  ]
+  ],
+  "iconStockId": "pfp-zzz-official"
 }

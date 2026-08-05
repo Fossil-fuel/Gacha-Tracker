@@ -26,9 +26,9 @@ Out of scope unless you say otherwise: live game integration, auto-complete from
 
 | Concept | Meaning |
 |--------|---------|
-| **Game** | A title with reset timezone/hour, optional dailies, lists of weekly & endgame tasks, currency/pull rates. |
+| **Game** | A title with reset timezone/hour, optional dailies, lists of weekly & endgame tasks, currency/pull rates, optional identity (`iconImage` / shape / subtitle). Presets may set `iconStockId` so Add Game applies a stock Official PFP. |
 | **Game day** | Not always midnight→midnight. If reset is 4:00, wall-clock 03:59 still belongs to the **previous** game day. |
-| **Cycle / period** | One attempt window for a weekly or endgame task: `[cycleStart, cycleEnd)` anchored from `dateStarted` + frequency. Optional `cycleEndHour` / `cycleEndMinute` when end clock ≠ begin (task modal: “Same as cycle begin”). |
+| **Cycle / period** | One attempt window for a weekly or endgame task: `[cycleStart, cycleEnd)` anchored from `dateStarted` + frequency. Optional `cycleEndHour` / `cycleEndMinute` when end clock ≠ begin (task modal: “Same as cycle begin”). **Manual Reset** tasks replace fixed frequency with an explicit start/due window (due may be TBD); editing the live window must not invent a second current cycle; logging a past window archives closed history without clobbering the live one. |
 | **Shared reset day** | When one cycle ends and the next starts on the **same calendar date** (e.g. ends 7:59pm, restarts 8:00pm; or ends 3:59am, restarts 4:00am), that calendar date is split by the reset clock. Time **before** reset belongs to the ending cycle; time **at/after** reset belongs to the new cycle (treated as the start of the next game period — “closer to the next day” than the old one). |
 | **Owned calendar dates** | Dates returned by `getCalendarDatesInCycleRange` for fill/list. On a shared reset day the boundary date is owned by the **new** cycle only. |
 | **Completion mark** | Entry in `completionByDate[dateStr][type]` for a task key. Weeklies/endgame may **fill remaining** days in the cycle after the finish day. |
@@ -99,9 +99,9 @@ Grouped by responsibility. Names match `src/01-core.js` (and mirrors in `test/li
 
 | Area | Role |
 |------|------|
-| `load` / `save` / schema migrate | Local state. |
+| `load` / `save` / schema migrate | Local state (IndexedDB primary; slim daily localStorage backup). |
 | Firebase / cloud apply hooks | Optional sync. |
-| Page renderers + modals | Present state; must call the write path above, not fork completion rules. |
+| Page renderers + modals | Present state; must call the write path above, not fork completion rules (including Games **Add completion** and Manual Reset flows). |
 
 ---
 
@@ -133,7 +133,7 @@ Regression mirrors: `test/lib/cycle-math.js`, `test/lib/sim-tracker.js`, `test/l
 
 In-browser probes (optional): open `http://localhost:4000/?liveProbe=1` and run `test/live/browser-probe-runner.js` (gated `__gachaLiveProbe` API). Restores prior state after checks.
 
-Non-core features (share cards, extracurricular OCR, export, undo, cloud sync, etc.) are **not** excused from bugs: they must keep using the write path / tallies above and stay covered by integration suites so they stay seamless with one another.
+Non-core features (share cards, extracurricular OCR, Manual Reset / Add completion, stock assets, export, undo, cloud sync, etc.) are **not** excused from bugs: they must keep using the write path / tallies above and stay covered by integration suites so they stay seamless with one another.
 
 ---
 
@@ -146,8 +146,8 @@ Non-core features (share cards, extracurricular OCR, export, undo, cloud sync, e
 | Attendance | Calendar of marks; day modal uses calendar ownership for multi-day tasks. |
 | Extracurricular | Side tracking / OCR helpers (not period-math core; still must not corrupt completion state). |
 | Data | Tallies, pies, currency/pulls, missed. |
-| Games | Configure games/tasks/presets. |
-| Settings | Formats, data export/import, debug/repair, undo. |
+| Games | Configure games/tasks/presets; identity; completion history; Add completion; Sync; Manual Reset Edit current / start. |
+| Settings | Formats, stock assets browse, data export/import, debug/repair, undo. |
 
 ---
 
