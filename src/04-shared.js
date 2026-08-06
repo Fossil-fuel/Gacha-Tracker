@@ -333,9 +333,27 @@
     img.style.objectPosition = "center";
   }
 
+  /** Scale relative to CSS base overlay sizes; 1 = current default. */
+  const BANNER_OVERLAY_TEXT_SIZE_DEFAULT = 1;
+  const BANNER_OVERLAY_TEXT_SIZE_MIN = 0.4;
+  const BANNER_OVERLAY_TEXT_SIZE_MAX = 3;
+
+  function clampBannerOverlayTextSize(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return BANNER_OVERLAY_TEXT_SIZE_DEFAULT;
+    return Math.min(BANNER_OVERLAY_TEXT_SIZE_MAX, Math.max(BANNER_OVERLAY_TEXT_SIZE_MIN, v));
+  }
+
   function getTaskBannerOverlayText(task) {
     if (!task) return "";
     return String(task.bannerOverlayText || "").trim();
+  }
+
+  function getTaskBannerOverlayTextSize(task) {
+    if (!task || task.bannerOverlayTextSize == null || task.bannerOverlayTextSize === "") {
+      return BANNER_OVERLAY_TEXT_SIZE_DEFAULT;
+    }
+    return clampBannerOverlayTextSize(task.bannerOverlayTextSize);
   }
 
   /** Optional CSS label over a banner image container. */
@@ -345,6 +363,7 @@
     const el = document.createElement("span");
     el.className = "task-banner-overlay";
     el.textContent = text;
+    el.style.setProperty("--banner-overlay-size", String(getTaskBannerOverlayTextSize(task)));
     parent.appendChild(el);
     return el;
   }

@@ -6140,6 +6140,20 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   width: 100%;
 }
 
+.task-banner-overlay-size-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.task-banner-overlay-size-label input[type="range"] {
+  width: 100%;
+}
+
 .task-banner-overlay {
   position: absolute;
   left: 0;
@@ -6147,7 +6161,7 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   top: 0;
   z-index: 1;
   padding: 0.4rem 0.5rem 0.65rem;
-  font-size: 0.72rem;
+  font-size: calc(0.72rem * var(--banner-overlay-size, 1));
   font-weight: 600;
   line-height: 1.25;
   color: #fff;
@@ -6167,12 +6181,12 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 }
 
 .task-banner-thumb-wrap .task-banner-overlay {
-  font-size: 0.65rem;
+  font-size: calc(0.65rem * var(--banner-overlay-size, 1));
   padding: 0.28rem 0.35rem 0.45rem;
 }
 
 .games-task-media-stage .task-banner-overlay {
-  font-size: 0.7rem;
+  font-size: calc(0.7rem * var(--banner-overlay-size, 1));
 }
 
 .task-banner-targets {

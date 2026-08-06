@@ -2072,6 +2072,14 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     const overlayInput = bannerEl("overlayTextInput");
     if (overlayInput) overlayInput.value = (task && task.bannerOverlayText) ? String(task.bannerOverlayText) : "";
+    const overlaySizeInput = bannerEl("overlayTextSizeInput");
+    if (overlaySizeInput) {
+      const size = typeof getTaskBannerOverlayTextSize === "function"
+        ? getTaskBannerOverlayTextSize(task)
+        : 1;
+      overlaySizeInput.value = String(size);
+      overlaySizeInput.setAttribute("aria-valuenow", String(size));
+    }
     resetTaskBannerCropState();
     syncTaskBannerTargetButtons();
     syncTaskBannerPreview();
@@ -2104,6 +2112,11 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     const overlayInput = bannerEl("overlayTextInput");
     if (overlayInput) overlayInput.value = "";
+    const overlaySizeInput = bannerEl("overlayTextSizeInput");
+    if (overlaySizeInput) {
+      overlaySizeInput.value = "1";
+      overlaySizeInput.setAttribute("aria-valuenow", "1");
+    }
     resetTaskBannerCropState();
     syncTaskBannerPreview();
     syncTaskBannerTargetButtons();
@@ -5005,10 +5018,16 @@ function syncTaskCycleEndTimeUI() {
       const overlayInput = bannerEl("overlayTextInput");
       const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
       next.bannerOverlayText = overlayText || undefined;
+      const overlaySizeInput = bannerEl("overlayTextSizeInput");
+      const size = typeof clampBannerOverlayTextSize === "function"
+        ? clampBannerOverlayTextSize(overlaySizeInput && overlaySizeInput.value)
+        : 1;
+      next.bannerOverlayTextSize = size === 1 ? undefined : size;
     } else {
       next.bannerSourceImage = undefined;
       next.bannerViews = undefined;
       next.bannerOverlayText = undefined;
+      next.bannerOverlayTextSize = undefined;
     }
     next.bannerImage = undefined;
     next.bannerAspect = undefined;
@@ -5024,8 +5043,12 @@ function syncTaskCycleEndTimeUI() {
       delete merged.bannerSourceImage;
       delete merged.bannerViews;
       delete merged.bannerOverlayText;
-    } else if (!merged.bannerOverlayText) {
-      delete merged.bannerOverlayText;
+      delete merged.bannerOverlayTextSize;
+    } else {
+      if (!merged.bannerOverlayText) delete merged.bannerOverlayText;
+      if (merged.bannerOverlayTextSize == null || Number(merged.bannerOverlayTextSize) === 1) {
+        delete merged.bannerOverlayTextSize;
+      }
     }
     delete merged.bannerImage;
     delete merged.bannerAspect;
@@ -5378,12 +5401,17 @@ function syncTaskCycleEndTimeUI() {
   function getTaskBannerPreviewTaskStub() {
     const nameInput = bannerEl("nameInput");
     const overlayInput = bannerEl("overlayTextInput");
+    const overlaySizeInput = bannerEl("overlayTextSizeInput");
     const label = (nameInput && nameInput.value.trim()) || "Task name";
     const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
+    const size = typeof clampBannerOverlayTextSize === "function"
+      ? clampBannerOverlayTextSize(overlaySizeInput && overlaySizeInput.value)
+      : 1;
     return {
       label: label,
       bannerSourceImage: taskModal.bannerSource || null,
       bannerOverlayText: overlayText || undefined,
+      bannerOverlayTextSize: size,
       bannerViews: {
         home: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.home, TASK_BANNER_TARGETS.home.aspect),
         games: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.games, TASK_BANNER_TARGETS.games.aspect),
@@ -5690,14 +5718,12 @@ function syncTaskCycleEndTimeUI() {
 
     if (wantBanner) {
       const assets = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
-      const byKind = { story: [], event: [], other: [] };
-      assets.forEach((a) => {
-        const k = a.kind === "story" || a.kind === "event" ? a.kind : "other";
-        byKind[k].push(Object.assign({ path: a.path, label: a.label, id: a.id }, a));
-      });
-      [["story", "Stock · Story"], ["event", "Stock · Event"], ["other", "Stock · Other"]].forEach(([kind, title]) => {
-        appendPickerSection(host, title, byKind[kind], applyPickerImageAsset);
-      });
+      appendPickerSection(
+        host,
+        "Stock banners",
+        assets.map((a) => Object.assign({}, a, { path: a.path })),
+        applyPickerImageAsset
+      );
     }
     if (wantPfp) {
       const pfps = typeof getStockPfpAssets === "function" ? getStockPfpAssets() : [];
@@ -5718,7 +5744,8 @@ function syncTaskCycleEndTimeUI() {
     img.alt = asset.label;
     img.loading = "lazy";
     const fig = document.createElement("figcaption");
-    fig.textContent = kindLabel + " · " + asset.label;
+    const label = asset.label || asset.id || "Image";
+    fig.textContent = kindLabel ? kindLabel + " · " + label : label;
     const path = document.createElement("code");
     path.className = "stock-assets-path";
     path.textContent = asset.path;
@@ -5825,11 +5852,7 @@ function syncTaskCycleEndTimeUI() {
       heading.textContent = "Banners";
       const grid = document.createElement("div");
       grid.className = "stock-assets-gallery";
-      banners.forEach((asset) => {
-        const kind =
-          asset.kind === "story" ? "Story" : asset.kind === "event" ? "Event" : "Banner";
-        appendStockAssetCard(grid, asset, kind);
-      });
+      banners.forEach((asset) => appendStockAssetCard(grid, asset, ""));
       block.appendChild(heading);
       block.appendChild(grid);
       host.appendChild(block);
@@ -6197,6 +6220,7 @@ function syncTaskCycleEndTimeUI() {
       const cropFrame = bannerEl("cropFrame");
       const nameInput = bannerEl("nameInput");
       const overlayTextInput = bannerEl("overlayTextInput");
+      const overlayTextSizeInput = bannerEl("overlayTextSizeInput");
       const root = bannerRootEl();
       setActiveBannerUi(prev);
       if (!fileInput || !root) return;
@@ -6291,6 +6315,11 @@ function syncTaskCycleEndTimeUI() {
           taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
           const overlayInput = bannerEl("overlayTextInput");
           if (overlayInput) overlayInput.value = "";
+          const overlaySizeInput = bannerEl("overlayTextSizeInput");
+          if (overlaySizeInput) {
+            overlaySizeInput.value = "1";
+            overlaySizeInput.setAttribute("aria-valuenow", "1");
+          }
           resizeTaskBannerCropStage();
           drawTaskBannerCrop();
           syncTaskBannerPreview();
@@ -6310,6 +6339,20 @@ function syncTaskCycleEndTimeUI() {
           if (activeBannerUiKey !== uiKey) return;
           if (taskModal.bannerSource) syncTaskBannerPreview();
         });
+      }
+
+      if (overlayTextSizeInput) {
+        const onOverlaySizeChange = () => {
+          if (activeBannerUiKey !== uiKey) return;
+          const size = typeof clampBannerOverlayTextSize === "function"
+            ? clampBannerOverlayTextSize(overlayTextSizeInput.value)
+            : Number(overlayTextSizeInput.value) || 1;
+          overlayTextSizeInput.value = String(size);
+          overlayTextSizeInput.setAttribute("aria-valuenow", String(size));
+          if (taskModal.bannerSource) syncTaskBannerPreview();
+        };
+        overlayTextSizeInput.addEventListener("input", onOverlaySizeChange);
+        overlayTextSizeInput.addEventListener("change", onOverlaySizeChange);
       }
 
       const bindFrameDown = (frame, frameKind) => {

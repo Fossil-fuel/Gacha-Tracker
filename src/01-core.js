@@ -72,6 +72,7 @@
       cardPreview: "taskBannerCardPreview",
       nameInput: "taskNameInput",
       overlayTextInput: "taskBannerOverlayText",
+      overlayTextSizeInput: "taskBannerOverlayTextSize",
     },
     extra: {
       root: "extracurricularTaskModal",
@@ -88,6 +89,7 @@
       cardPreview: "extraBannerCardPreview",
       nameInput: "extracurricularTaskName",
       overlayTextInput: "extraBannerOverlayText",
+      overlayTextSizeInput: "extraBannerOverlayTextSize",
     },
   };
   let activeBannerUiKey = "task";
@@ -95,13 +97,19 @@
 
   /** Bundled stock banners (relative paths; stored as URL strings on tasks). */
   const STOCK_BANNER_ASSETS = [
-    { id: "story-castorice-fields", path: "assets/Castorice fields.png", kind: "story", label: "Castorice Fields" },
-    { id: "story-startorch", path: "assets/Startorch.png", kind: "story", label: "Startorch" },
-    { id: "story-wuling", path: "assets/Wuling.png", kind: "story", label: "Wuling" },
-    { id: "event-endfield", path: "assets/Endfield.png", kind: "event", label: "Endfield" },
-    { id: "event-stellar-jade", path: "assets/Stellar Jade.png", kind: "event", label: "Stellar Jade" },
-    { id: "event-zzz", path: "assets/ZZZ.png", kind: "event", label: "ZZZ" },
+    { id: "banner-castorice-fields", path: "assets/Castorice Fields.png", kind: "banner", label: "Castorice Fields" },
+    { id: "banner-startorch", path: "assets/Startorch.png", kind: "banner", label: "Startorch" },
+    { id: "banner-wuling", path: "assets/Wuling.png", kind: "banner", label: "Wuling" },
+    { id: "banner-endfield", path: "assets/Endfield.png", kind: "banner", label: "Endfield" },
+    { id: "banner-stellar-jade", path: "assets/Stellar Jade.png", kind: "banner", label: "Stellar Jade" },
+    { id: "banner-zzz", path: "assets/ZZZ.png", kind: "banner", label: "ZZZ" },
   ];
+
+  /** Older path spellings → current asset path (saved task banners, case-sensitive hosts). */
+  const STOCK_BANNER_PATH_ALIASES = {
+    "assets/Castorice fields.png": "assets/Castorice Fields.png",
+    "assets/startorch.png": "assets/Startorch.png",
+  };
 
   /** Bundled profile pictures (Settings gallery; not offered in the task banner picker). */
   const STOCK_PFP_ASSETS = [
@@ -271,10 +279,11 @@
     if (!raw) return "";
     if (isUserImageRef(raw)) return resolveUserImageUrl(raw) || "";
     if (/^(data:|blob:|https?:|\/\/)/i.test(raw)) return raw;
+    const aliased = STOCK_BANNER_PATH_ALIASES[raw] || raw;
     try {
-      return new URL(raw.replace(/^\.\//, ""), document.baseURI || window.location.href).href;
+      return new URL(aliased.replace(/^\.\//, ""), document.baseURI || window.location.href).href;
     } catch (_) {
-      return raw;
+      return aliased;
     }
   }
 

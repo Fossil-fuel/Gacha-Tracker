@@ -195,6 +195,7 @@
       cardPreview: "taskBannerCardPreview",
       nameInput: "taskNameInput",
       overlayTextInput: "taskBannerOverlayText",
+      overlayTextSizeInput: "taskBannerOverlayTextSize",
     },
     extra: {
       root: "extracurricularTaskModal",
@@ -211,6 +212,7 @@
       cardPreview: "extraBannerCardPreview",
       nameInput: "extracurricularTaskName",
       overlayTextInput: "extraBannerOverlayText",
+      overlayTextSizeInput: "extraBannerOverlayTextSize",
     },
   };
   let activeBannerUiKey = "task";
@@ -218,13 +220,19 @@
 
   /** Bundled stock banners (relative paths; stored as URL strings on tasks). */
   const STOCK_BANNER_ASSETS = [
-    { id: "story-castorice-fields", path: "assets/Castorice fields.png", kind: "story", label: "Castorice Fields" },
-    { id: "story-startorch", path: "assets/Startorch.png", kind: "story", label: "Startorch" },
-    { id: "story-wuling", path: "assets/Wuling.png", kind: "story", label: "Wuling" },
-    { id: "event-endfield", path: "assets/Endfield.png", kind: "event", label: "Endfield" },
-    { id: "event-stellar-jade", path: "assets/Stellar Jade.png", kind: "event", label: "Stellar Jade" },
-    { id: "event-zzz", path: "assets/ZZZ.png", kind: "event", label: "ZZZ" },
+    { id: "banner-castorice-fields", path: "assets/Castorice Fields.png", kind: "banner", label: "Castorice Fields" },
+    { id: "banner-startorch", path: "assets/Startorch.png", kind: "banner", label: "Startorch" },
+    { id: "banner-wuling", path: "assets/Wuling.png", kind: "banner", label: "Wuling" },
+    { id: "banner-endfield", path: "assets/Endfield.png", kind: "banner", label: "Endfield" },
+    { id: "banner-stellar-jade", path: "assets/Stellar Jade.png", kind: "banner", label: "Stellar Jade" },
+    { id: "banner-zzz", path: "assets/ZZZ.png", kind: "banner", label: "ZZZ" },
   ];
+
+  /** Older path spellings → current asset path (saved task banners, case-sensitive hosts). */
+  const STOCK_BANNER_PATH_ALIASES = {
+    "assets/Castorice fields.png": "assets/Castorice Fields.png",
+    "assets/startorch.png": "assets/Startorch.png",
+  };
 
   /** Bundled profile pictures (Settings gallery; not offered in the task banner picker). */
   const STOCK_PFP_ASSETS = [
@@ -394,10 +402,11 @@
     if (!raw) return "";
     if (isUserImageRef(raw)) return resolveUserImageUrl(raw) || "";
     if (/^(data:|blob:|https?:|\/\/)/i.test(raw)) return raw;
+    const aliased = STOCK_BANNER_PATH_ALIASES[raw] || raw;
     try {
-      return new URL(raw.replace(/^\.\//, ""), document.baseURI || window.location.href).href;
+      return new URL(aliased.replace(/^\.\//, ""), document.baseURI || window.location.href).href;
     } catch (_) {
-      return raw;
+      return aliased;
     }
   }
 
@@ -10401,6 +10410,14 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     const overlayInput = bannerEl("overlayTextInput");
     if (overlayInput) overlayInput.value = (task && task.bannerOverlayText) ? String(task.bannerOverlayText) : "";
+    const overlaySizeInput = bannerEl("overlayTextSizeInput");
+    if (overlaySizeInput) {
+      const size = typeof getTaskBannerOverlayTextSize === "function"
+        ? getTaskBannerOverlayTextSize(task)
+        : 1;
+      overlaySizeInput.value = String(size);
+      overlaySizeInput.setAttribute("aria-valuenow", String(size));
+    }
     resetTaskBannerCropState();
     syncTaskBannerTargetButtons();
     syncTaskBannerPreview();
@@ -10433,6 +10450,11 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     const overlayInput = bannerEl("overlayTextInput");
     if (overlayInput) overlayInput.value = "";
+    const overlaySizeInput = bannerEl("overlayTextSizeInput");
+    if (overlaySizeInput) {
+      overlaySizeInput.value = "1";
+      overlaySizeInput.setAttribute("aria-valuenow", "1");
+    }
     resetTaskBannerCropState();
     syncTaskBannerPreview();
     syncTaskBannerTargetButtons();
@@ -13334,10 +13356,16 @@ function syncTaskCycleEndTimeUI() {
       const overlayInput = bannerEl("overlayTextInput");
       const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
       next.bannerOverlayText = overlayText || undefined;
+      const overlaySizeInput = bannerEl("overlayTextSizeInput");
+      const size = typeof clampBannerOverlayTextSize === "function"
+        ? clampBannerOverlayTextSize(overlaySizeInput && overlaySizeInput.value)
+        : 1;
+      next.bannerOverlayTextSize = size === 1 ? undefined : size;
     } else {
       next.bannerSourceImage = undefined;
       next.bannerViews = undefined;
       next.bannerOverlayText = undefined;
+      next.bannerOverlayTextSize = undefined;
     }
     next.bannerImage = undefined;
     next.bannerAspect = undefined;
@@ -13353,8 +13381,12 @@ function syncTaskCycleEndTimeUI() {
       delete merged.bannerSourceImage;
       delete merged.bannerViews;
       delete merged.bannerOverlayText;
-    } else if (!merged.bannerOverlayText) {
-      delete merged.bannerOverlayText;
+      delete merged.bannerOverlayTextSize;
+    } else {
+      if (!merged.bannerOverlayText) delete merged.bannerOverlayText;
+      if (merged.bannerOverlayTextSize == null || Number(merged.bannerOverlayTextSize) === 1) {
+        delete merged.bannerOverlayTextSize;
+      }
     }
     delete merged.bannerImage;
     delete merged.bannerAspect;
@@ -13707,12 +13739,17 @@ function syncTaskCycleEndTimeUI() {
   function getTaskBannerPreviewTaskStub() {
     const nameInput = bannerEl("nameInput");
     const overlayInput = bannerEl("overlayTextInput");
+    const overlaySizeInput = bannerEl("overlayTextSizeInput");
     const label = (nameInput && nameInput.value.trim()) || "Task name";
     const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
+    const size = typeof clampBannerOverlayTextSize === "function"
+      ? clampBannerOverlayTextSize(overlaySizeInput && overlaySizeInput.value)
+      : 1;
     return {
       label: label,
       bannerSourceImage: taskModal.bannerSource || null,
       bannerOverlayText: overlayText || undefined,
+      bannerOverlayTextSize: size,
       bannerViews: {
         home: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.home, TASK_BANNER_TARGETS.home.aspect),
         games: cloneBannerView(taskModal.bannerViews && taskModal.bannerViews.games, TASK_BANNER_TARGETS.games.aspect),
@@ -14019,14 +14056,12 @@ function syncTaskCycleEndTimeUI() {
 
     if (wantBanner) {
       const assets = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
-      const byKind = { story: [], event: [], other: [] };
-      assets.forEach((a) => {
-        const k = a.kind === "story" || a.kind === "event" ? a.kind : "other";
-        byKind[k].push(Object.assign({ path: a.path, label: a.label, id: a.id }, a));
-      });
-      [["story", "Stock · Story"], ["event", "Stock · Event"], ["other", "Stock · Other"]].forEach(([kind, title]) => {
-        appendPickerSection(host, title, byKind[kind], applyPickerImageAsset);
-      });
+      appendPickerSection(
+        host,
+        "Stock banners",
+        assets.map((a) => Object.assign({}, a, { path: a.path })),
+        applyPickerImageAsset
+      );
     }
     if (wantPfp) {
       const pfps = typeof getStockPfpAssets === "function" ? getStockPfpAssets() : [];
@@ -14047,7 +14082,8 @@ function syncTaskCycleEndTimeUI() {
     img.alt = asset.label;
     img.loading = "lazy";
     const fig = document.createElement("figcaption");
-    fig.textContent = kindLabel + " · " + asset.label;
+    const label = asset.label || asset.id || "Image";
+    fig.textContent = kindLabel ? kindLabel + " · " + label : label;
     const path = document.createElement("code");
     path.className = "stock-assets-path";
     path.textContent = asset.path;
@@ -14154,11 +14190,7 @@ function syncTaskCycleEndTimeUI() {
       heading.textContent = "Banners";
       const grid = document.createElement("div");
       grid.className = "stock-assets-gallery";
-      banners.forEach((asset) => {
-        const kind =
-          asset.kind === "story" ? "Story" : asset.kind === "event" ? "Event" : "Banner";
-        appendStockAssetCard(grid, asset, kind);
-      });
+      banners.forEach((asset) => appendStockAssetCard(grid, asset, ""));
       block.appendChild(heading);
       block.appendChild(grid);
       host.appendChild(block);
@@ -14526,6 +14558,7 @@ function syncTaskCycleEndTimeUI() {
       const cropFrame = bannerEl("cropFrame");
       const nameInput = bannerEl("nameInput");
       const overlayTextInput = bannerEl("overlayTextInput");
+      const overlayTextSizeInput = bannerEl("overlayTextSizeInput");
       const root = bannerRootEl();
       setActiveBannerUi(prev);
       if (!fileInput || !root) return;
@@ -14620,6 +14653,11 @@ function syncTaskCycleEndTimeUI() {
           taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
           const overlayInput = bannerEl("overlayTextInput");
           if (overlayInput) overlayInput.value = "";
+          const overlaySizeInput = bannerEl("overlayTextSizeInput");
+          if (overlaySizeInput) {
+            overlaySizeInput.value = "1";
+            overlaySizeInput.setAttribute("aria-valuenow", "1");
+          }
           resizeTaskBannerCropStage();
           drawTaskBannerCrop();
           syncTaskBannerPreview();
@@ -14639,6 +14677,20 @@ function syncTaskCycleEndTimeUI() {
           if (activeBannerUiKey !== uiKey) return;
           if (taskModal.bannerSource) syncTaskBannerPreview();
         });
+      }
+
+      if (overlayTextSizeInput) {
+        const onOverlaySizeChange = () => {
+          if (activeBannerUiKey !== uiKey) return;
+          const size = typeof clampBannerOverlayTextSize === "function"
+            ? clampBannerOverlayTextSize(overlayTextSizeInput.value)
+            : Number(overlayTextSizeInput.value) || 1;
+          overlayTextSizeInput.value = String(size);
+          overlayTextSizeInput.setAttribute("aria-valuenow", String(size));
+          if (taskModal.bannerSource) syncTaskBannerPreview();
+        };
+        overlayTextSizeInput.addEventListener("input", onOverlaySizeChange);
+        overlayTextSizeInput.addEventListener("change", onOverlaySizeChange);
       }
 
       const bindFrameDown = (frame, frameKind) => {
@@ -16127,9 +16179,27 @@ function syncTaskCycleEndTimeUI() {
     img.style.objectPosition = "center";
   }
 
+  /** Scale relative to CSS base overlay sizes; 1 = current default. */
+  const BANNER_OVERLAY_TEXT_SIZE_DEFAULT = 1;
+  const BANNER_OVERLAY_TEXT_SIZE_MIN = 0.4;
+  const BANNER_OVERLAY_TEXT_SIZE_MAX = 3;
+
+  function clampBannerOverlayTextSize(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return BANNER_OVERLAY_TEXT_SIZE_DEFAULT;
+    return Math.min(BANNER_OVERLAY_TEXT_SIZE_MAX, Math.max(BANNER_OVERLAY_TEXT_SIZE_MIN, v));
+  }
+
   function getTaskBannerOverlayText(task) {
     if (!task) return "";
     return String(task.bannerOverlayText || "").trim();
+  }
+
+  function getTaskBannerOverlayTextSize(task) {
+    if (!task || task.bannerOverlayTextSize == null || task.bannerOverlayTextSize === "") {
+      return BANNER_OVERLAY_TEXT_SIZE_DEFAULT;
+    }
+    return clampBannerOverlayTextSize(task.bannerOverlayTextSize);
   }
 
   /** Optional CSS label over a banner image container. */
@@ -16139,6 +16209,7 @@ function syncTaskCycleEndTimeUI() {
     const el = document.createElement("span");
     el.className = "task-banner-overlay";
     el.textContent = text;
+    el.style.setProperty("--banner-overlay-size", String(getTaskBannerOverlayTextSize(task)));
     parent.appendChild(el);
     return el;
   }
@@ -19681,6 +19752,14 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     const overlayInput = typeof bannerEl === "function" ? bannerEl("overlayTextInput") : document.getElementById("extraBannerOverlayText");
     if (overlayInput) overlayInput.value = (task && task.bannerOverlayText) ? String(task.bannerOverlayText) : "";
+    const overlaySizeInput = typeof bannerEl === "function" ? bannerEl("overlayTextSizeInput") : document.getElementById("extraBannerOverlayTextSize");
+    if (overlaySizeInput) {
+      const size = typeof getTaskBannerOverlayTextSize === "function"
+        ? getTaskBannerOverlayTextSize(task)
+        : 1;
+      overlaySizeInput.value = String(size);
+      overlaySizeInput.setAttribute("aria-valuenow", String(size));
+    }
     if (typeof resetTaskBannerCropState === "function") resetTaskBannerCropState();
     if (typeof syncTaskBannerTargetButtons === "function") syncTaskBannerTargetButtons();
     if (typeof syncTaskBannerPreview === "function") syncTaskBannerPreview();
@@ -19722,6 +19801,11 @@ function syncTaskCycleEndTimeUI() {
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     const overlayInput = document.getElementById("extraBannerOverlayText");
     if (overlayInput) overlayInput.value = "";
+    const overlaySizeInput = document.getElementById("extraBannerOverlayTextSize");
+    if (overlaySizeInput) {
+      overlaySizeInput.value = "1";
+      overlaySizeInput.setAttribute("aria-valuenow", "1");
+    }
   }
 
   function deleteExtracurricularTask(taskId) {

@@ -431,6 +431,14 @@
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     const overlayInput = typeof bannerEl === "function" ? bannerEl("overlayTextInput") : document.getElementById("extraBannerOverlayText");
     if (overlayInput) overlayInput.value = (task && task.bannerOverlayText) ? String(task.bannerOverlayText) : "";
+    const overlaySizeInput = typeof bannerEl === "function" ? bannerEl("overlayTextSizeInput") : document.getElementById("extraBannerOverlayTextSize");
+    if (overlaySizeInput) {
+      const size = typeof getTaskBannerOverlayTextSize === "function"
+        ? getTaskBannerOverlayTextSize(task)
+        : 1;
+      overlaySizeInput.value = String(size);
+      overlaySizeInput.setAttribute("aria-valuenow", String(size));
+    }
     if (typeof resetTaskBannerCropState === "function") resetTaskBannerCropState();
     if (typeof syncTaskBannerTargetButtons === "function") syncTaskBannerTargetButtons();
     if (typeof syncTaskBannerPreview === "function") syncTaskBannerPreview();
@@ -472,6 +480,11 @@
     taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
     const overlayInput = document.getElementById("extraBannerOverlayText");
     if (overlayInput) overlayInput.value = "";
+    const overlaySizeInput = document.getElementById("extraBannerOverlayTextSize");
+    if (overlaySizeInput) {
+      overlaySizeInput.value = "1";
+      overlaySizeInput.setAttribute("aria-valuenow", "1");
+    }
   }
 
   function deleteExtracurricularTask(taskId) {
