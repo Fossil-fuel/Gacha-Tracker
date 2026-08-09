@@ -5281,15 +5281,13 @@ function syncTaskCycleEndTimeUI() {
           if (!data || !Array.isArray(data.games)) {
             throw new Error("Invalid backup file (expected Export data JSON)");
           }
-          const keys = Object.keys(data);
-          keys.forEach((k) => {
-            if (state[k] !== undefined && k !== "lastSimulationSnapshot") state[k] = data[k];
-          });
+          // Canonical load path normalizes userImageLibrary (data URLs) and runs migrations.
+          // Do NOT call load() afterward: with IndexedDB active, load() reads the slim
+          // no-image localStorage backup and strips bannerSourceImage / library blobs.
+          applySavePayload(data, { isFirstLoad: false });
           state.lastSimulationSnapshot = null;
           if (typeof clearCompletionUndoStack === "function") clearCompletionUndoStack();
-          // Must flush before load(), or load() reloads the previous localStorage and undoes the import.
           save({ immediate: true });
-          load();
           // bulk state change: full refresh
           renderAll();
           const report = qs("settingsDebugReport");

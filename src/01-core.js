@@ -971,13 +971,20 @@
     return Number.isFinite(obj && obj[hourKey]) ? obj[hourKey] : fallback;
   }
 
+  /** True for inlined blobs that slim backups intentionally drop (keep stock paths / userimg: refs). */
+  function isEmbeddedImageUrl(path) {
+    return /^(data:|blob:)/i.test(String(path || "").trim());
+  }
+
   function cloneTaskWithoutImages(task) {
     if (!task || typeof task !== "object") return task;
     const c = Object.assign({}, task);
-    delete c.bannerSourceImage;
-    delete c.bannerImage;
-    delete c.bannerHomeImage;
-    delete c.bannerGamesImage;
+    // Preserve assets/… and userimg:… refs so stock banners (and library ids) survive slim backups.
+    // Only strip embedded data/blob URLs that bloat localStorage.
+    if (isEmbeddedImageUrl(c.bannerSourceImage)) delete c.bannerSourceImage;
+    if (isEmbeddedImageUrl(c.bannerImage)) delete c.bannerImage;
+    if (isEmbeddedImageUrl(c.bannerHomeImage)) delete c.bannerHomeImage;
+    if (isEmbeddedImageUrl(c.bannerGamesImage)) delete c.bannerGamesImage;
     delete c.bannerHomeAspect;
     delete c.bannerGamesAspect;
     return c;
@@ -986,7 +993,7 @@
   function cloneGameWithoutImages(game) {
     if (!game || typeof game !== "object") return game;
     const c = Object.assign({}, game);
-    delete c.iconImage;
+    if (isEmbeddedImageUrl(c.iconImage)) delete c.iconImage;
     c.weeklies = Array.isArray(game.weeklies) ? game.weeklies.map(cloneTaskWithoutImages) : game.weeklies;
     c.endgame = Array.isArray(game.endgame) ? game.endgame.map(cloneTaskWithoutImages) : game.endgame;
     return c;

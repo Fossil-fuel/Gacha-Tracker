@@ -249,6 +249,15 @@ module.exports = {
       /bulk state change: full refresh[\s\S]*?renderAll\(\)/.test(modals),
       "import/clear-data must keep full renderAll"
     );
+    assert.ok(
+      /settingsImportInput[\s\S]*?applySavePayload\(data,\s*\{\s*isFirstLoad:\s*false\s*\}\)/.test(modals),
+      "import must use applySavePayload (preserves banners + userImageLibrary)"
+    );
+    assert.ok(
+      !/settingsImportInput[\s\S]*?save\(\{\s*immediate:\s*true\s*\}\)[\s\S]*?\bload\(\)/.test(modals),
+      "import must not reload from slim via load() after save"
+    );
+    assert.ok(core.includes("function isEmbeddedImageUrl"), "slim image omit must detect embedded URLs only");
 
     const extracurricular = read("src/08b-page-extracurricular.js");
     assert.ok(extracurricular.includes("extracurricular-completed-row"), "08b must render Completed editors");

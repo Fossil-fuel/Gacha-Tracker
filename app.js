@@ -1094,13 +1094,20 @@
     return Number.isFinite(obj && obj[hourKey]) ? obj[hourKey] : fallback;
   }
 
+  /** True for inlined blobs that slim backups intentionally drop (keep stock paths / userimg: refs). */
+  function isEmbeddedImageUrl(path) {
+    return /^(data:|blob:)/i.test(String(path || "").trim());
+  }
+
   function cloneTaskWithoutImages(task) {
     if (!task || typeof task !== "object") return task;
     const c = Object.assign({}, task);
-    delete c.bannerSourceImage;
-    delete c.bannerImage;
-    delete c.bannerHomeImage;
-    delete c.bannerGamesImage;
+    // Preserve assets/… and userimg:… refs so stock banners (and library ids) survive slim backups.
+    // Only strip embedded data/blob URLs that bloat localStorage.
+    if (isEmbeddedImageUrl(c.bannerSourceImage)) delete c.bannerSourceImage;
+    if (isEmbeddedImageUrl(c.bannerImage)) delete c.bannerImage;
+    if (isEmbeddedImageUrl(c.bannerHomeImage)) delete c.bannerHomeImage;
+    if (isEmbeddedImageUrl(c.bannerGamesImage)) delete c.bannerGamesImage;
     delete c.bannerHomeAspect;
     delete c.bannerGamesAspect;
     return c;
@@ -1109,7 +1116,7 @@
   function cloneGameWithoutImages(game) {
     if (!game || typeof game !== "object") return game;
     const c = Object.assign({}, game);
-    delete c.iconImage;
+    if (isEmbeddedImageUrl(c.iconImage)) delete c.iconImage;
     c.weeklies = Array.isArray(game.weeklies) ? game.weeklies.map(cloneTaskWithoutImages) : game.weeklies;
     c.endgame = Array.isArray(game.endgame) ? game.endgame.map(cloneTaskWithoutImages) : game.endgame;
     return c;
@@ -14351,15 +14358,13 @@ function syncTaskCycleEndTimeUI() {
           if (!data || !Array.isArray(data.games)) {
             throw new Error("Invalid backup file (expected Export data JSON)");
           }
-          const keys = Object.keys(data);
-          keys.forEach((k) => {
-            if (state[k] !== undefined && k !== "lastSimulationSnapshot") state[k] = data[k];
-          });
+          // Canonical load path normalizes userImageLibrary (data URLs) and runs migrations.
+          // Do NOT call load() afterward: with IndexedDB active, load() reads the slim
+          // no-image localStorage backup and strips bannerSourceImage / library blobs.
+          applySavePayload(data, { isFirstLoad: false });
           state.lastSimulationSnapshot = null;
           if (typeof clearCompletionUndoStack === "function") clearCompletionUndoStack();
-          // Must flush before load(), or load() reloads the previous localStorage and undoes the import.
           save({ immediate: true });
-          load();
           // bulk state change: full refresh
           renderAll();
           const report = qs("settingsDebugReport");
