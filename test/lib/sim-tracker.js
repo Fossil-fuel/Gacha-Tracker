@@ -118,6 +118,10 @@ function createFixture(opts) {
     endgameCurrencyEarned: {},
     endgameCurrencyPotential: {},
     weekliesCurrencyEarned: {},
+    endgameCompletionDates: {},
+    extracurricularTasks: [],
+    extracurricularCompleted: {},
+    extracurricularCompletedAt: {},
   };
 }
 
@@ -241,6 +245,316 @@ function timestampsForKey(state, type, key) {
   return (state.completionTimestamps || []).filter(
     (t) => t.taskType === type && t.gameId === gameId && t.taskId === taskId
   );
+}
+
+/** Manual closed/live window bounds (mirror getManualPeriodBoundsForDateStr). */
+function getManualPeriodBoundsForDateStr(task, type, dateStr) {
+  if (!task || !task.manualReset || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return null;
+  const startHour = Number.isFinite(task.weekStartHour) ? task.weekStartHour : 4;
+  const startMinute = Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0;
+  // Mirror getManualResetEndMomentOnDate / getTaskDefaultEndTimeParts
+  const sameAsBegin = task.cycleEndTimeSameAsBegin !== false;
+  let endHour = startHour;
+  let endMinute = startMinute;
+  if (!sameAsBegin && Number.isFinite(task.cycleEndHour)) {
+    endHour = task.cycleEndHour;
+    endMinute = Number.isFinite(task.cycleEndMinute) ? task.cycleEndMinute : 0;
+  }
+  const pad = (n) => String(n).padStart(2, "0");
+  const startMomentOn = (ds) => new Date(ds + "T" + pad(startHour) + ":" + pad(startMinute) + ":00");
+  const endMomentOn = (ds) => new Date(ds + "T" + pad(endHour) + ":" + pad(endMinute) + ":00");
+  const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+  let exact = null;
+  let covering = null;
+  for (let i = 0; i < closed.length; i++) {
+    const c = closed[i];
+    if (!c || !c.start || !c.end) continue;
+    if (dateStr < c.start || dateStr > c.end) continue;
+    const cycleStart = startMomentOn(c.start);
+    const cycleEnd = endMomentOn(c.end);
+    if (!(cycleEnd.getTime() > cycleStart.getTime())) continue;
+    const bounds = { cycleStart, cycleEnd, nextCycleStart: new Date(cycleEnd.getTime()) };
+    if (dateStr === c.start) {
+      exact = bounds;
+      break;
+    }
+    if (!covering) covering = bounds;
+  }
+  if (exact || covering) return exact || covering;
+  if (!task.dateStarted || !task.manualDueDateStr) return null;
+  if (dateStr < task.dateStarted || dateStr > task.manualDueDateStr) return null;
+  const liveEndHour = Number.isFinite(task.manualDueHour) ? task.manualDueHour : endHour;
+  const liveEndMinute = Number.isFinite(task.manualDueMinute) ? task.manualDueMinute : endMinute;
+  const cycleStart = startMomentOn(task.dateStarted);
+  const cycleEnd = new Date(
+    task.manualDueDateStr + "T" + pad(liveEndHour) + ":" + pad(liveEndMinute) + ":00"
+  );
+  if (!(cycleEnd.getTime() > cycleStart.getTime())) return null;
+  return { cycleStart, cycleEnd, nextCycleStart: new Date(cycleEnd.getTime()) };
+}
+
+/**
+ * Simulate Completion History Save phases for a manual endgame draft item list.
+ * Mirrors saveEarningsModal write order (delete → skip → complete → rehome → finish → earned).
+ */
+function commitEarningsHistoryDraft(state, gameId, taskId, draftItems) {
+  const game = (state.games || []).find((g) => g.id === gameId) || getGame(state);
+  const task = (game.endgame || []).find((t) => (t.id || t.label) === taskId);
+  if (!game || !task) return { ok: false, reason: "Task not found" };
+  const key = game.id + "." + taskId;
+  const items = (draftItems || []).slice();
+  const errors = [];
+
+  function clearManualEndgameWindow(startStr) {
+    const bounds = getManualPeriodBoundsForDateStr(task, "endgame", startStr);
+    if (bounds) {
+      const startMs = bounds.cycleStart.getTime();
+      const endMs = bounds.cycleEnd.getTime();
+      // Include end calendar day (next !== end) so shared-boundary finish stamps clear.
+      const owned = math.getCalendarDatesInCycleRange(
+        bounds.cycleStart,
+        bounds.cycleEnd,
+        new Date(endMs + 1)
+      );
+      owned.forEach((ds) => {
+        const day = state.completionByDate[ds];
+        if (!day || !Array.isArray(day.endgame)) return;
+        const idx = day.endgame.indexOf(key);
+        if (idx >= 0) day.endgame.splice(idx, 1);
+      });
+      state.completionTimestamps = (state.completionTimestamps || []).filter((t) => {
+        if (!t || t.taskType !== "endgame" || t.taskId !== taskId) return true;
+        if (!t.dateStr) return true;
+        const h = Number.isFinite(t.hour) ? t.hour : 12;
+        const m = Number.isFinite(t.minute) ? t.minute : 0;
+        const ms = new Date(
+          t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+        ).getTime();
+        if (Number.isFinite(ms) && ms >= startMs && ms < endMs) return false;
+        if (owned.includes(t.dateStr)) return false;
+        return true;
+      });
+    }
+    state.endgameCompleted[key] = Math.max(0, (Number(state.endgameCompleted[key]) || 0) - 1);
+  }
+
+  // Phase 0: completed → deleted (drop closed archive entirely).
+  items.forEach((item) => {
+    if (item.origStatus !== "completed" || item.status !== "deleted") return;
+    if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
+    const start = item.startStr || item.origStartStr;
+    const end = item.endStr || item.origEndStr;
+    clearManualEndgameWindow(start);
+    task.manualClosedCycles = task.manualClosedCycles.filter(
+      (c) => !(c && c.start === start && c.end === end)
+    );
+  });
+
+  items.forEach((item) => {
+    if (item.origStatus !== "completed" || item.status !== "skipped") return;
+    if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
+    const hit = task.manualClosedCycles.find((c) => c && c.start === item.startStr && c.end === item.endStr);
+    if (hit) hit.completed = 0;
+    else task.manualClosedCycles.push({ start: item.startStr, end: item.endStr, completed: 0 });
+    // Clear calendar + stamps in window
+    clearManualEndgameWindow(item.startStr);
+  });
+
+  items.forEach((item) => {
+    if (item.origStatus !== "skipped" || item.status !== "completed") return;
+    if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
+    const hit = task.manualClosedCycles.find((c) => c && c.start === item.startStr && c.end === item.endStr);
+    if (hit) hit.completed = 1;
+    else task.manualClosedCycles.push({ start: item.startStr, end: item.endStr, completed: 1 });
+    const finish = item.finishDateStr || item.startStr;
+    const r = setCycleCompletionMoment(
+      state,
+      "endgame",
+      key,
+      item.startStr,
+      finish,
+      item.hour,
+      item.minute
+    );
+    if (!r.ok) errors.push(r.reason);
+    state.endgameCompleted[key] = (Number(state.endgameCompleted[key]) || 0) + 1;
+  });
+
+  items.forEach((item, idx) => {
+    if (item.status !== "completed") return;
+    if (item.origStatus === "skipped") return;
+    if (item.startStr === item.origStartStr && item.endStr === item.origEndStr) return;
+    setEndgameCompletionDate(state, gameId, taskId, idx, item.startStr, item.endStr);
+  });
+
+  items.forEach((item) => {
+    if (item.status !== "completed") return;
+    const finishUnchanged =
+      item.finishDateStr === item.origFinishDateStr &&
+      item.hour === item.origHour &&
+      item.minute === item.origMinute;
+    const boundsUnchanged =
+      item.startStr === item.origStartStr && item.endStr === item.origEndStr;
+    if (item.origStatus === "completed" && finishUnchanged && boundsUnchanged) return;
+    const cycleRef = item.startStr || item.origStartStr;
+    if (
+      items.some(
+        (other) =>
+          (other.status === "skipped" || other.status === "deleted") &&
+          (other.startStr === cycleRef || other.origStartStr === cycleRef)
+      )
+    ) {
+      return;
+    }
+    const r = setCycleCompletionMoment(
+      state,
+      "endgame",
+      key,
+      cycleRef,
+      item.finishDateStr,
+      item.hour,
+      item.minute
+    );
+    if (!r.ok) errors.push(r.reason);
+  });
+
+  const completed = items.filter((i) => i.status === "completed");
+  if (!state.endgameCurrencyEarned[gameId]) state.endgameCurrencyEarned[gameId] = {};
+  state.endgameCurrencyEarned[gameId][taskId] = completed.map((i) => Math.max(0, Number(i.earned) || 0));
+
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * Move finish day/time inside an existing cycle. Remaps marks + timestamps; no tally bump.
+ * Mirrors setCycleCompletionMoment in src/01-core.js.
+ */
+function setCycleCompletionMoment(state, type, key, cycleRefDateStr, newDateStr, hour, minute) {
+  if (type !== "weeklies" && type !== "endgame") return { ok: false, reason: "Unsupported type" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(cycleRefDateStr || "")) || !/^\d{4}-\d{2}-\d{2}$/.test(String(newDateStr || ""))) {
+    return { ok: false, reason: "Invalid date" };
+  }
+  const game = getGame(state);
+  const task = findTask(game, type, key);
+  if (!task) return { ok: false, reason: "Task not found" };
+
+  const bounds = task.manualReset
+    ? getManualPeriodBoundsForDateStr(task, type, cycleRefDateStr)
+    : math.getCycleBoundsForMoment(task, new Date(cycleRefDateStr + "T12:00:00"));
+  if (!bounds) return { ok: false, reason: "Cycle not found" };
+
+  const owned = math.getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+  if (!owned.length) return { ok: false, reason: "Empty cycle" };
+
+  let finish = newDateStr;
+  if (type === "endgame") {
+    finish = math.clampCompletionToUnlock(task, owned, finish);
+  }
+  if (finish < owned[0]) finish = owned[0];
+  if (finish > owned[owned.length - 1]) finish = owned[owned.length - 1];
+
+  const h = Math.max(0, Math.min(23, Math.round(Number(hour))));
+  const m = Math.max(0, Math.min(59, Math.round(Number(minute))));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return { ok: false, reason: "Invalid time" };
+
+  owned.forEach((ds) => {
+    const day = state.completionByDate[ds];
+    if (!day || !Array.isArray(day[type])) return;
+    const idx = day[type].indexOf(key);
+    if (idx >= 0) day[type].splice(idx, 1);
+  });
+
+  const gameId = key.slice(0, key.indexOf("."));
+  const taskId = key.slice(key.indexOf(".") + 1);
+  const startMs = bounds.cycleStart.getTime();
+  const endMs = bounds.cycleEnd.getTime();
+  state.completionTimestamps = (state.completionTimestamps || []).filter((t) => {
+    if (!t || t.taskType !== type || t.gameId !== gameId || t.taskId !== taskId) return true;
+    if (owned.includes(t.dateStr)) return false;
+    const th = Number.isFinite(t.hour) ? t.hour : 12;
+    const tm = Number.isFinite(t.minute) ? t.minute : 0;
+    const ms = new Date(
+      t.dateStr + "T" + String(th).padStart(2, "0") + ":" + String(tm).padStart(2, "0") + ":00"
+    ).getTime();
+    if (!Number.isFinite(ms)) return true;
+    return !(ms >= startMs && ms < endMs);
+  });
+
+  math.getRemainingDatesInCycleFrom(bounds, finish).forEach((ds) => {
+    const day = ensureDay(state, ds);
+    if (!day[type].includes(key)) day[type].push(key);
+  });
+  state.completionTimestamps.push({
+    dateStr: finish,
+    hour: h,
+    minute: m,
+    gameId,
+    taskType: type,
+    taskId,
+    taskLabel: taskId,
+  });
+
+  return { ok: true, dateStr: finish, hour: h, minute: m };
+}
+
+/**
+ * Start/End cycle date edits — only apply for manual-reset endgame (scheduled are no-ops).
+ * Lightweight mirror of setEndgameCompletionDate + closed-cycle rewrite.
+ */
+function setEndgameCompletionDate(state, gameId, taskId, index, start, end) {
+  const game = (state.games || []).find((g) => g.id === gameId) || getGame(state);
+  const task = (game.endgame || []).find((t) => (t.id || t.label) === taskId);
+  if (!task || !task.manualReset) return { ok: false, applied: false, reason: "scheduled-locked" };
+  const key = game.id + "." + taskId;
+  if (!state.endgameCompletionDates) state.endgameCompletionDates = {};
+  if (!state.endgameCompletionDates[key]) state.endgameCompletionDates[key] = [];
+  while (state.endgameCompletionDates[key].length <= index) {
+    state.endgameCompletionDates[key].push({ start: "", end: "" });
+  }
+  const prev = state.endgameCompletionDates[key][index] || { start: "", end: "" };
+  state.endgameCompletionDates[key][index] = { start: start || "", end: end || "" };
+
+  if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
+  const closed = task.manualClosedCycles;
+  const fromStart = prev.start || start;
+  const fromEnd = prev.end || end;
+  const closedHit = closed.find((c) => c && c.start === fromStart && c.end === fromEnd);
+  if (closedHit) {
+    closedHit.start = start;
+    closedHit.end = end;
+    closedHit.completed = 1;
+  } else {
+    closed.push({ start, end, completed: 1 });
+  }
+  return { ok: true, applied: true };
+}
+
+/** Update extracurricular completedAt + stamp (mirror setExtracurricularCompletionMoment). */
+function setExtracurricularCompletionMoment(state, taskId, dateStr, hour, minute) {
+  if (!state.extracurricularCompleted || !state.extracurricularCompleted[taskId]) {
+    return { ok: false, reason: "Not completed" };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ""))) return { ok: false, reason: "Invalid date" };
+  const h = Math.max(0, Math.min(23, Math.round(Number(hour))));
+  const m = Math.max(0, Math.min(59, Math.round(Number(minute))));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return { ok: false, reason: "Invalid time" };
+  if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
+  state.extracurricularCompletedAt[taskId] =
+    dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00.000Z";
+  state.completionTimestamps = (state.completionTimestamps || []).filter(
+    (t) => !(t && t.taskType === "extracurricular" && String(t.taskId || "") === String(taskId))
+  );
+  const task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
+  state.completionTimestamps.push({
+    dateStr,
+    hour: h,
+    minute: m,
+    gameId: (task && task.gameId) || "",
+    taskType: "extracurricular",
+    taskId,
+    taskLabel: (task && task.label) || taskId,
+  });
+  return { ok: true, dateStr, hour: h, minute: m };
 }
 
 /** Whether the cycle containing refDateStr is complete (mirror getCompletionDateInCycle). */
@@ -1076,6 +1390,11 @@ module.exports = {
   markComplete,
   markCompleteWithLegacyBoundaryBleed,
   markIncomplete,
+  setCycleCompletionMoment,
+  setEndgameCompletionDate,
+  setExtracurricularCompletionMoment,
+  getManualPeriodBoundsForDateStr,
+  commitEarningsHistoryDraft,
   isCompletedInCurrentCycle,
   isCompletedInCycleForDate,
   simulateCalendarDayUncheck,

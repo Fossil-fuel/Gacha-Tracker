@@ -85,7 +85,7 @@
                 <li><strong>Extracurricular</strong> — Custom tasks for events, story, or other reminders with start/end dates. Optional screenshot OCR fill when creating a task.</li>
                 <li><strong>Attendance</strong> — Weekly view with completion pies (hover or click a pie for skipped tasks by game), History calendar, and Time Trends.</li>
                 <li><strong>Data</strong> — Breakdown of currency earned across games and task types.</li>
-                <li><strong>Games</strong> — Add, edit, or remove games. Start from presets (with Official icons) or build custom. Edit game identity, completion history, Add completion, Sync with Calendar, and manual Edit current / Reset from each card.</li>
+                <li><strong>Games</strong> — Add, edit, or remove games. Start from presets (with Official icons) or build custom. Edit game identity, completion history, Add Attempt (completed/skipped), Sync with Calendar, and manual Edit current / Reset from each card.</li>
               </ul>
             </section>
             <section class="about-section">
@@ -93,7 +93,7 @@
               <ul class="about-feature-list about-feature-list-compact">
                 <li>Server regions (America, Asia, Europe) and DST handling for reset times</li>
                 <li>Manual Reset/Start — set start/due (or TBD), edit the live window, and log past completions without clobbering the current cycle</li>
-                <li>Add completion from Games — backdate a finish with date/time; updates calendar, tallies, Data, and Time Trends</li>
+                <li>Add Attempt from Games (weeklies/endgame) — choose Completed (date/time) or Skipped; updates calendar, tallies, Data, and Time Trends. Dailies still use Add completion.</li>
                 <li>Unlock windows on weeklies/endgame (e.g. earliest day/time you can mark complete)</li>
                 <li>Fill-remaining: finishing a weekly/endgame marks the rest of that cycle complete in History</li>
                 <li>Stop cycles on a Games card when a mode retires, while keeping history</li>
@@ -124,7 +124,7 @@
                 <li><strong>What counts as "today"</strong> — A daily period runs from one reset to the next. So if dailies reset at 3:00 AM, then 2:59 AM still belongs to yesterday's tasks; 3:00 AM starts today's.</li>
                 <li><strong>Weeklies</strong> — Each weekly task has a start day (e.g. Monday) and time. The week runs from that moment for 7 days. The "time remaining" shows how long until the current week ends. Completing a weekly marks that day through the end of the cycle in History; Time Trends still counts only the finish day.</li>
                 <li><strong>Endgame</strong> — Endgame tasks use cycles (e.g. every 2 weeks). Each cycle has a deadline. Time remaining is until the end of the current cycle. Same fill-remaining / Trends rules as weeklies. Optional unlock fields block marking complete before a day/time in the cycle.</li>
-                <li><strong>Manual Reset/Start</strong> — Instead of a repeating schedule, you set when the window starts and when it is due (or leave due as TBD). Use Edit current to adjust the live window, or Reset / start to begin the next cycle after one ends. Past finishes can be logged with Add completion.</li>
+                <li><strong>Manual Reset/Start</strong> — Instead of a repeating schedule, you set when the window starts and when it is due (or leave due as TBD). Use Edit current to adjust the live window, or Reset / start to begin the next cycle after one ends. Past windows can be logged with Add Attempt as completed or skipped.</li>
               </ul>
               <p class="about-time-hint">The sidebar shows your current time, the next reset countdown, and a comparison of reset times with and without DST. Check Settings → Time to sync your timezone or change how dates and times are displayed.</p>
             </section>
@@ -342,14 +342,14 @@
             <span class="task-menu-note">Reset timers do not account for DST.</span>
           </div>
 
-          <!-- Row 3a: Cycle end time -->
-          <div class="task-menu-cell span-2 task-menu-label task-menu-scheduled-only">Cycle end time</div>
-          <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-desc task-menu-scheduled-only">
+          <!-- Row 3a: Cycle end time (scheduled cycles + Manual Reset default due clock) -->
+          <div class="task-menu-cell span-2 task-menu-label">Cycle end time</div>
+          <div class="task-menu-cell span-5 task-menu-control task-menu-control-with-desc">
             <input id="taskCycleEndTime" type="time" step="60" aria-label="Cycle end time" />
             <div class="form-row-toggle task-menu-toggle-row">
               <label class="settings-label" for="taskCycleEndTimeSameAsBegin">
                 Same as cycle begin (reset) time
-                <span class="currency-info-icon" aria-label="More information" title="When on, cycle end time matches Time of Reset. Turn off to set a different end-of-cycle clock time.">ⓘ</span>
+                <span class="currency-info-icon" aria-label="More information" title="When on, cycle end time matches Time of Reset. Turn off to set a different end-of-cycle clock. For Manual Reset/Start, this is the default Due time in the Start/Reset menu (you can still change it per window).">ⓘ</span>
               </label>
               <input type="checkbox" id="taskCycleEndTimeSameAsBegin" class="settings-toggle" checked aria-label="Same as cycle begin (reset) time" />
             </div>
@@ -384,7 +384,7 @@
           <div class="form-row-toggle task-menu-toggle-row task-menu-cell span-7" style="grid-column: 1 / -1;">
             <label class="settings-label" for="taskManualReset">
               Manual Reset/Start
-              <span class="currency-info-icon" aria-label="More information" title="When on, cycle length is ignored. You set a due date (or TBD) when the task starts or when you hit Reset. TBD still uses a calendar placeholder (weeklies: 7 days, endgame: 4 weeks) until you set a real due or edit history. Off by default.">ⓘ</span>
+              <span class="currency-info-icon" aria-label="More information" title="When on, cycle length is ignored. You set a due date (or TBD) when the task starts or when you hit Reset. TBD still uses a calendar placeholder (weeklies: 7 days, endgame: 4 weeks) until you set a real due or edit history. Toggling Manual Reset/Start on Save converts the task either way and migrates past cycles into history (does not clear completions or bump tallies). Off by default.">ⓘ</span>
             </label>
             <input type="checkbox" id="taskManualReset" class="settings-toggle" />
           </div>
@@ -797,6 +797,7 @@
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="earningsModalCancel">Close</button>
+          <button type="button" class="btn btn-add" id="earningsModalSave" disabled>Save</button>
         </div>
       </div>
     </div>
@@ -1279,16 +1280,29 @@
     </div>
   </div>
 
-  <!-- Add completion (Games cards): date/time, plus window fields for manual-reset tasks -->
+  <!-- Add attempt (Games cards): completed or skipped; window fields for manual-reset tasks -->
   <div id="manualCompletionModal" class="modal" hidden aria-hidden="true">
     <div class="modal-backdrop" data-close="manualCompletionModal"></div>
     <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="manualCompletionModalTitle">
       <div class="modal-header">
-        <h3 id="manualCompletionModalTitle" class="modal-title">Add completion</h3>
+        <h3 id="manualCompletionModalTitle" class="modal-title">Add Attempt</h3>
         <button type="button" class="icon-btn" id="manualCompletionModalClose" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
-        <p id="manualCompletionModalDesc" class="settings-hint">Log a completion for this task. If one already exists in the same cycle, you will be warned.</p>
+        <p id="manualCompletionModalDesc" class="settings-hint">Log an attempt for this task as completed or skipped.</p>
+        <div class="form-row" id="manualCompletionOutcomeRow">
+          <span class="settings-label" id="manualCompletionOutcomeLabel">Attempt result</span>
+          <div class="manual-attempt-outcome" role="radiogroup" aria-labelledby="manualCompletionOutcomeLabel">
+            <label class="manual-attempt-option">
+              <input type="radio" name="manualCompletionOutcome" id="manualCompletionOutcomeCompleted" value="completed" checked />
+              <span>Completed</span>
+            </label>
+            <label class="manual-attempt-option">
+              <input type="radio" name="manualCompletionOutcome" id="manualCompletionOutcomeSkipped" value="skipped" />
+              <span>Skipped</span>
+            </label>
+          </div>
+        </div>
         <div id="manualCompletionWindowFields" hidden>
           <div class="form-row">
             <label for="manualCompletionWindowStartDate">Cycle start date</label>
@@ -1307,17 +1321,24 @@
             <input id="manualCompletionWindowEndTime" type="time" step="60" />
           </div>
         </div>
-        <div class="form-row">
-          <label for="manualCompletionDate">Completion date</label>
-          <input id="manualCompletionDate" type="date" />
+        <div id="manualCompletionFinishFields">
+          <div class="form-row">
+            <label for="manualCompletionDate">Completion date</label>
+            <input id="manualCompletionDate" type="date" />
+          </div>
+          <div class="form-row">
+            <label for="manualCompletionTime">Completion time</label>
+            <input id="manualCompletionTime" type="time" step="60" />
+          </div>
+          <div class="form-row" id="manualCompletionCurrencyRow" hidden>
+            <label for="manualCompletionCurrency">Currency earned</label>
+            <input id="manualCompletionCurrency" type="number" min="0" step="1" />
+          </div>
         </div>
-        <div class="form-row">
-          <label for="manualCompletionTime">Completion time</label>
-          <input id="manualCompletionTime" type="time" step="60" />
-        </div>
-        <div class="form-row" id="manualCompletionCurrencyRow" hidden>
-          <label for="manualCompletionCurrency">Currency earned</label>
-          <input id="manualCompletionCurrency" type="number" min="0" step="1" />
+        <div class="form-row" id="manualCompletionSkipDateRow" hidden>
+          <label for="manualCompletionSkipDate">Cycle date</label>
+          <input id="manualCompletionSkipDate" type="date" />
+          <p class="settings-hint">Pick any date inside the cycle to mark as skipped (clears a finish if one exists).</p>
         </div>
         <p id="manualCompletionConflict" class="settings-hint" hidden></p>
       </div>

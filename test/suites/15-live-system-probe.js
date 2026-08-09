@@ -129,6 +129,19 @@ module.exports = {
       })
     );
 
+    checks.push(
+      check("LIVE FIND: finish-moment + extracurricular + manual Start/End lock in served bundle", () => {
+        assert.ok(appJs.includes("function setCycleCompletionMoment"), "setCycleCompletionMoment");
+        assert.ok(appJs.includes("function setExtracurricularCompletionMoment"), "setExtracurricularCompletionMoment");
+        assert.ok(appJs.includes("function getManualPeriodBoundsForDateStr"), "manual closed bounds");
+        assert.ok(appJs.includes("Only applies for manual-reset endgame"), "scheduled Start/End locked");
+        assert.ok(appJs.includes("appendEarningsFinishEditors"), "Completion History Finished UI");
+        assert.ok(appJs.includes("extracurricular-completed-row"), "extracurricular Completed row");
+        assert.ok(appJs.includes("setCycleCompletionMoment,"), "live probe exports finish editor");
+        assert.ok(appJs.includes("setExtracurricularCompletionMoment,"), "live probe exports extracurricular editor");
+      })
+    );
+
     // ── Behavioral probes (same fixtures as suite 14) ──
     checks.push(
       check("LIVE behavior: remaining-from-shared-day must not replant boundary", () => {
@@ -222,6 +235,30 @@ module.exports = {
           boundsEve.nextCycleStart
         );
         assert.ok(owned.includes("2026-07-06"), "owns start day");
+      })
+    );
+
+    checks.push(
+      check("LIVE behavior: finish-moment edit remaps History day without tally bump", () => {
+        const state = sim.createFixture({ today: "2026-08-03" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 10);
+        const tally = Number(state.weekliesCompleted[key]) || 0;
+        const moved = sim.setCycleCompletionMoment(state, "weeklies", key, "2026-07-20", "2026-07-24", 18, 0);
+        assert.equal(moved.ok, true);
+        assert.equal(sim.historyCompletionDayInCycle(state, "weeklies", key, "2026-07-22"), "2026-07-24");
+        assert.equal(Number(state.weekliesCompleted[key]) || 0, tally);
+      })
+    );
+
+    checks.push(
+      check("LIVE behavior: scheduled Start/End edit stays locked", () => {
+        const state = sim.createFixture({ today: "2026-08-03" });
+        const game = sim.getGame(state);
+        const eg = game.endgame[0];
+        const res = sim.setEndgameCompletionDate(state, game.id, eg.id, 0, "2020-01-01", "2020-02-01");
+        assert.equal(res.applied, false);
       })
     );
 

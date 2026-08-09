@@ -87,6 +87,18 @@ module.exports = {
       "function previewHistoryCompact",
       "function applyHistoryCompact",
       "function getHistoryCompactBaseline",
+      "function splitAutoHistoryForManualConvert",
+      "function convertScheduledTaskToManualReset",
+      "function convertManualResetTaskToScheduled",
+      "function applyManualResetCompletion",
+      "function applyManualResetSkip",
+      "function applyManualResetDelete",
+      "function applyScheduledCycleSkip",
+      "function getTaskDefaultEndTimeParts",
+      "function setEndgameCompletionDate",
+      "function setCycleCompletionMoment",
+      "function setExtracurricularCompletionMoment",
+      "function getManualPeriodBoundsForDateStr",
       "function processResets",
       "STORAGE_KEY",
       "STORAGE_SLIM_KEY",
@@ -119,8 +131,12 @@ module.exports = {
       /visibilityState === ["']visible["'][\s\S]{0,160}updateSidebarTime\(/.test(main),
       "sidebar clock must refresh immediately when tab becomes visible"
     );
-    assert.ok(main.includes("processResets()"), "startApp must keep processResets cadence");
-    assert.ok(main.includes("60000"), "processResets minute cadence unchanged");
+    assert.ok(main.includes("setCycleCompletionMoment"), "12-main.js live probe exports setCycleCompletionMoment");
+    assert.ok(main.includes("setExtracurricularCompletionMoment"), "12-main.js live probe exports setExtracurricularCompletionMoment");
+    assert.ok(
+      main.includes('extracurricularCompletedAt: state.extracurricularCompletedAt'),
+      "live probe snapshot includes extracurricularCompletedAt"
+    );
 
     const attendance = read("src/08-page-attendance.js");
     [
@@ -198,9 +214,21 @@ module.exports = {
       "function isMarkedOnCalendarDay",
       "check.checked = onThisDay",
       "(finished later)",
+      "function appendEarningsFinishEditors",
+      "Cycle Start/End edits are manual-reset only",
+      "function saveEarningsModal",
+      "function flushEarningsModalDraftFromDom",
+      "function toggleEarningsDraftStatus",
+      "setCycleCompletionMoment(",
     ].forEach((needle) => {
       assert.ok(modals.includes(needle), "02-modals.js must contain " + needle);
     });
+    assert.ok(modals.includes('earningsModalSave'), "Completion History has Save control");
+    assert.ok(
+      modals.includes("Mark skipped") && modals.includes("Mark completed"),
+      "manual-reset history exposes completed↔skipped toggle"
+    );
+    assert.ok(core.includes("function getManualResetEndMomentOnDate"), "closed cycles use end clock");
     assert.ok(
       !modals.includes('isCompletedInCycleForDate(item.key, "endgame", dateStr)'),
       "calendar day modal must not check endgame boxes from cycle-wide completion"
@@ -222,10 +250,23 @@ module.exports = {
       "import/clear-data must keep full renderAll"
     );
 
+    const extracurricular = read("src/08b-page-extracurricular.js");
+    assert.ok(extracurricular.includes("extracurricular-completed-row"), "08b must render Completed editors");
+    assert.ok(
+      extracurricular.includes("Dates/Currency live in dedicated rows below"),
+      "08b must not duplicate Dates/Currency in snippet"
+    );
+    assert.ok(
+      extracurricular.includes("setExtracurricularCompletionMoment"),
+      "08b must wire completed moment edits"
+    );
+
     const css = read("styles.css");
     assert.ok(css.includes(".sr-only"), "styles.css must include .sr-only");
     assert.ok(css.includes("prefers-reduced-motion"), "styles.css must respect prefers-reduced-motion");
     assert.ok(css.includes("history-dwe-carried-mark"), "styles.css must style carried marks");
+    assert.ok(css.includes(".earnings-modal-finish-row"), "styles.css must style Finished editors");
+    assert.ok(css.includes(".extracurricular-completed-row"), "styles.css must style Completed row");
 
     const weeklies = read("src/06-page-weeklies.js");
     assert.ok(weeklies.includes("aria-describedby"), "weeklies locked checkbox must use aria-describedby");
@@ -280,6 +321,19 @@ module.exports = {
     ].forEach((needle) => {
       assert.ok(html.includes(needle), "index.html must include " + needle);
     });
+    assert.ok(
+      html.includes("For Manual Reset/Start, this is the default Due time"),
+      "index.html Cycle end time tooltip must mention Manual Reset default Due time"
+    );
+    assert.ok(
+      !/<div class="task-menu-cell span-2 task-menu-label task-menu-scheduled-only">Cycle end time<\/div>/.test(html),
+      "Cycle end time label must stay visible for Manual Reset (not scheduled-only)"
+    );
+    assert.ok(
+      html.includes('id="manualCompletionOutcomeCompleted"') && html.includes('id="manualCompletionOutcomeSkipped"'),
+      "index.html Add Attempt modal must offer Completed/Skipped"
+    );
+    assert.ok(html.includes("Add Attempt"), "index.html references Add Attempt");
     assert.ok(html.includes("firebase-config.js"), "index.html loads firebase-config.js before app");
     assert.ok(
       html.includes("YOUR_API_KEY") || html.includes("isFirebaseConfigured"),

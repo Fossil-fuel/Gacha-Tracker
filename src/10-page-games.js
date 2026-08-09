@@ -133,7 +133,7 @@
 
   /**
    * Games card action rows:
-   * Row 1: Completion History | Add completion
+   * Row 1: Completion History | Add Attempt (weeklies/endgame)
    * Row 2: Sync with Calendar | Edit current (manual-reset only)
    */
   function appendGamesTaskActionButtons(main, selected, t, taskType, key) {
@@ -147,12 +147,12 @@
     historyBtn.addEventListener("click", () => openEarningsModal(selected.id, t, taskType));
     historyRow.appendChild(historyBtn);
 
-    const addCompletionBtn = document.createElement("button");
-    addCompletionBtn.type = "button";
-    addCompletionBtn.className = "btn btn-ghost";
-    addCompletionBtn.textContent = "Add completion";
-    addCompletionBtn.title = "Manually log a completion for a cycle";
-    addCompletionBtn.addEventListener("click", () => {
+    const addAttemptBtn = document.createElement("button");
+    addAttemptBtn.type = "button";
+    addAttemptBtn.className = "btn btn-ghost";
+    addAttemptBtn.textContent = "Add Attempt";
+    addAttemptBtn.title = "Log a completed or skipped attempt for a cycle";
+    addAttemptBtn.addEventListener("click", () => {
       if (typeof openManualCompletionModal === "function") {
         openManualCompletionModal({
           gameId: selected.id,
@@ -161,7 +161,7 @@
         });
       }
     });
-    historyRow.appendChild(addCompletionBtn);
+    historyRow.appendChild(addAttemptBtn);
     main.appendChild(historyRow);
 
     const syncRow = document.createElement("div");

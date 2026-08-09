@@ -989,7 +989,14 @@
     setCalendarDayModalOpen(true);
   }
 
-  let earningsModal = { gameId: null, task: null, taskType: null };
+  let earningsModal = {
+    gameId: null,
+    task: null,
+    taskType: null,
+    dirty: false,
+    draft: null, // { isManual, emptyHint, items: [...] }
+    _uidSeq: 0,
+  };
 
   function formatHistoryCycleDateRange(periodStart, periodEnd) {
     return getDateStr(periodStart) + " — " + getDateStr(periodEnd);
@@ -1029,94 +1036,194 @@
     if (skippedSection) skippedSection.hidden = !hasSkipped;
   }
 
-  function populateWeeklyEarningsModal(gameId, task, listEl, skippedSection, skippedListEl) {
+  function syncEarningsModalSaveButton() {
+    const btn = qs("earningsModalSave");
+    if (btn) btn.disabled = !earningsModal.dirty;
+  }
+
+  function markEarningsModalDirty() {
+    earningsModal.dirty = true;
+    syncEarningsModalSaveButton();
+  }
+
+  /** Pull current editor values into the draft (covers Save click before input `change` fires). */
+  function flushEarningsModalDraftFromDom() {
+    const draft = earningsModal.draft;
+    if (!draft || !Array.isArray(draft.items)) return;
+    const root = qs("earningsModal");
+    if (!root) return;
+    draft.items.forEach((row) => {
+      const itemEl = root.querySelector('[data-draft-uid="' + row.uid + '"]');
+      if (!itemEl) return;
+      const startEl = itemEl.querySelector('[data-draft-field="startStr"]');
+      const endEl = itemEl.querySelector('[data-draft-field="endStr"]');
+      const finishDateEl = itemEl.querySelector('[data-draft-field="finishDate"]');
+      const finishTimeEl = itemEl.querySelector('[data-draft-field="finishTime"]');
+      const earnedEl = itemEl.querySelector('[data-draft-field="earned"]');
+      if (startEl) row.startStr = startEl.value || "";
+      if (endEl) row.endStr = endEl.value || "";
+      if (finishDateEl) row.finishDateStr = finishDateEl.value || "";
+      if (finishTimeEl) {
+        const parts =
+          typeof parseTimeStr === "function"
+            ? parseTimeStr(finishTimeEl.value || "12:00")
+            : { hour: 12, minute: 0 };
+        row.hour = parts.hour;
+        row.minute = parts.minute;
+      }
+      if (earnedEl) row.earned = Math.max(0, Number(earnedEl.value) || 0);
+    });
+  }
+
+  function appendEarningsFinishEditors(item, opts) {
+    const o = opts || {};
+    const finishRow = document.createElement("div");
+    finishRow.className = "earnings-modal-earn-row earnings-modal-finish-row";
+    const lab = document.createElement("label");
+    lab.textContent = "Finished:";
+    finishRow.appendChild(lab);
+    const dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.dataset.draftField = "finishDate";
+    dateInput.value = o.dateStr || "";
+    dateInput.title = "Completion day (applied on Save)";
+    const timeInput = document.createElement("input");
+    timeInput.type = "time";
+    timeInput.dataset.draftField = "finishTime";
+    timeInput.step = "60";
+    const hh = Number.isFinite(o.hour) ? o.hour : 12;
+    const mm = Number.isFinite(o.minute) ? o.minute : 0;
+    timeInput.value =
+      typeof timeToStr === "function"
+        ? timeToStr(hh, mm)
+        : String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+    timeInput.title = "Completion time (applied on Save)";
+    const apply = () => {
+      if (typeof o.onChange !== "function") return;
+      const parts =
+        typeof parseTimeStr === "function"
+          ? parseTimeStr(timeInput.value || "12:00")
+          : { hour: 12, minute: 0 };
+      o.onChange(dateInput.value, parts.hour, parts.minute);
+    };
+    dateInput.addEventListener("change", apply);
+    dateInput.addEventListener("input", apply);
+    timeInput.addEventListener("change", apply);
+    timeInput.addEventListener("input", apply);
+    finishRow.appendChild(dateInput);
+    finishRow.appendChild(timeInput);
+    item.appendChild(finishRow);
+  }
+
+  function getTimestampHourMinuteForCycle(type, gameId, taskId, cycleStart, cycleEnd) {
+    const startMs = cycleStart instanceof Date ? cycleStart.getTime() : 0;
+    const endMs = cycleEnd instanceof Date ? cycleEnd.getTime() : Number.POSITIVE_INFINITY;
+    let best = null;
+    (state.completionTimestamps || []).forEach((t) => {
+      if (!t || t.taskType !== type || t.gameId !== gameId) return;
+      if (taskId && t.taskId !== taskId) return;
+      if (!isValidDateStr(t.dateStr)) return;
+      const h = Number.isFinite(t.hour) ? t.hour : 12;
+      const m = Number.isFinite(t.minute) ? t.minute : 0;
+      const ms = new Date(
+        t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+      ).getTime();
+      if (!Number.isFinite(ms)) return;
+      if (ms < startMs || ms >= endMs) return;
+      if (!best || ms < best.ms) best = { dateStr: t.dateStr, hour: h, minute: m, ms };
+    });
+    return best;
+  }
+
+  function makeEarningsDraftItem(partial) {
+    earningsModal._uidSeq += 1;
+    const hour = Number.isFinite(partial.hour) ? partial.hour : 12;
+    const minute = Number.isFinite(partial.minute) ? partial.minute : 0;
+    const earned = Number.isFinite(partial.earned) ? partial.earned : Math.max(0, Number(partial.earned) || 0);
+    return {
+      uid: "eh-" + earningsModal._uidSeq,
+      origStatus: partial.origStatus || partial.status || "completed",
+      status: partial.status || "completed",
+      origStartStr: partial.origStartStr || partial.startStr || "",
+      origEndStr: partial.origEndStr || partial.endStr || "",
+      startStr: partial.startStr || "",
+      endStr: partial.endStr || "",
+      origFinishDateStr: partial.origFinishDateStr || partial.finishDateStr || "",
+      finishDateStr: partial.finishDateStr || "",
+      origHour: Number.isFinite(partial.origHour) ? partial.origHour : hour,
+      hour,
+      origMinute: Number.isFinite(partial.origMinute) ? partial.origMinute : minute,
+      minute,
+      origEarned: Number.isFinite(partial.origEarned) ? partial.origEarned : earned,
+      earned,
+      maxPot: Number.isFinite(partial.maxPot) ? partial.maxPot : 0,
+      weeklyFixedEarn: partial.weeklyFixedEarn != null ? partial.weeklyFixedEarn : null,
+    };
+  }
+
+  function buildWeeklyEarningsDraft(gameId, task) {
     const game = getGame(gameId);
     const key = gameId + "." + (task.id || task.label);
     const history = game ? getTaskTallyHistory(game, "weeklies", key) : [];
     const pot = getWeeklyPotential(task);
     const now = getSimulatedNow();
-    const completedPeriods = history.filter((p) => p.completed > 0);
+    const isManual = typeof isManualResetTask === "function" && isManualResetTask(task);
+    const items = [];
 
-    listEl.innerHTML = "";
-    if (completedPeriods.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "earnings-modal-empty";
-      empty.textContent = history.length === 0
-        ? "No cycles yet. Complete this task to add history."
-        : "No completed cycles yet.";
-      listEl.appendChild(empty);
-    } else {
-      let completionNum = 0;
-      history.forEach((period) => {
-        if (period.completed === 0) return;
-        completionNum += 1;
-        const item = document.createElement("div");
-        item.className = "earnings-modal-item";
-        const dateRow = document.createElement("div");
-        dateRow.className = "earnings-modal-date-row";
-        const dateDisplay = document.createElement("span");
-        dateDisplay.className = "earnings-modal-date-display";
-        dateDisplay.textContent = "Completion " + completionNum + ": " + formatHistoryCycleDateRange(period.periodStart, period.periodEnd);
-        dateRow.appendChild(dateDisplay);
-        item.appendChild(dateRow);
-
-        const earnRow = document.createElement("div");
-        earnRow.className = "earnings-modal-earn-row";
-        earnRow.innerHTML = "<label>Earned:</label>";
-        const earnVal = document.createElement("span");
-        earnVal.className = "earnings-modal-earn-value";
-        earnVal.textContent = String(pot);
-        earnRow.appendChild(earnVal);
-        appendEarningsMaxLabel(earnRow, pot);
-        item.appendChild(earnRow);
-        listEl.appendChild(item);
-      });
-    }
-
-    const skipped = history.filter((p) => p.completed === 0 && p.periodEnd.getTime() <= now.getTime());
-    if (skippedListEl) {
-      skippedListEl.innerHTML = "";
-      if (skipped.length === 0) {
-        setEarningsModalSkippedLayout(false);
-      } else {
-        setEarningsModalSkippedLayout(true);
-        skipped.forEach((period) => {
-          const item = document.createElement("div");
-          item.className = "earnings-modal-skipped-item";
-          item.textContent = formatHistoryCycleDateRange(period.periodStart, period.periodEnd) + " (skipped) · Max: " + pot;
-          skippedListEl.appendChild(item);
-        });
+    history.forEach((period) => {
+      const startStr = getDateStr(period.periodStart);
+      const endStr = getDateStr(period.periodEnd);
+      if (period.completed > 0) {
+        const finishInfo =
+          getTimestampHourMinuteForCycle("weeklies", gameId, task.id || task.label, period.periodStart, period.periodEnd) ||
+          {};
+        const finishDate =
+          (typeof getCycleCompletionDateStr === "function"
+            ? getCycleCompletionDateStr("weeklies", key, startStr)
+            : null) ||
+          finishInfo.dateStr ||
+          startStr;
+        items.push(
+          makeEarningsDraftItem({
+            status: "completed",
+            startStr,
+            endStr,
+            finishDateStr: finishDate,
+            hour: Number.isFinite(finishInfo.hour) ? finishInfo.hour : 12,
+            minute: Number.isFinite(finishInfo.minute) ? finishInfo.minute : 0,
+            maxPot: pot,
+            weeklyFixedEarn: pot,
+          })
+        );
+      } else if (period.periodEnd.getTime() <= now.getTime()) {
+        items.push(
+          makeEarningsDraftItem({
+            status: "skipped",
+            startStr,
+            endStr,
+            finishDateStr: startStr,
+            hour: 12,
+            minute: 0,
+            maxPot: pot,
+            weeklyFixedEarn: pot,
+          })
+        );
       }
-    }
+    });
+
+    return {
+      isManual,
+      emptyHint:
+        history.length === 0
+          ? "No cycles yet. Complete this task to add history."
+          : items.some((i) => i.status === "completed")
+            ? ""
+            : "No completed cycles yet.",
+      items,
+    };
   }
 
-  function openEarningsModal(gameId, task, taskType) {
-    const type = taskType === "weeklies" ? "weeklies" : "endgame";
-    earningsModal.gameId = gameId;
-    earningsModal.task = task;
-    earningsModal.taskType = type;
-
-    const titleEl = qs("earningsModalTitle");
-    if (titleEl) titleEl.textContent = "Completion History — " + (task.label || "Task");
-
-    const listEl = qs("earningsModalList");
-    const skippedSection = qs("earningsModalSkippedSection");
-    const skippedListEl = qs("earningsModalSkippedList");
-    if (!listEl) return;
-    setEarningsModalSkippedLayout(false);
-
-    if (type === "weeklies") {
-      populateWeeklyEarningsModal(gameId, task, listEl, skippedSection, skippedListEl);
-      const modalEl = qs("earningsModal");
-      if (modalEl) {
-        modalEl.hidden = false;
-        modalEl.setAttribute("aria-hidden", "false");
-        document.body.style.overflow = "hidden";
-        activateModalFocus(modalEl);
-      }
-      return;
-    }
-
+  function buildEndgameEarningsDraft(gameId, task) {
     const key = gameId + "." + (task.id || task.label);
     const completedCount = getCompletedAmount(state.endgameCompleted, key);
     ensureEndgameEarnedArrayLength(gameId, task.id || task.label, completedCount);
@@ -1124,94 +1231,296 @@
     const game = getGame(gameId);
     const completedEntries = game ? getEndgameCompletedPeriodsFromCalendar(game, task, key) : [];
     const endgameHistory = game ? getTaskTallyHistory(game, "endgame", key) : [];
+    const skippedCycles = typeof getEndgameSkippedCycles === "function" ? getEndgameSkippedCycles(key) : [];
+    const isManual = typeof isManualResetTask === "function" && isManualResetTask(task);
+    const items = [];
+
+    completedEntries.forEach((entry, i) => {
+      const startStr = entry.range.start;
+      const endStr = entry.range.end;
+      const finishInfo =
+        getTimestampHourMinuteForCycle(
+          "endgame",
+          gameId,
+          task.id || task.label,
+          entry.period.periodStart,
+          entry.period.periodEnd
+        ) || {};
+      const finishDate =
+        (typeof getCycleCompletionDateStr === "function"
+          ? getCycleCompletionDateStr("endgame", key, startStr || getDateStr(entry.period.periodStart))
+          : null) ||
+        finishInfo.dateStr ||
+        startStr ||
+        getDateStr(entry.period.periodStart);
+      const historyIdx = endgameHistory.findIndex(
+        (p) => p.periodStart.getTime() === entry.period.periodStart.getTime()
+      );
+      const maxPot =
+        historyIdx >= 0
+          ? getEndgamePotentialAtCycle(gameId, task.id || task.label, task, historyIdx)
+          : getEndgamePotential(task);
+      items.push(
+        makeEarningsDraftItem({
+          status: "completed",
+          startStr,
+          endStr,
+          finishDateStr: finishDate,
+          hour: Number.isFinite(finishInfo.hour) ? finishInfo.hour : 12,
+          minute: Number.isFinite(finishInfo.minute) ? finishInfo.minute : 0,
+          earned: Number(earnedArr[i]) || 0,
+          maxPot,
+        })
+      );
+    });
+
+    skippedCycles.forEach((s) => {
+      const idx = endgameHistory.findIndex((p) => p.periodStart.getTime() === s.periodStart.getTime());
+      const maxPot =
+        idx >= 0
+          ? getEndgamePotentialAtCycle(gameId, task.id || task.label, task, idx)
+          : getEndgamePotential(task);
+      items.push(
+        makeEarningsDraftItem({
+          status: "skipped",
+          startStr: s.startStr,
+          endStr: s.endStr,
+          finishDateStr: s.startStr,
+          hour: 12,
+          minute: 0,
+          earned: maxPot,
+          maxPot,
+        })
+      );
+    });
+
+    return {
+      isManual,
+      emptyHint:
+        completedEntries.length === 0 && earnedArr.length === 0
+          ? "No completions yet. Complete this task to add earnings."
+          : "",
+      items,
+    };
+  }
+
+  function findEarningsDraftItem(uid) {
+    const items = (earningsModal.draft && earningsModal.draft.items) || [];
+    return items.find((it) => it.uid === uid) || null;
+  }
+
+  function toggleEarningsDraftStatus(uid) {
+    const item = findEarningsDraftItem(uid);
+    if (!item || !earningsModal.draft || !earningsModal.draft.isManual) return;
+    if (item.status === "completed") {
+      item.status = "skipped";
+    } else if (item.status === "skipped") {
+      item.status = "completed";
+      if (!isValidDateStr(item.finishDateStr)) item.finishDateStr = item.startStr;
+      if (!Number.isFinite(item.hour)) item.hour = 12;
+      if (!Number.isFinite(item.minute)) item.minute = 0;
+      if (earningsModal.taskType === "endgame" && !(Number(item.earned) > 0)) {
+        item.earned = Number(item.maxPot) || 0;
+      }
+    }
+    markEarningsModalDirty();
+    renderEarningsModalFromDraft();
+  }
+
+  /** Draft-only remove; persisted on Save (Close discards). */
+  function deleteEarningsDraftItem(uid) {
+    const item = findEarningsDraftItem(uid);
+    if (!item || item.status !== "completed") return;
+    item.status = "deleted";
+    markEarningsModalDirty();
+    renderEarningsModalFromDraft();
+  }
+
+  function renderEarningsModalFromDraft() {
+    const listEl = qs("earningsModalList");
+    const skippedListEl = qs("earningsModalSkippedList");
+    if (!listEl || !earningsModal.draft) return;
+
+    const type = earningsModal.taskType;
+    const draft = earningsModal.draft;
+    const isManual = !!draft.isManual;
+    const completed = draft.items.filter((i) => i.status === "completed");
+    const skipped = draft.items.filter((i) => i.status === "skipped");
 
     listEl.innerHTML = "";
-
-    if (completedEntries.length === 0 && earnedArr.length === 0) {
+    if (completed.length === 0) {
       const empty = document.createElement("p");
       empty.className = "earnings-modal-empty";
-      empty.textContent = "No completions yet. Complete this task to add earnings.";
+      empty.textContent =
+        draft.emptyHint ||
+        (skipped.length ? "No completed cycles yet." : "No completions yet.");
       listEl.appendChild(empty);
     } else {
-      completedEntries.forEach((entry, i) => {
+      completed.forEach((row, i) => {
         const completionNum = i + 1;
-        const startVal = entry.range.start;
-        const endVal = entry.range.end;
-        const dateLabel = startVal && endVal ? startVal + " — " + endVal : "(Start - End)";
-
+        const dateLabel =
+          row.startStr && row.endStr ? row.startStr + " — " + row.endStr : "(Start - End)";
         const item = document.createElement("div");
         item.className = "earnings-modal-item";
+        item.dataset.draftUid = row.uid;
+
         const dateRow = document.createElement("div");
         dateRow.className = "earnings-modal-date-row";
         const dateDisplay = document.createElement("span");
         dateDisplay.className = "earnings-modal-date-display";
         dateDisplay.textContent = "Completion " + completionNum + ": " + dateLabel;
         dateRow.appendChild(dateDisplay);
-        const startInput = document.createElement("input");
-        startInput.type = "date";
-        startInput.placeholder = "Start";
-        startInput.value = startVal;
-        startInput.title = "Start date";
-        const endInput = document.createElement("input");
-        endInput.type = "date";
-        endInput.placeholder = "End";
-        endInput.value = endVal;
-        endInput.title = "End date";
-        const dateEditWrap = document.createElement("div");
-        dateEditWrap.className = "earnings-modal-date-edit";
-        dateEditWrap.appendChild(startInput);
-        dateEditWrap.appendChild(document.createTextNode(" — "));
-        dateEditWrap.appendChild(endInput);
-        const updateDateDisplay = () => {
-          const s = startInput.value || "";
-          const e = endInput.value || "";
-          dateDisplay.textContent = "Completion " + completionNum + ": " + (s && e ? s + " — " + e : "(Start - End)");
-          setEndgameCompletionDate(gameId, task.id || task.label, i, s, e);
-        };
-        startInput.addEventListener("change", updateDateDisplay);
-        endInput.addEventListener("change", updateDateDisplay);
-        dateRow.appendChild(dateEditWrap);
+
+        // Cycle Start/End edits are manual-reset only (scheduled grid bounds must stay derived).
+        if (isManual && type === "endgame") {
+          const startInput = document.createElement("input");
+          startInput.type = "date";
+          startInput.placeholder = "Start";
+          startInput.dataset.draftField = "startStr";
+          startInput.value = row.startStr;
+          startInput.title = "Cycle start (manual-reset only; applied on Save)";
+          const endInput = document.createElement("input");
+          endInput.type = "date";
+          endInput.placeholder = "End";
+          endInput.dataset.draftField = "endStr";
+          endInput.value = row.endStr;
+          endInput.title = "Cycle end (manual-reset only; applied on Save)";
+          const dateEditWrap = document.createElement("div");
+          dateEditWrap.className = "earnings-modal-date-edit";
+          dateEditWrap.appendChild(startInput);
+          dateEditWrap.appendChild(document.createTextNode(" — "));
+          dateEditWrap.appendChild(endInput);
+          const updateDates = () => {
+            row.startStr = startInput.value || "";
+            row.endStr = endInput.value || "";
+            dateDisplay.textContent =
+              "Completion " +
+              completionNum +
+              ": " +
+              (row.startStr && row.endStr ? row.startStr + " — " + row.endStr : "(Start - End)");
+            markEarningsModalDirty();
+          };
+          startInput.addEventListener("change", updateDates);
+          startInput.addEventListener("input", updateDates);
+          endInput.addEventListener("change", updateDates);
+          endInput.addEventListener("input", updateDates);
+          dateRow.appendChild(dateEditWrap);
+        }
+
+        const actions = document.createElement("div");
+        actions.className = "earnings-modal-row-actions";
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "btn btn-ghost btn-sm earnings-modal-status-toggle";
+        deleteBtn.textContent = "Delete";
+        deleteBtn.title = "Remove this completion (applied on Save)";
+        deleteBtn.addEventListener("click", () => deleteEarningsDraftItem(row.uid));
+        actions.appendChild(deleteBtn);
+        if (isManual) {
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.className = "btn btn-ghost btn-sm earnings-modal-status-toggle";
+          toggleBtn.textContent = "Mark skipped";
+          toggleBtn.title = "Move this cycle to Skipped (applied on Save)";
+          toggleBtn.addEventListener("click", () => toggleEarningsDraftStatus(row.uid));
+          actions.appendChild(toggleBtn);
+        }
+        dateRow.appendChild(actions);
         item.appendChild(dateRow);
+
+        appendEarningsFinishEditors(item, {
+          dateStr: row.finishDateStr,
+          hour: row.hour,
+          minute: row.minute,
+          onChange: (ds, hour, minute) => {
+            row.finishDateStr = ds || "";
+            row.hour = hour;
+            row.minute = minute;
+            markEarningsModalDirty();
+          },
+        });
 
         const earnRow = document.createElement("div");
         earnRow.className = "earnings-modal-earn-row";
         earnRow.innerHTML = "<label>Earned:</label>";
-        const earnInput = document.createElement("input");
-        earnInput.type = "number";
-        earnInput.min = "0";
-        earnInput.placeholder = "0";
-        earnInput.value = String(earnedArr[i] || 0);
-        earnInput.addEventListener("change", () => setEndgameEarnedAt(gameId, task.id || task.label, i, earnInput.value));
-        earnRow.appendChild(earnInput);
-        const historyIdx = endgameHistory.findIndex((p) => p.periodStart.getTime() === entry.period.periodStart.getTime());
-        const maxPot = historyIdx >= 0
-          ? getEndgamePotentialAtCycle(gameId, task.id || task.label, task, historyIdx)
-          : getEndgamePotential(task);
-        appendEarningsMaxLabel(earnRow, maxPot);
+        if (type === "endgame") {
+          const earnInput = document.createElement("input");
+          earnInput.type = "number";
+          earnInput.min = "0";
+          earnInput.placeholder = "0";
+          earnInput.dataset.draftField = "earned";
+          earnInput.value = String(row.earned || 0);
+          earnInput.title = "Currency earned (applied on Save)";
+          const applyEarn = () => {
+            row.earned = Math.max(0, Number(earnInput.value) || 0);
+            markEarningsModalDirty();
+          };
+          earnInput.addEventListener("change", applyEarn);
+          earnInput.addEventListener("input", applyEarn);
+          earnRow.appendChild(earnInput);
+        } else {
+          const earnVal = document.createElement("span");
+          earnVal.className = "earnings-modal-earn-value";
+          earnVal.textContent = String(
+            row.weeklyFixedEarn != null ? row.weeklyFixedEarn : row.maxPot
+          );
+          earnRow.appendChild(earnVal);
+        }
+        appendEarningsMaxLabel(earnRow, row.maxPot);
         item.appendChild(earnRow);
         listEl.appendChild(item);
       });
     }
 
-    const skippedCycles = getEndgameSkippedCycles(key);
     if (skippedListEl) {
       skippedListEl.innerHTML = "";
-      if (skippedCycles.length === 0) {
+      if (skipped.length === 0) {
         setEarningsModalSkippedLayout(false);
       } else {
         setEarningsModalSkippedLayout(true);
-        skippedCycles.forEach((s) => {
-          const idx = endgameHistory.findIndex((p) => p.periodStart.getTime() === s.periodStart.getTime());
-          const maxPot = idx >= 0
-            ? getEndgamePotentialAtCycle(gameId, task.id || task.label, task, idx)
-            : getEndgamePotential(task);
+        skipped.forEach((row) => {
           const item = document.createElement("div");
           item.className = "earnings-modal-skipped-item";
-          item.textContent = s.startStr + " — " + s.endStr + " (skipped) · Max: " + maxPot;
+          item.dataset.draftUid = row.uid;
+          const label = document.createElement("span");
+          label.className = "earnings-modal-skipped-label";
+          label.textContent =
+            row.startStr + " — " + row.endStr + " (skipped) · Max: " + row.maxPot;
+          item.appendChild(label);
+          if (isManual) {
+            const toggleBtn = document.createElement("button");
+            toggleBtn.type = "button";
+            toggleBtn.className = "btn btn-ghost btn-sm earnings-modal-status-toggle";
+            toggleBtn.textContent = "Mark completed";
+            toggleBtn.title = "Move this cycle to Completed (applied on Save)";
+            toggleBtn.addEventListener("click", () => toggleEarningsDraftStatus(row.uid));
+            item.appendChild(toggleBtn);
+          }
           skippedListEl.appendChild(item);
         });
       }
     }
+
+    syncEarningsModalSaveButton();
+  }
+
+  function openEarningsModal(gameId, task, taskType) {
+    const type = taskType === "weeklies" ? "weeklies" : "endgame";
+    earningsModal.gameId = gameId;
+    earningsModal.task = task;
+    earningsModal.taskType = type;
+    earningsModal.dirty = false;
+    earningsModal._uidSeq = 0;
+    earningsModal.draft =
+      type === "weeklies" ? buildWeeklyEarningsDraft(gameId, task) : buildEndgameEarningsDraft(gameId, task);
+
+    const titleEl = qs("earningsModalTitle");
+    if (titleEl) titleEl.textContent = "Completion History — " + (task.label || "Task");
+
+    const listEl = qs("earningsModalList");
+    if (!listEl) return;
+    setEarningsModalSkippedLayout(false);
+    renderEarningsModalFromDraft();
 
     const modalEl = qs("earningsModal");
     if (modalEl) {
@@ -1223,9 +1532,13 @@
   }
 
   function closeEarningsModal() {
+    // Close discards unsaved draft edits (no confirm — typical modal Cancel/Close UX).
     earningsModal.gameId = null;
     earningsModal.task = null;
     earningsModal.taskType = null;
+    earningsModal.dirty = false;
+    earningsModal.draft = null;
+    syncEarningsModalSaveButton();
     const modalEl = qs("earningsModal");
     if (modalEl) {
       modalEl.hidden = true;
@@ -1233,6 +1546,215 @@
       document.body.style.overflow = "";
       deactivateModalFocus();
     }
+  }
+
+  function saveEarningsModal() {
+    const ctx = earningsModal;
+    if (!ctx.draft || !ctx.gameId || !ctx.task || !ctx.taskType) {
+      closeEarningsModal();
+      return;
+    }
+    // Flush focused editors into the draft before dirty check / commit.
+    flushEarningsModalDraftFromDom();
+    if (!ctx.dirty) {
+      closeEarningsModal();
+      return;
+    }
+
+    const gameId = ctx.gameId;
+    const task = ctx.task;
+    const type = ctx.taskType;
+    const taskId = task.id || task.label;
+    const key = gameId + "." + taskId;
+    const game = getGame(gameId);
+    if (!game) {
+      alert("Task not found.");
+      return;
+    }
+    const isManual = !!ctx.draft.isManual;
+    const items = ctx.draft.items.slice();
+    const quiet = { save: false, render: false, processResets: false, skipSave: true, skipRender: true };
+    let firstError = null;
+
+    // Prefer original cycle ref for finish remaps when Start was also edited (Phase 3 rehomes first).
+    // Phase order: delete → skip → complete → rehome bounds → finish moment → earned.
+
+    // Phase 0: completed → deleted (clears tallies/marks/timestamps; manual also drops closed archive).
+    items.forEach((item) => {
+      if (item.origStatus !== "completed" || item.status !== "deleted") return;
+      const start = isValidDateStr(item.startStr) ? item.startStr : item.origStartStr;
+      const end = isValidDateStr(item.endStr) ? item.endStr : item.origEndStr;
+      let result;
+      if (isManual && typeof applyManualResetDelete === "function") {
+        result = applyManualResetDelete(game, task, type, {
+          startDateStr: start,
+          endDateStr: end,
+          ...quiet,
+        });
+      } else if (typeof applyScheduledCycleSkip === "function") {
+        // Scheduled: clearing a finish yields the same calendar state as skip (past empty = skipped).
+        result = applyScheduledCycleSkip(type, key, start, quiet);
+      } else if (typeof removeTaskCompletion === "function") {
+        const dateRef = isValidDateStr(item.finishDateStr)
+          ? item.finishDateStr
+          : isValidDateStr(item.origFinishDateStr)
+            ? item.origFinishDateStr
+            : start;
+        result = removeTaskCompletion(type, key, {
+          dateStr: dateRef,
+          recordUndo: false,
+          ...quiet,
+        });
+        if (type === "endgame" && typeof syncEndgameCompletionDatesFromCalendar === "function") {
+          syncEndgameCompletionDatesFromCalendar(game, task, key);
+        }
+      }
+      if (result && !result.ok && result.reason && !firstError) firstError = result.reason;
+    });
+
+    // Phase 1: completed → skipped (use draft bounds so an edited window is skipped correctly).
+    items.forEach((item) => {
+      if (item.origStatus !== "completed" || item.status !== "skipped") return;
+      const start = isValidDateStr(item.startStr) ? item.startStr : item.origStartStr;
+      const end = isValidDateStr(item.endStr) ? item.endStr : item.origEndStr;
+      let result;
+      if (isManual && typeof applyManualResetSkip === "function") {
+        result = applyManualResetSkip(game, task, type, {
+          startDateStr: start,
+          endDateStr: end,
+          ...quiet,
+        });
+      } else if (typeof applyScheduledCycleSkip === "function") {
+        result = applyScheduledCycleSkip(type, key, start, quiet);
+      }
+      if (result && !result.ok && result.reason && !firstError) firstError = result.reason;
+    });
+
+    // Phase 2: skipped → completed.
+    items.forEach((item) => {
+      if (item.origStatus !== "skipped" || item.status !== "completed") return;
+      const start = isValidDateStr(item.startStr) ? item.startStr : item.origStartStr;
+      const end = isValidDateStr(item.endStr) ? item.endStr : item.origEndStr;
+      const finish = isValidDateStr(item.finishDateStr) ? item.finishDateStr : start;
+      let result;
+      if (isManual && typeof applyManualResetCompletion === "function") {
+        result = applyManualResetCompletion(game, task, type, {
+          startDateStr: start,
+          endDateStr: end,
+          dateStr: finish,
+          hour: item.hour,
+          minute: item.minute,
+          currencyValue: type === "endgame" ? item.earned : undefined,
+          replace: true,
+          ...quiet,
+        });
+      } else if (typeof applyTaskCompletion === "function") {
+        result = applyTaskCompletion(type, key, {
+          dateStr: finish,
+          hour: item.hour,
+          minute: item.minute,
+          currencyValue: type === "endgame" ? item.earned : undefined,
+          skipUnlockGate: true,
+          recordUndo: false,
+          ...quiet,
+        });
+      }
+      if (result && !result.ok && result.reason && result.reason !== "conflict" && !firstError) {
+        firstError = result.reason;
+      }
+    });
+
+    // Phase 3: manual endgame cycle bound edits for items that stay completed.
+    if (type === "endgame" && isManual && typeof setEndgameCompletionDate === "function") {
+      items.forEach((item) => {
+        if (item.status !== "completed") return;
+        if (item.origStatus === "skipped") return; // already applied with new bounds in phase 2
+        if (!isValidDateStr(item.startStr) || !isValidDateStr(item.endStr)) return;
+        if (item.startStr === item.origStartStr && item.endStr === item.origEndStr) return;
+        const entries = getEndgameCompletedPeriodsFromCalendar(game, task, key);
+        let idx = entries.findIndex(
+          (e) => e.range.start === item.origStartStr && e.range.end === item.origEndStr
+        );
+        if (idx < 0) {
+          idx = entries.findIndex(
+            (e) => e.range.start === item.startStr && e.range.end === item.endStr
+          );
+        }
+        if (idx < 0) return;
+        setEndgameCompletionDate(gameId, taskId, idx, item.startStr, item.endStr, {
+          skipSave: true,
+        });
+      });
+    }
+
+    // Phase 4: finish day/time for completed rows (skips newly completed if phase 2 already set them,
+    // but re-applying with draft values keeps History/Trends in sync when finish was edited after toggle).
+    // Never re-paint a window this draft marked skipped/deleted — finish fields may still be present.
+    const blockedCycleStarts = new Set();
+    items.forEach((item) => {
+      if (item.status !== "skipped" && item.status !== "deleted") return;
+      if (isValidDateStr(item.startStr)) blockedCycleStarts.add(item.startStr);
+      if (isValidDateStr(item.origStartStr)) blockedCycleStarts.add(item.origStartStr);
+    });
+    if (typeof setCycleCompletionMoment === "function") {
+      items.forEach((item) => {
+        if (item.status !== "completed") return;
+        if (!isValidDateStr(item.finishDateStr)) return;
+        const finishUnchanged =
+          item.finishDateStr === item.origFinishDateStr &&
+          item.hour === item.origHour &&
+          item.minute === item.origMinute;
+        const boundsUnchanged =
+          item.startStr === item.origStartStr && item.endStr === item.origEndStr;
+        if (item.origStatus === "completed" && finishUnchanged && boundsUnchanged) return;
+        // After Phase 3 rehome, look up by new start; otherwise prefer original window start.
+        const cycleRef = isValidDateStr(item.startStr)
+          ? item.startStr
+          : isValidDateStr(item.origStartStr)
+            ? item.origStartStr
+            : "";
+        if (!isValidDateStr(cycleRef)) return;
+        if (blockedCycleStarts.has(cycleRef)) return;
+        const result = setCycleCompletionMoment(
+          type,
+          key,
+          cycleRef,
+          item.finishDateStr,
+          item.hour,
+          item.minute,
+          { skipSave: true, skipRender: true }
+        );
+        if (result && !result.ok && result.reason && !firstError) firstError = result.reason;
+      });
+    }
+
+    // Phase 5: endgame earned amounts (match by current or original window).
+    if (type === "endgame" && typeof setEndgameEarnedAt === "function") {
+      const entries = getEndgameCompletedPeriodsFromCalendar(game, task, key);
+      ensureEndgameEarnedArrayLength(gameId, taskId, entries.length);
+      const completedDraft = items.filter((i) => i.status === "completed");
+      entries.forEach((entry, i) => {
+        const match = completedDraft.find(
+          (it) =>
+            (it.startStr === entry.range.start && it.endStr === entry.range.end) ||
+            (it.origStartStr === entry.range.start && it.origEndStr === entry.range.end)
+        );
+        if (!match) return;
+        setEndgameEarnedAt(gameId, taskId, i, match.earned, { skipSave: true, skipRender: true });
+      });
+    }
+
+    if (typeof processResets === "function") processResets();
+    save();
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    renderActiveTab();
+
+    if (firstError) {
+      alert(String(firstError));
+    }
+
+    // Refresh draft from persisted state; keep modal open for review.
+    openEarningsModal(gameId, task, type);
   }
 
   let endgameCompleteModalCtx = null;
@@ -2287,15 +2809,17 @@ function syncTaskCycleEndTimeUI() {
       dueInput.value = hasDue ? task.manualDueDateStr : getDateStr(now);
     }
     if (dueTime) {
-      const dueH = Number.isFinite(task.manualDueHour)
-        ? task.manualDueHour
-        : (Number.isFinite(task.weekStartHour) ? task.weekStartHour : 23);
-      const dueM = Number.isFinite(task.manualDueMinute)
-        ? task.manualDueMinute
-        : (Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 59);
-      dueTime.value = hasDue
-        ? timeToStr(dueH, dueM)
-        : timeToStr(now.getHours(), now.getMinutes());
+      // Seed Due time from Cycle end time default (Edit Task); per-window manualDue* overrides when set.
+      const defaults =
+        typeof getTaskDefaultEndTimeParts === "function"
+          ? getTaskDefaultEndTimeParts(task)
+          : {
+              hour: Number.isFinite(task.weekStartHour) ? task.weekStartHour : 4,
+              minute: Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0,
+            };
+      const dueH = Number.isFinite(task.manualDueHour) ? task.manualDueHour : defaults.hour;
+      const dueM = Number.isFinite(task.manualDueMinute) ? task.manualDueMinute : defaults.minute;
+      dueTime.value = timeToStr(dueH, dueM);
     }
     syncManualResetDueInputs();
     updateManualResetTimeRemainingDisplay();
@@ -2459,6 +2983,41 @@ function syncTaskCycleEndTimeUI() {
     taskId: null,
   };
 
+  function getManualCompletionOutcome() {
+    const skipped = qs("manualCompletionOutcomeSkipped");
+    return skipped && skipped.checked ? "skipped" : "completed";
+  }
+
+  function syncManualCompletionOutcomeUI() {
+    const ctx = getManualCompletionTaskContext();
+    const outcomeRow = qs("manualCompletionOutcomeRow");
+    const finishFields = qs("manualCompletionFinishFields");
+    const skipDateRow = qs("manualCompletionSkipDateRow");
+    const windowFields = qs("manualCompletionWindowFields");
+    const currencyRow = qs("manualCompletionCurrencyRow");
+    const confirmBtn = qs("manualCompletionModalConfirm");
+    const isDaily = ctx && ctx.type === "dailies";
+    const outcome = getManualCompletionOutcome();
+    const isSkip = !isDaily && outcome === "skipped";
+
+    if (outcomeRow) outcomeRow.hidden = !!isDaily;
+    if (finishFields) finishFields.hidden = !!isSkip;
+    if (skipDateRow) {
+      // Scheduled skip needs a cycle-date picker; manual skip uses window fields instead.
+      skipDateRow.hidden = !(isSkip && ctx && !ctx.isManual);
+    }
+    if (windowFields) {
+      windowFields.hidden = !(ctx && ctx.isManual && !isDaily);
+    }
+    if (currencyRow) {
+      currencyRow.hidden = isSkip || !ctx || ctx.type !== "endgame";
+    }
+    if (confirmBtn) {
+      confirmBtn.textContent = isDaily ? "Add" : isSkip ? "Add skipped" : "Add completed";
+    }
+    refreshManualCompletionConflictHint();
+  }
+
   function setManualCompletionModalOpen(open) {
     const el = qs("manualCompletionModal");
     if (!el) return;
@@ -2537,6 +3096,11 @@ function syncTaskCycleEndTimeUI() {
       conflict.textContent = "";
       return;
     }
+    if (ctx.type !== "dailies" && getManualCompletionOutcome() === "skipped") {
+      conflict.hidden = true;
+      conflict.textContent = "";
+      return;
+    }
     const dateStr = dateInput && isValidDateStr(dateInput.value) ? dateInput.value : null;
     if (!dateStr) {
       conflict.hidden = true;
@@ -2590,24 +3154,39 @@ function syncTaskCycleEndTimeUI() {
 
     const title = qs("manualCompletionModalTitle");
     const desc = qs("manualCompletionModalDesc");
-    const windowFields = qs("manualCompletionWindowFields");
     const startDate = qs("manualCompletionWindowStartDate");
     const startTime = qs("manualCompletionWindowStartTime");
     const endDate = qs("manualCompletionWindowEndDate");
     const endTime = qs("manualCompletionWindowEndTime");
     const dateInput = qs("manualCompletionDate");
     const timeInput = qs("manualCompletionTime");
-    const currencyRow = qs("manualCompletionCurrencyRow");
+    const skipDate = qs("manualCompletionSkipDate");
     const currencyInput = qs("manualCompletionCurrency");
+    const outcomeCompleted = qs("manualCompletionOutcomeCompleted");
+    const outcomeSkipped = qs("manualCompletionOutcomeSkipped");
     const now = getSimulatedNow();
 
-    if (title) title.textContent = "Add completion";
-    if (desc) {
-      desc.textContent = ctx.isManual
-        ? ("Log a completion for \"" + ctx.label + "\". Set the cycle window (past or current) and when you finished. Past windows are saved to history without changing the live cycle.")
-        : ("Log a completion for \"" + ctx.label + "\". The cycle is inferred from the completion date.");
+    if (outcomeCompleted) outcomeCompleted.checked = true;
+    if (outcomeSkipped) outcomeSkipped.checked = false;
+
+    if (title) {
+      title.textContent = ctx.type === "dailies" ? "Add completion" : "Add Attempt";
     }
-    if (windowFields) windowFields.hidden = !ctx.isManual;
+    if (desc) {
+      if (ctx.type === "dailies") {
+        desc.textContent = "Log a daily completion for \"" + ctx.label + "\".";
+      } else if (ctx.isManual) {
+        desc.textContent =
+          "Log an attempt for \"" +
+          ctx.label +
+          "\". Choose Completed (enter finish info) or Skipped (window counts as skipped in history).";
+      } else {
+        desc.textContent =
+          "Log an attempt for \"" +
+          ctx.label +
+          "\". Choose Completed to enter finish date/time, or Skipped to clear a finish and leave that cycle skipped.";
+      }
+    }
     if (ctx.isManual && ctx.task) {
       if (startDate) startDate.value = isValidDateStr(ctx.task.dateStarted) ? ctx.task.dateStarted : getDateStr(now);
       if (startTime) {
@@ -2622,23 +3201,23 @@ function syncTaskCycleEndTimeUI() {
           : getDateStr(now);
       }
       if (endTime) {
-        const eh = Number.isFinite(ctx.task.manualDueHour)
-          ? ctx.task.manualDueHour
-          : (Number.isFinite(ctx.task.weekStartHour) ? ctx.task.weekStartHour : 23);
-        const em = Number.isFinite(ctx.task.manualDueMinute)
-          ? ctx.task.manualDueMinute
-          : (Number.isFinite(ctx.task.weekStartMinute) ? ctx.task.weekStartMinute : 59);
+        const defaults =
+          typeof getTaskDefaultEndTimeParts === "function"
+            ? getTaskDefaultEndTimeParts(ctx.task)
+            : { hour: 23, minute: 59 };
+        const eh = Number.isFinite(ctx.task.manualDueHour) ? ctx.task.manualDueHour : defaults.hour;
+        const em = Number.isFinite(ctx.task.manualDueMinute) ? ctx.task.manualDueMinute : defaults.minute;
         endTime.value = timeToStr(eh, em);
       }
     }
     if (dateInput) dateInput.value = getDateStr(now);
     if (timeInput) timeInput.value = timeToStr(now.getHours(), now.getMinutes());
-    if (currencyRow) currencyRow.hidden = ctx.type !== "endgame";
+    if (skipDate) skipDate.value = getDateStr(now);
     if (currencyInput) {
       const pot = ctx.task && typeof getEndgamePotential === "function" ? getEndgamePotential(ctx.task) : 0;
       currencyInput.value = String(Math.max(0, pot || 0));
     }
-    refreshManualCompletionConflictHint();
+    syncManualCompletionOutcomeUI();
     setManualCompletionModalOpen(true);
   }
 
@@ -2648,6 +3227,54 @@ function syncTaskCycleEndTimeUI() {
       closeManualCompletionModal();
       return;
     }
+
+    // Weeklies / endgame: Completed vs Skipped attempt.
+    if (ctx.type !== "dailies" && getManualCompletionOutcome() === "skipped") {
+      if (ctx.isManual && ctx.task) {
+        const win = readManualCompletionWindowFromForm();
+        if (!win) {
+          alert("Manual-reset tasks need both cycle start and end dates.");
+          return;
+        }
+        if (typeof applyManualResetSkip !== "function") {
+          alert("Skip attempt is unavailable.");
+          return;
+        }
+        const result = applyManualResetSkip(ctx.game, ctx.task, ctx.type, {
+          startDateStr: win.startDateStr,
+          endDateStr: win.endDateStr,
+          startHour: win.startHour,
+          startMinute: win.startMinute,
+          endHour: win.endHour,
+          endMinute: win.endMinute,
+        });
+        if (result && !result.ok && result.reason) {
+          alert(result.reason);
+          return;
+        }
+        closeManualCompletionModal();
+        return;
+      }
+
+      const skipDateEl = qs("manualCompletionSkipDate");
+      const skipDateStr = skipDateEl && isValidDateStr(skipDateEl.value) ? skipDateEl.value : null;
+      if (!skipDateStr) {
+        if (skipDateEl) skipDateEl.focus();
+        return;
+      }
+      if (typeof applyScheduledCycleSkip !== "function") {
+        alert("Skip attempt is unavailable.");
+        return;
+      }
+      const result = applyScheduledCycleSkip(ctx.type, ctx.key, skipDateStr, {});
+      if (result && !result.ok && result.reason) {
+        alert(result.reason);
+        return;
+      }
+      closeManualCompletionModal();
+      return;
+    }
+
     const dateInput = qs("manualCompletionDate");
     const timeInput = qs("manualCompletionTime");
     const dateStr = dateInput && isValidDateStr(dateInput.value) ? dateInput.value : null;
@@ -2781,6 +3408,10 @@ function syncTaskCycleEndTimeUI() {
       dateInput.addEventListener("change", refreshManualCompletionConflictHint);
       dateInput.addEventListener("input", refreshManualCompletionConflictHint);
     }
+    ["manualCompletionOutcomeCompleted", "manualCompletionOutcomeSkipped"].forEach((id) => {
+      const el = qs(id);
+      if (el) el.addEventListener("change", syncManualCompletionOutcomeUI);
+    });
     ["manualCompletionWindowStartDate", "manualCompletionWindowEndDate", "manualCompletionWindowStartTime", "manualCompletionWindowEndTime", "manualCompletionTime"].forEach((id) => {
       const el = qs(id);
       if (el) {
@@ -3274,12 +3905,14 @@ function syncTaskCycleEndTimeUI() {
     const modalEl = qs("earningsModal");
     const closeBtn = qs("earningsModalClose");
     const cancelBtn = qs("earningsModalCancel");
+    const saveBtn = qs("earningsModalSave");
     if (!modalEl) return;
     modalEl.addEventListener("click", (e) => {
       if (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true") closeEarningsModal();
     });
     if (closeBtn) closeBtn.addEventListener("click", closeEarningsModal);
     if (cancelBtn) cancelBtn.addEventListener("click", closeEarningsModal);
+    if (saveBtn) saveBtn.addEventListener("click", saveEarningsModal);
   }
 
   function initEndgameCompleteModal() {

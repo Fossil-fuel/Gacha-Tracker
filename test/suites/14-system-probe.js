@@ -327,6 +327,44 @@ module.exports = {
       })
     );
 
+    checks.push(
+      check("Invariant: finish-moment edit syncs History day and keeps sibling cycles", () => {
+        const state = sim.createFixture({ today: "2026-08-03" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        const dKey = sim.taskKey(game, game.weeklies.find((t) => t.id === "divergent"));
+        sim.markComplete(state, "weeklies", key, "2026-07-22", 10);
+        sim.markComplete(state, "weeklies", dKey, "2026-07-15", 12);
+        const tally = Number(state.weekliesCompleted[key]) || 0;
+        const moved = sim.setCycleCompletionMoment(state, "weeklies", key, "2026-07-20", "2026-07-24", 14, 0);
+        assert.equal(moved.ok, true, "finish move");
+        assert.equal(sim.historyCompletionDayInCycle(state, "weeklies", key, "2026-07-22"), "2026-07-24");
+        assert.equal(Number(state.weekliesCompleted[key]) || 0, tally, "no tally bump");
+        assert.equal(
+          sim.isCompletedInCycleForDate(state, "weeklies", dKey, "2026-07-15"),
+          true,
+          "sibling DivUni cycle undisturbed"
+        );
+      })
+    );
+
+    checks.push(
+      check("FIND: scheduled endgame Start/End edits must stay locked in source + sim", () => {
+        const core = fs.readFileSync(path.join(__dirname, "..", "..", "src", "01-core.js"), "utf8");
+        assert.ok(
+          /function setEndgameCompletionDate[\s\S]{0,400}!isManualResetTask\(task\)\) return;/.test(core),
+          "setEndgameCompletionDate must early-return for scheduled tasks"
+        );
+        const state = sim.createFixture({ today: "2026-08-03" });
+        const game = sim.getGame(state);
+        const eg = game.endgame.find((t) => t.id === "endgame_a");
+        const before = JSON.stringify(state.completionByDate);
+        const res = sim.setEndgameCompletionDate(state, game.id, eg.id, 0, "2019-01-01", "2019-02-01");
+        assert.equal(res.applied, false);
+        assert.equal(JSON.stringify(state.completionByDate), before);
+      })
+    );
+
     // ── G. Source: ended-task history edit asymmetry ─────────
     checks.push(
       check("FIND: apply blocks ended tasks but remove does not (history restore impossible)", () => {

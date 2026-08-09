@@ -226,6 +226,9 @@
               endgameCurrencyEarned: state.endgameCurrencyEarned,
               endgameCurrencyPotential: state.endgameCurrencyPotential,
               endgameCompletionDates: state.endgameCompletionDates,
+              extracurricularTasks: state.extracurricularTasks,
+              extracurricularCompleted: state.extracurricularCompleted,
+              extracurricularCompletedAt: state.extracurricularCompletedAt,
               simulatedDateOffset: state.simulatedDateOffset || 0,
               simulatedHourOffset: state.simulatedHourOffset || 0,
               tab: state.tab,
@@ -248,6 +251,9 @@
             "endgameCurrencyEarned",
             "endgameCurrencyPotential",
             "endgameCompletionDates",
+            "extracurricularTasks",
+            "extracurricularCompleted",
+            "extracurricularCompletedAt",
           ].forEach((k) => {
             if (snap[k] !== undefined) state[k] = snap[k];
           });
@@ -262,13 +268,31 @@
           }
           if (!state.completionByDate) state.completionByDate = {};
           if (!Array.isArray(state.completionTimestamps)) state.completionTimestamps = [];
+          if (!Array.isArray(state.extracurricularTasks)) state.extracurricularTasks = [];
+          if (!state.extracurricularCompleted || typeof state.extracurricularCompleted !== "object") {
+            state.extracurricularCompleted = {};
+          }
+          if (!state.extracurricularCompletedAt || typeof state.extracurricularCompletedAt !== "object") {
+            state.extracurricularCompletedAt = {};
+          }
           if (snap.tab) state.tab = snap.tab;
           if (typeof save === "function") save({ immediate: true });
           if (typeof renderAll === "function") renderAll();
           return true;
         },
         applyTaskCompletion,
+        applyManualResetCompletion,
+        applyManualResetSkip,
+        applyManualResetDelete,
+        applyScheduledCycleSkip,
+        setEndgameCompletionDate,
+        setCycleCompletionMoment,
+        getManualResetEndMomentOnDate,
+        setExtracurricularCompletionMoment,
         removeTaskCompletion,
+        getEndgameCompletedPeriodsFromCalendar,
+        getEndgameSkippedCycles,
+        getTaskTallyHistory,
         getRemainingDatesInCycleFrom,
         getCalendarDatesInCycleRange,
         getWeeklyCycleBoundsForMoment,

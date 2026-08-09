@@ -135,36 +135,89 @@
         if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
         applyTaskBannersToSavePayload(next);
         if (taskModal.bannerSource) setTaskBannerSectionPreferExpanded(false);
+        const convertingToManual = manualReset && !wasManual && existingIdx >= 0;
+        const convertingToAuto = !manualReset && wasManual && existingIdx >= 0;
         if (existingIdx >= 0) {
-          const merged = { ...game.weeklies[existingIdx], ...next };
-          if (!countFromDateStarted) delete merged.countFromDateStarted;
-          if (!earliestCompleteDays) delete merged.earliestCompleteDays;
-          if (!hasUnlockTime) {
-            delete merged.earliestCompleteHour;
-            delete merged.earliestCompleteMinute;
+          const prev = game.weeklies[existingIdx];
+          if (convertingToManual && typeof convertScheduledTaskToManualReset === "function") {
+            // Convert while still scheduled so auto history can be archived.
+            convertScheduledTaskToManualReset(game, prev, "weeklies");
+            const merged = { ...prev, ...next };
+            merged.manualReset = true;
+            merged.manualClosedCycles = Array.isArray(prev.manualClosedCycles) ? prev.manualClosedCycles : [];
+            merged.manualDueTbd = prev.manualDueTbd;
+            merged.manualDueDateStr = prev.manualDueDateStr;
+            merged.manualDueHour = prev.manualDueHour;
+            merged.manualDueMinute = prev.manualDueMinute;
+            merged.manualAwaitingRestart = prev.manualAwaitingRestart;
+            merged.dateStarted = prev.dateStarted;
+            if (Number.isFinite(prev.weekStartDay)) merged.weekStartDay = prev.weekStartDay;
+            if (!earliestCompleteDays) delete merged.earliestCompleteDays;
+            if (!hasUnlockTime) {
+              delete merged.earliestCompleteHour;
+              delete merged.earliestCompleteMinute;
+            }
+            if (cycleEndTimeSameAsBegin) {
+              delete merged.cycleEndTimeSameAsBegin;
+              delete merged.cycleEndHour;
+              delete merged.cycleEndMinute;
+            }
+            clearTaskBannerFieldsFromMerged(merged);
+            game.weeklies[existingIdx] = merged;
+          } else if (convertingToAuto && typeof convertManualResetTaskToScheduled === "function") {
+            const merged = { ...prev, ...next };
+            merged.manualReset = true;
+            merged.manualClosedCycles = Array.isArray(prev.manualClosedCycles) ? prev.manualClosedCycles.slice() : [];
+            merged.manualDueTbd = prev.manualDueTbd;
+            merged.manualDueDateStr = prev.manualDueDateStr;
+            merged.manualDueHour = prev.manualDueHour;
+            merged.manualDueMinute = prev.manualDueMinute;
+            merged.manualAwaitingRestart = prev.manualAwaitingRestart;
+            if (!earliestCompleteDays) delete merged.earliestCompleteDays;
+            if (!hasUnlockTime) {
+              delete merged.earliestCompleteHour;
+              delete merged.earliestCompleteMinute;
+            }
+            if (cycleEndTimeSameAsBegin) {
+              delete merged.cycleEndTimeSameAsBegin;
+              delete merged.cycleEndHour;
+              delete merged.cycleEndMinute;
+            }
+            clearTaskBannerFieldsFromMerged(merged);
+            game.weeklies[existingIdx] = merged;
+            convertManualResetTaskToScheduled(game, game.weeklies[existingIdx], "weeklies");
+          } else {
+            const merged = { ...game.weeklies[existingIdx], ...next };
+            if (!countFromDateStarted) delete merged.countFromDateStarted;
+            if (!earliestCompleteDays) delete merged.earliestCompleteDays;
+            if (!hasUnlockTime) {
+              delete merged.earliestCompleteHour;
+              delete merged.earliestCompleteMinute;
+            }
+            if (cycleEndTimeSameAsBegin) {
+              delete merged.cycleEndTimeSameAsBegin;
+              delete merged.cycleEndHour;
+              delete merged.cycleEndMinute;
+            }
+            if (!manualReset) {
+              delete merged.manualReset;
+              delete merged.manualDueDateStr;
+              delete merged.manualDueTbd;
+              delete merged.manualDueHour;
+              delete merged.manualDueMinute;
+              delete merged.manualAwaitingRestart;
+              delete merged.manualClosedCycles;
+            }
+            clearTaskBannerFieldsFromMerged(merged);
+            game.weeklies[existingIdx] = merged;
           }
-          if (cycleEndTimeSameAsBegin) {
-            delete merged.cycleEndTimeSameAsBegin;
-            delete merged.cycleEndHour;
-            delete merged.cycleEndMinute;
-          }
-          if (!manualReset) {
-            delete merged.manualReset;
-            delete merged.manualDueDateStr;
-            delete merged.manualDueTbd;
-            delete merged.manualDueHour;
-            delete merged.manualDueMinute;
-            delete merged.manualAwaitingRestart;
-            delete merged.manualClosedCycles;
-          }
-          clearTaskBannerFieldsFromMerged(merged);
-          game.weeklies[existingIdx] = merged;
         } else game.weeklies.push(next);
 
         save();
         if (typeof bumpDataVersion === "function") bumpDataVersion();
         const savedId = next.id;
-        const openManual = manualReset && (!wasManual || existingIdx < 0);
+        // New manual tasks still open Start; converting an existing task migrates history silently.
+        const openManual = manualReset && existingIdx < 0;
         closeTaskModal();
         renderActiveTab();
         if (openManual && typeof openManualResetModal === "function") {
@@ -217,6 +270,8 @@
         if (taskBannerCrop.sourceImg && !taskBannerCrop.clear) commitTaskBannerCrop();
         applyTaskBannersToSavePayload(next);
         if (taskModal.bannerSource) setTaskBannerSectionPreferExpanded(false);
+        const convertingToManual = manualReset && !wasManual && existingIdx >= 0;
+        const convertingToAuto = !manualReset && wasManual && existingIdx >= 0;
         if (existingIdx >= 0) {
           const prev = game.endgame[existingIdx];
           const oldCurrency = getEndgamePotential(prev);
@@ -228,29 +283,77 @@
               freezeEndgameCurrencyPotentialForPastCycles(game.id, taskId, oldCurrency, attempted);
             }
           }
-          const merged = { ...game.endgame[existingIdx], ...next };
-          if (!countFromDateStarted) delete merged.countFromDateStarted;
-          if (!earliestCompleteDays) delete merged.earliestCompleteDays;
-          if (!hasUnlockTime) {
-            delete merged.earliestCompleteHour;
-            delete merged.earliestCompleteMinute;
+          if (convertingToManual && typeof convertScheduledTaskToManualReset === "function") {
+            convertScheduledTaskToManualReset(game, prev, "endgame");
+            const merged = { ...prev, ...next };
+            merged.manualReset = true;
+            merged.manualClosedCycles = Array.isArray(prev.manualClosedCycles) ? prev.manualClosedCycles : [];
+            merged.manualDueTbd = prev.manualDueTbd;
+            merged.manualDueDateStr = prev.manualDueDateStr;
+            merged.manualDueHour = prev.manualDueHour;
+            merged.manualDueMinute = prev.manualDueMinute;
+            merged.manualAwaitingRestart = prev.manualAwaitingRestart;
+            merged.dateStarted = prev.dateStarted;
+            if (Number.isFinite(prev.weekStartDay)) merged.weekStartDay = prev.weekStartDay;
+            if (!earliestCompleteDays) delete merged.earliestCompleteDays;
+            if (!hasUnlockTime) {
+              delete merged.earliestCompleteHour;
+              delete merged.earliestCompleteMinute;
+            }
+            if (cycleEndTimeSameAsBegin) {
+              delete merged.cycleEndTimeSameAsBegin;
+              delete merged.cycleEndHour;
+              delete merged.cycleEndMinute;
+            }
+            clearTaskBannerFieldsFromMerged(merged);
+            game.endgame[existingIdx] = merged;
+          } else if (convertingToAuto && typeof convertManualResetTaskToScheduled === "function") {
+            const merged = { ...prev, ...next };
+            merged.manualReset = true;
+            merged.manualClosedCycles = Array.isArray(prev.manualClosedCycles) ? prev.manualClosedCycles.slice() : [];
+            merged.manualDueTbd = prev.manualDueTbd;
+            merged.manualDueDateStr = prev.manualDueDateStr;
+            merged.manualDueHour = prev.manualDueHour;
+            merged.manualDueMinute = prev.manualDueMinute;
+            merged.manualAwaitingRestart = prev.manualAwaitingRestart;
+            if (!earliestCompleteDays) delete merged.earliestCompleteDays;
+            if (!hasUnlockTime) {
+              delete merged.earliestCompleteHour;
+              delete merged.earliestCompleteMinute;
+            }
+            if (cycleEndTimeSameAsBegin) {
+              delete merged.cycleEndTimeSameAsBegin;
+              delete merged.cycleEndHour;
+              delete merged.cycleEndMinute;
+            }
+            clearTaskBannerFieldsFromMerged(merged);
+            game.endgame[existingIdx] = merged;
+            convertManualResetTaskToScheduled(game, game.endgame[existingIdx], "endgame");
+          } else {
+            const merged = { ...game.endgame[existingIdx], ...next };
+            if (!countFromDateStarted) delete merged.countFromDateStarted;
+            if (!earliestCompleteDays) delete merged.earliestCompleteDays;
+            if (!hasUnlockTime) {
+              delete merged.earliestCompleteHour;
+              delete merged.earliestCompleteMinute;
+            }
+            if (cycleEndTimeSameAsBegin) {
+              delete merged.cycleEndTimeSameAsBegin;
+              delete merged.cycleEndHour;
+              delete merged.cycleEndMinute;
+            }
+            if (!manualReset) {
+              delete merged.manualReset;
+              delete merged.manualDueDateStr;
+              delete merged.manualDueTbd;
+              delete merged.manualDueHour;
+              delete merged.manualDueMinute;
+              delete merged.manualAwaitingRestart;
+              delete merged.manualClosedCycles;
+            }
+            clearTaskBannerFieldsFromMerged(merged);
+            game.endgame[existingIdx] = merged;
           }
-          if (cycleEndTimeSameAsBegin) {
-            delete merged.cycleEndTimeSameAsBegin;
-            delete merged.cycleEndHour;
-            delete merged.cycleEndMinute;
-          }
-          if (!manualReset) {
-            delete merged.manualReset;
-            delete merged.manualDueDateStr;
-            delete merged.manualDueTbd;
-            delete merged.manualDueHour;
-            delete merged.manualDueMinute;
-            delete merged.manualAwaitingRestart;
-            delete merged.manualClosedCycles;
-          }
-          clearTaskBannerFieldsFromMerged(merged);
-          game.endgame[existingIdx] = merged;
         } else {
           game.endgame.push(next);
         }
@@ -258,7 +361,8 @@
         save();
         if (typeof bumpDataVersion === "function") bumpDataVersion();
         const savedId = next.id;
-        const openManual = manualReset && (!wasManual || existingIdx < 0);
+        // New manual tasks still open Start; converting an existing task migrates history silently.
+        const openManual = manualReset && existingIdx < 0;
         closeTaskModal();
         renderActiveTab();
         if (openManual && typeof openManualResetModal === "function") {

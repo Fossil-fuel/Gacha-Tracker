@@ -1815,6 +1815,20 @@
   /** Cycle boundaries for the period containing dateStr (matches calendar/tally logic). */
   function getEndgameCycleDatesForDate(task, dateStr, game) {
     if (isManualResetTask(task)) {
+      const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+      for (let i = 0; i < closed.length; i++) {
+        const c = closed[i];
+        if (
+          c &&
+          isValidDateStr(c.start) &&
+          isValidDateStr(c.end) &&
+          isValidDateStr(dateStr) &&
+          dateStr >= c.start &&
+          dateStr <= c.end
+        ) {
+          return { start: c.start, end: c.end };
+        }
+      }
       const bounds = getManualResetCycleBounds(task, game, "endgame");
       if (!bounds) return { start: dateStr, end: dateStr };
       return { start: getDateStr(bounds.cycleStart), end: getDateStr(bounds.cycleEnd) };
@@ -1848,6 +1862,7 @@
   /**
    * Completed endgame cycles from calendar, deduped by cycle date range (one entry per actual completion).
    * Returns [{ period, range, refDate }, ...] in chronological order.
+   * Manual closed cycles with completed:1 are trusted even if calendar remapping misses them.
    */
   function getEndgameCompletedPeriodsFromCalendar(game, task, key) {
     const cacheKey = "endgameCompleted|" + key;
@@ -1856,10 +1871,24 @@
     const history = getTaskTallyHistory(game, "endgame", key);
     const seen = new Set();
     const result = [];
+    const manual = isManualResetTask(task);
     history.forEach((period) => {
-      const refDate = periodHasCalendarMarkInRange(key, "endgame", period.periodStart, period.periodEnd, period.nextCycleStart);
+      let refDate = periodHasCalendarMarkInRange(
+        key,
+        "endgame",
+        period.periodStart,
+        period.periodEnd,
+        period.nextCycleStart
+      );
+      if (!refDate && manual && period.completed) {
+        refDate = getDateStr(period.periodStart);
+      }
       if (!refDate) return;
-      const range = getEndgameCycleDatesForDate(task, refDate, game);
+      // Manual windows are irregular: always use this period's own bounds.
+      // (getEndgameCycleDatesForDate used to return only the live window, collapsing history.)
+      const range = manual
+        ? { start: getDateStr(period.periodStart), end: getDateStr(period.periodEnd) }
+        : getEndgameCycleDatesForDate(task, refDate, game);
       const rangeKey = range.start + "|" + range.end;
       if (seen.has(rangeKey)) return;
       seen.add(rangeKey);
@@ -1875,16 +1904,305 @@
     state.endgameCompletionDates[key] = periods.map((p) => ({ start: p.range.start, end: p.range.end }));
   }
 
-  /** Updates display dates for a completion (earnings modal). Does NOT touch completionByDate.
-   * Editing prior completion dates cannot affect current-cycle completion logic. */
+  /**
+   * Updates completion cycle dates (earnings modal).
+   * Only applies for manual-reset endgame — scheduled cycle bounds stay derived from the grid.
+   * For manual-reset endgame, also rehomes manualClosedCycles / clears live marks so the
+   * entered range becomes the history bounds (not overwritten by the current open cycle).
+   */
   function setEndgameCompletionDate(gameId, taskId, index, start, end, opts) {
     const key = gameId + "." + taskId;
+    const game = getGame(gameId);
+    const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
+    if (!game || !task || !isManualResetTask(task)) return;
+
     if (!state.endgameCompletionDates[key]) state.endgameCompletionDates[key] = [];
     while (state.endgameCompletionDates[key].length <= index) {
       state.endgameCompletionDates[key].push({ start: "", end: "" });
     }
+    const prev = state.endgameCompletionDates[key][index] || { start: "", end: "" };
     state.endgameCompletionDates[key][index] = { start: start || "", end: end || "" };
+
+    if (!opts || !opts.skipManualRehome) {
+      if (isValidDateStr(start) && isValidDateStr(end)) {
+        rehomeManualEndgameCompletionRange(game, task, key, index, prev.start, prev.end, start, end);
+      }
+    }
+
     if (!opts || !opts.skipSave) save();
+  }
+
+  /**
+   * Move a manual endgame completion's cycle start/end to the dates the user entered.
+   * Absorbs a matching skipped closed row so it does not remain under Skipped cycles.
+   * Also remaps calendar fill + timestamps into the new window.
+   */
+  function rehomeManualEndgameCompletionRange(game, task, key, index, prevStart, prevEnd, newStart, newEnd) {
+    if (!game || !task || !isValidDateStr(newStart) || !isValidDateStr(newEnd)) return;
+    if (newStart === prevStart && newEnd === prevEnd) return;
+
+    // Prefer the calendar-derived entry's old bounds when stored dates were empty/stale.
+    let fromStart = isValidDateStr(prevStart) ? prevStart : null;
+    let fromEnd = isValidDateStr(prevEnd) ? prevEnd : null;
+    const entries = getEndgameCompletedPeriodsFromCalendar(game, task, key);
+    const entry = entries[index];
+    if ((!fromStart || !fromEnd) && entry && entry.range) {
+      fromStart = entry.range.start;
+      fromEnd = entry.range.end;
+    }
+    if (!isValidDateStr(fromStart) || !isValidDateStr(fromEnd)) return;
+    if (fromStart === newStart && fromEnd === newEnd) return;
+
+    // Capture finish moment before rewriting bounds / clearing marks.
+    const oldStartMom = getManualResetMomentOnDate(task, fromStart, game);
+    const oldEndMom = getManualResetEndMomentOnDate(task, fromEnd, game);
+    let finishDate = fromStart;
+    let finishHour = 12;
+    let finishMinute = 0;
+    if (oldStartMom && oldEndMom) {
+      const oldBounds = {
+        cycleStart: oldStartMom,
+        cycleEnd: oldEndMom,
+        nextCycleStart: new Date(oldEndMom.getTime()),
+      };
+      const found = findCompletionDateInBounds(key, "endgame", oldBounds);
+      if (found) finishDate = found;
+      const stamp = (state.completionTimestamps || []).find((t) => {
+        if (!t || t.taskType !== "endgame" || !isValidDateStr(t.dateStr)) return false;
+        if (t.dateStr < fromStart || t.dateStr > fromEnd) return false;
+        const dot = key.indexOf(".");
+        const gameId = dot > 0 ? key.slice(0, dot) : key;
+        const taskId = dot > 0 ? key.slice(dot + 1) : "";
+        return t.gameId === gameId && (t.taskId === taskId || t.taskLabel === taskId);
+      });
+      if (stamp) {
+        if (isValidDateStr(stamp.dateStr)) finishDate = stamp.dateStr;
+        if (Number.isFinite(stamp.hour)) finishHour = stamp.hour;
+        if (Number.isFinite(stamp.minute)) finishMinute = stamp.minute;
+      }
+    }
+
+    if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
+    const closed = task.manualClosedCycles;
+
+    // Drop any other closed row that already owns the destination (usually a skipped cycle).
+    for (let i = closed.length - 1; i >= 0; i--) {
+      const c = closed[i];
+      if (!c || c.start !== newStart || c.end !== newEnd) continue;
+      // Keep one row; prefer upgrading it below.
+      if (!(c.start === fromStart && c.end === fromEnd)) closed.splice(i, 1);
+    }
+
+    const closedHit = closed.find((c) => c && c.start === fromStart && c.end === fromEnd);
+    const liveMatch =
+      isValidDateStr(task.dateStarted) &&
+      task.dateStarted === fromStart &&
+      !task.manualDueTbd &&
+      isValidDateStr(task.manualDueDateStr) &&
+      task.manualDueDateStr === fromEnd;
+
+    if (closedHit) {
+      closedHit.start = newStart;
+      closedHit.end = newEnd;
+      closedHit.completed = 1;
+    } else if (liveMatch) {
+      // Completion was on the live window: archive under the entered past dates and clear live marks
+      // so Completion History no longer shows the current open cycle for that earn.
+      upsertManualClosedCycle(task, newStart, newEnd, 1);
+      const liveBounds = getManualResetCycleBounds(task, game, "endgame");
+      if (liveBounds) {
+        clearManualResetMarksInRange(key, "endgame", liveBounds.cycleStart, liveBounds.cycleEnd);
+      }
+    } else {
+      // Orphan / display-only entry: ensure a completed closed row exists for the new range.
+      upsertManualClosedCycle(task, newStart, newEnd, 1);
+    }
+
+    // Clear old-window marks (closedHit path) and plant fill from finish in the new window.
+    if (oldStartMom && oldEndMom && !liveMatch) {
+      clearManualResetMarksInRange(key, "endgame", oldStartMom, oldEndMom);
+    }
+    const newStartMom = getManualResetMomentOnDate(task, newStart, game);
+    const newEndMom = getManualResetEndMomentOnDate(task, newEnd, game);
+    if (newStartMom && newEndMom && newEndMom.getTime() > newStartMom.getTime()) {
+      const newBounds = {
+        cycleStart: newStartMom,
+        cycleEnd: newEndMom,
+        nextCycleStart: new Date(newEndMom.getTime()),
+      };
+      const owned = getCalendarDatesForBounds(newBounds);
+      let finish = finishDate;
+      if (finish < newStart) finish = newStart;
+      if (finish > newEnd) finish = newEnd;
+      if (!owned.includes(finish) && owned.length) {
+        finish = owned[0];
+      }
+      getRemainingDatesInCycleFrom(newBounds, finish).forEach((ds) => {
+        if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+        const arr = state.completionByDate[ds].endgame;
+        if (!arr.includes(key)) arr.push(key);
+      });
+      recordCompletionTimestamp("endgame", key, { dateStr: finish, hour: finishHour, minute: finishMinute });
+    }
+
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    syncEndgameCompletionDatesFromCalendar(game, task, key);
+  }
+
+  /**
+   * Manual-reset cycle bounds for a date inside a closed or live window.
+   * Live-only get*CycleBoundsForMoment is wrong for past closed history.
+   */
+  function getManualPeriodBoundsForDateStr(task, game, type, dateStr) {
+    if (!isManualResetTask(task) || !isValidDateStr(dateStr)) return null;
+    const kind = type === "endgame" ? "endgame" : "weeklies";
+    const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+    // Prefer an exact cycle-start match. Adjacent closed windows share the boundary day
+    // (prev.end === next.start); a first-hit containment scan would remap finishes into the
+    // previous cycle and History Save would look like a revert.
+    let exact = null;
+    let covering = null;
+    for (let i = 0; i < closed.length; i++) {
+      const c = closed[i];
+      if (!c || !isValidDateStr(c.start) || !isValidDateStr(c.end)) continue;
+      if (dateStr < c.start || dateStr > c.end) continue;
+      const cycleStart = getManualResetMomentOnDate(task, c.start, game);
+      const cycleEnd = getManualResetEndMomentOnDate(task, c.end, game);
+      if (!cycleStart || !cycleEnd || !(cycleEnd.getTime() > cycleStart.getTime())) continue;
+      const bounds = {
+        cycleStart,
+        cycleEnd,
+        nextCycleStart: new Date(cycleEnd.getTime()),
+      };
+      if (dateStr === c.start) {
+        exact = bounds;
+        break;
+      }
+      if (!covering) covering = bounds;
+    }
+    if (exact || covering) return exact || covering;
+    const live = getManualResetCycleBounds(task, game, kind);
+    if (!live) return null;
+    const liveStart = getDateStr(live.cycleStart);
+    const liveEnd = getDateStr(live.cycleEnd);
+    if (dateStr >= liveStart && dateStr <= liveEnd) return live;
+    return null;
+  }
+
+  /**
+   * Move the finish day/time of an existing weekly/endgame completion within its cycle.
+   * Updates calendar fill marks + timestamps so History/Trends/calendar stay in sync.
+   * Does not change completed/attempted tallies when staying in the same cycle.
+   */
+  function setCycleCompletionMoment(type, key, cycleRefDateStr, newDateStr, hour, minute, opts) {
+    const o = opts || {};
+    if (type !== "weeklies" && type !== "endgame") return { ok: false, reason: "Unsupported type" };
+    if (!isValidDateStr(cycleRefDateStr) || !isValidDateStr(newDateStr)) {
+      return { ok: false, reason: "Invalid date" };
+    }
+    const resolved = resolveTaskFromKey(type, key);
+    const game = resolved.game;
+    const task = resolved.task;
+    const gameId = resolved.gameId;
+    const taskId = resolved.taskId;
+    if (!game || !task) return { ok: false, reason: "Task not found" };
+
+    const bounds = isManualResetTask(task)
+      ? getManualPeriodBoundsForDateStr(task, game, type, cycleRefDateStr)
+      : getCycleBoundsForTaskType(type, task, new Date(cycleRefDateStr + "T12:00:00"), game);
+    if (!bounds) return { ok: false, reason: "Cycle not found" };
+    const owned = getCalendarDatesForBounds(bounds);
+    if (!owned.length) return { ok: false, reason: "Empty cycle" };
+
+    let finish = newDateStr;
+    const unlockStr = getTaskUnlockDateStr(type, task, game, owned[0]);
+    if (isValidDateStr(unlockStr) && finish < unlockStr) finish = unlockStr;
+    if (finish < owned[0]) finish = owned[0];
+    if (finish > owned[owned.length - 1]) finish = owned[owned.length - 1];
+
+    const h = Math.max(0, Math.min(23, Math.round(Number(hour))));
+    const m = Math.max(0, Math.min(59, Math.round(Number(minute))));
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return { ok: false, reason: "Invalid time" };
+
+    owned.forEach((ds) => {
+      const day = state.completionByDate[ds];
+      if (!day || !Array.isArray(day[type])) return;
+      const idx = day[type].indexOf(key);
+      if (idx >= 0) day[type].splice(idx, 1);
+    });
+
+    const startMs = bounds.cycleStart.getTime();
+    const endMs = bounds.cycleEnd.getTime();
+    state.completionTimestamps = (state.completionTimestamps || []).filter((t) => {
+      if (!t || t.taskType !== type || t.gameId !== gameId || t.taskId !== taskId) return true;
+      if (!isValidDateStr(t.dateStr)) return true;
+      if (owned.includes(t.dateStr)) return false;
+      const th = Number.isFinite(t.hour) ? t.hour : 12;
+      const tm = Number.isFinite(t.minute) ? t.minute : 0;
+      const ms = new Date(
+        t.dateStr + "T" + String(th).padStart(2, "0") + ":" + String(tm).padStart(2, "0") + ":00"
+      ).getTime();
+      if (!Number.isFinite(ms)) return true;
+      return !(ms >= startMs && ms < endMs);
+    });
+
+    const datesToRecord = getRemainingDatesInCycleFrom(bounds, finish);
+    datesToRecord.forEach((ds) => {
+      if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+      const arr = state.completionByDate[ds][type];
+      if (!arr.includes(key)) arr.push(key);
+    });
+    recordCompletionTimestamp(type, key, { dateStr: finish, hour: h, minute: m });
+
+    if (type === "endgame") {
+      syncEndgameCompletionDatesFromCalendar(game, task, key);
+    }
+    bumpDataVersion();
+    if (!o.skipSave) save(o.saveOptions);
+    if (!o.skipRender) renderActiveTab();
+    return { ok: true, dateStr: finish, hour: h, minute: m };
+  }
+
+  /**
+   * Update extracurricular completion date/time. Syncs extracurricularCompletedAt + completionTimestamps.
+   */
+  function setExtracurricularCompletionMoment(taskId, dateStr, hour, minute, opts) {
+    const o = opts || {};
+    const task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
+    if (!task) return { ok: false, reason: "Task not found" };
+    if (!state.extracurricularCompleted || !state.extracurricularCompleted[taskId]) {
+      return { ok: false, reason: "Not completed" };
+    }
+    if (!isValidDateStr(dateStr)) return { ok: false, reason: "Invalid date" };
+    const h = Math.max(0, Math.min(23, Math.round(Number(hour))));
+    const m = Math.max(0, Math.min(59, Math.round(Number(minute))));
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return { ok: false, reason: "Invalid time" };
+
+    const tz = typeof getAppTimezone === "function" ? getAppTimezone() : getRecordingTimezone();
+    const y = parseInt(dateStr.slice(0, 4), 10);
+    const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    let completedAt;
+    if (typeof createDateInTimezone === "function") {
+      completedAt = createDateInTimezone(y, mo, d, h, m, tz).toISOString();
+    } else {
+      completedAt = new Date(
+        dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+      ).toISOString();
+    }
+    if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
+    state.extracurricularCompletedAt[taskId] = completedAt;
+
+    state.completionTimestamps = (state.completionTimestamps || []).filter(
+      (t) => !(t && t.taskType === "extracurricular" && String(t.taskId || "") === String(taskId))
+    );
+    const key = (task.gameId || "") + "." + taskId;
+    recordCompletionTimestamp("extracurricular", key, { dateStr, hour: h, minute: m });
+
+    bumpDataVersion();
+    if (!o.skipSave) save(o.saveOptions);
+    if (!o.skipRender) renderActiveTab();
+    return { ok: true, dateStr, hour: h, minute: m };
   }
 
   /** When the calendar cycle changes, reset in-progress pending amount. */
@@ -2039,6 +2357,33 @@
     return 7 * 24 * 60 * 60 * 1000;
   }
 
+  /**
+   * Default end-of-cycle clock for a task.
+   * Uses cycleEndHour/Minute when "Same as begin" is off; otherwise Time of Reset.
+   * Manual Reset Start/Reset menus seed Due time from this default.
+   */
+  function getTaskDefaultEndTimeParts(task) {
+    const beginHour = Number.isFinite(task && task.weekStartHour)
+      ? task.weekStartHour
+      : (Number.isFinite(task && task.resetHour) ? task.resetHour : 4);
+    const beginMinute = Number.isFinite(task && task.weekStartMinute)
+      ? task.weekStartMinute
+      : (Number.isFinite(task && task.resetMinute) ? task.resetMinute : 0);
+    const sameAsBegin = !task || task.cycleEndTimeSameAsBegin !== false;
+    if (!sameAsBegin && Number.isFinite(task.cycleEndHour)) {
+      return {
+        hour: Math.max(0, Math.min(23, task.cycleEndHour | 0)),
+        minute: Number.isFinite(task.cycleEndMinute)
+          ? Math.max(0, Math.min(59, task.cycleEndMinute | 0))
+          : 0,
+      };
+    }
+    return {
+      hour: Math.max(0, Math.min(23, beginHour | 0)),
+      minute: Math.max(0, Math.min(59, beginMinute | 0)),
+    };
+  }
+
   /** Due end ms for manual-reset tasks. null = TBD (unknown) — not a calendar placeholder. */
   function getManualResetDueMs(task) {
     if (!task || !task.manualReset) return null;
@@ -2048,13 +2393,10 @@
     const y = parts[0];
     const m = (parts[1] || 1) - 1;
     const d = parts[2] || 1;
-    // Prefer explicit due clock; fall back to cycle begin clock, else 23:59.
-    const hour = Number.isFinite(task.manualDueHour)
-      ? task.manualDueHour
-      : (Number.isFinite(task.weekStartHour) ? task.weekStartHour : 23);
-    const minute = Number.isFinite(task.manualDueMinute)
-      ? task.manualDueMinute
-      : (Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 59);
+    // Prefer explicit due clock; else Cycle end time default (may match Time of Reset).
+    const defaults = getTaskDefaultEndTimeParts(task);
+    const hour = Number.isFinite(task.manualDueHour) ? task.manualDueHour : defaults.hour;
+    const minute = Number.isFinite(task.manualDueMinute) ? task.manualDueMinute : defaults.minute;
     const end = createDateInTimezone(y, m, d, hour, minute, tz);
     return end.getTime();
   }
@@ -2062,10 +2404,13 @@
   /**
    * Cycle bounds for manual-reset tasks (calendar / completion membership).
    * Remaining UI still shows TBD when due is unset; this only scaffolds calendar/history windows.
+   * Uses the exact dateStarted day — does NOT snap to weekStartDay (manual windows are irregular).
    */
   function getManualResetCycleBounds(task, game, taskType) {
     if (!isManualResetTask(task)) return null;
-    const cycleStart = getEndgameAnchorDate(task, game);
+    const startStr = isValidDateStr(task.dateStarted) ? task.dateStarted : getDateStr();
+    const cycleStart = getManualResetMomentOnDate(task, startStr, game);
+    if (!cycleStart) return null;
     const dueMs = getManualResetDueMs(task);
     let cycleEndMs = dueMs != null ? dueMs : (cycleStart.getTime() + getManualResetPlaceholderMs(taskType));
     if (!(cycleEndMs > cycleStart.getTime())) {
@@ -2079,21 +2424,69 @@
     };
   }
 
-  /** Rebuild a Date at the task's reset clock for a YYYY-MM-DD (used for closed-cycle history). */
+  /** Rebuild a Date at the task's reset clock for a YYYY-MM-DD (used for closed-cycle history).
+   * Uses the exact calendar day — does NOT snap back to weekStartDay (that rewrote archived
+   * convert history whenever the live window's weekday changed). */
   function getManualResetMomentOnDate(task, dateStr, game) {
     if (!isValidDateStr(dateStr)) return null;
-    return getEndgameAnchorDate(Object.assign({}, task, { dateStarted: dateStr }), game);
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const tz = getTimezoneForTaskDst(task, baseTz);
+    const hour = Number.isFinite(task && task.weekStartHour)
+      ? task.weekStartHour
+      : getResetHour(task, "weekStartHour", 4, game);
+    const minute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : 0;
+    const y = parseInt(dateStr.slice(0, 4), 10);
+    const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    const offsetRef = getOffsetRefDateForTask(task, tz);
+    return createDateInTimezone(y, mo, d, hour, minute, tz, offsetRef);
+  }
+
+  /**
+   * Rebuild cycle-end Date for a YYYY-MM-DD (closed history / finish edits).
+   * Uses Cycle end time default (or live due clock when this is the open due day).
+   * Must NOT reuse the start/reset clock — Anomaly-style tasks end at 17:00 while starting at 4:00;
+   * treating end-day as 4:00 excluded finish stamps and made History Save look like a revert.
+   */
+  function getManualResetEndMomentOnDate(task, dateStr, game) {
+    if (!isValidDateStr(dateStr)) return null;
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const tz = getTimezoneForTaskDst(task, baseTz);
+    const defaults = getTaskDefaultEndTimeParts(task);
+    let hour = defaults.hour;
+    let minute = defaults.minute;
+    if (
+      task &&
+      !task.manualDueTbd &&
+      isValidDateStr(task.manualDueDateStr) &&
+      task.manualDueDateStr === dateStr
+    ) {
+      if (Number.isFinite(task.manualDueHour)) hour = task.manualDueHour;
+      if (Number.isFinite(task.manualDueMinute)) minute = task.manualDueMinute;
+    }
+    const y = parseInt(dateStr.slice(0, 4), 10);
+    const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    const offsetRef = getOffsetRefDateForTask(task, tz);
+    return createDateInTimezone(y, mo, d, hour, minute, tz, offsetRef);
   }
 
   /**
    * Remove calendar marks (+ matching timestamps) for key in [fromMoment, toMomentExclusive)
    * so assumed TBD fill beyond the new cycle start cannot complete the next window.
+   *
+   * Important: adjacent manual windows share the end/start calendar day. Owned fill dates
+   * exclude that boundary day, but finish *timestamps* often land on end-day afternoon
+   * (e.g. Anomaly ending 17:00). Skip/Delete must still clear those stamps — otherwise
+   * History rebuild treats the cycle as completed again after Mark skipped → Save.
    */
   function clearManualResetMarksInRange(key, type, fromMoment, toMomentExclusive) {
     if (!(fromMoment instanceof Date) || !(toMomentExclusive instanceof Date)) return;
-    if (fromMoment.getTime() >= toMomentExclusive.getTime()) return;
-    const dates = getCalendarDatesInCycleRange(fromMoment, toMomentExclusive, toMomentExclusive);
-    if (!dates.length) return;
+    const startMs = fromMoment.getTime();
+    const endMs = toMomentExclusive.getTime();
+    if (!(endMs > startMs)) return;
+    // next != end so getCalendarDatesInCycleRange includes the cycle-end calendar day.
+    const dates = getCalendarDatesInCycleRange(fromMoment, toMomentExclusive, new Date(endMs + 1));
     const dateSet = new Set(dates);
     dates.forEach((ds) => {
       const dayData = state.completionByDate[ds];
@@ -2106,11 +2499,18 @@
       const gameId = dot > 0 ? key.slice(0, dot) : key;
       const taskId = dot > 0 ? key.slice(dot + 1) : "";
       state.completionTimestamps = state.completionTimestamps.filter((t) => {
-        if (!t || !dateSet.has(t.dateStr)) return true;
-        if (t.taskType !== type) return true;
-        if (t.gameId !== gameId) return true;
+        if (!t || t.taskType !== type || t.gameId !== gameId) return true;
         if (type !== "dailies" && (t.taskId || t.taskLabel) !== taskId && t.taskId !== taskId) return true;
-        return false;
+        if (!isValidDateStr(t.dateStr)) return true;
+        const h = Number.isFinite(t.hour) ? t.hour : 12;
+        const m = Number.isFinite(t.minute) ? t.minute : 0;
+        const ms = new Date(
+          t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+        ).getTime();
+        // Time-window match: catches end-afternoon stamps on the shared boundary day.
+        if (Number.isFinite(ms) && ms >= startMs && ms < endMs) return false;
+        if (dateSet.has(t.dateStr)) return false;
+        return true;
       });
     }
   }
@@ -2286,10 +2686,21 @@
   function buildManualResetBoundsFromParts(task, game, taskType, parts) {
     const p = parts || {};
     if (!task || !isValidDateStr(p.startDateStr) || !isValidDateStr(p.endDateStr)) return null;
-    const startHour = Number.isFinite(p.startHour) ? Math.max(0, Math.min(23, p.startHour | 0)) : 4;
-    const startMinute = Number.isFinite(p.startMinute) ? Math.max(0, Math.min(59, p.startMinute | 0)) : 0;
-    const endHour = Number.isFinite(p.endHour) ? Math.max(0, Math.min(23, p.endHour | 0)) : 23;
-    const endMinute = Number.isFinite(p.endMinute) ? Math.max(0, Math.min(59, p.endMinute | 0)) : 59;
+    const beginHour = Number.isFinite(task && task.weekStartHour) ? task.weekStartHour : 4;
+    const beginMinute = Number.isFinite(task && task.weekStartMinute) ? task.weekStartMinute : 0;
+    const endDefaults = getTaskDefaultEndTimeParts(task);
+    const startHour = Number.isFinite(p.startHour)
+      ? Math.max(0, Math.min(23, p.startHour | 0))
+      : Math.max(0, Math.min(23, beginHour | 0));
+    const startMinute = Number.isFinite(p.startMinute)
+      ? Math.max(0, Math.min(59, p.startMinute | 0))
+      : Math.max(0, Math.min(59, beginMinute | 0));
+    const endHour = Number.isFinite(p.endHour)
+      ? Math.max(0, Math.min(23, p.endHour | 0))
+      : Math.max(0, Math.min(23, endDefaults.hour | 0));
+    const endMinute = Number.isFinite(p.endMinute)
+      ? Math.max(0, Math.min(59, p.endMinute | 0))
+      : Math.max(0, Math.min(59, endDefaults.minute | 0));
     const startWeekday = new Date(p.startDateStr + "T12:00:00").getDay();
     const cycleStart = getEndgameAnchorDate(
       Object.assign({}, task, {
@@ -2364,8 +2775,12 @@
     if (task.manualDueDateStr !== bounds.endDateStr) return false;
     const sh = Number.isFinite(task.weekStartHour) ? task.weekStartHour : 4;
     const sm = Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0;
-    const eh = Number.isFinite(task.manualDueHour) ? task.manualDueHour : sh;
-    const em = Number.isFinite(task.manualDueMinute) ? task.manualDueMinute : sm;
+    const eh = Number.isFinite(task.manualDueHour)
+      ? task.manualDueHour
+      : (typeof getTaskDefaultEndTimeParts === "function" ? getTaskDefaultEndTimeParts(task).hour : sh);
+    const em = Number.isFinite(task.manualDueMinute)
+      ? task.manualDueMinute
+      : (typeof getTaskDefaultEndTimeParts === "function" ? getTaskDefaultEndTimeParts(task).minute : sm);
     return sh === bounds.startHour && sm === bounds.startMinute && eh === bounds.endHour && em === bounds.endMinute;
   }
 
@@ -2394,6 +2809,126 @@
     const hit = closed.find((c) => c && c.start === bounds.startDateStr && c.end === bounds.endDateStr && c.completed);
     if (hit) return { dateStr: bounds.startDateStr, fromClosed: true };
     return { dateStr: null, fromClosed: false };
+  }
+
+  /**
+   * Pure split of auto-cycle history into archived closed rows + optional in-progress period.
+   * Used when converting scheduled (auto) tasks to manual reset without bricking tallies/calendar.
+   */
+  function splitAutoHistoryForManualConvert(history, now) {
+    const n = now instanceof Date ? now : getSimulatedNow();
+    const nowMs = n.getTime();
+    const closed = [];
+    let current = null;
+    (history || []).forEach((p) => {
+      if (!p || !(p.periodStart instanceof Date) || !(p.periodEnd instanceof Date)) return;
+      const startMs = p.periodStart.getTime();
+      const endMs = p.periodEnd.getTime();
+      if (startMs <= nowMs && endMs > nowMs) {
+        current = p;
+      } else if (endMs <= nowMs) {
+        closed.push({
+          start: getDateStr(p.periodStart),
+          end: getDateStr(p.periodEnd),
+          completed: p.completed ? 1 : 0,
+        });
+      }
+    });
+    return { closed, current };
+  }
+
+  /**
+   * Convert a scheduled weekly/endgame task to manual reset, preserving past cycles + tallies.
+   * Does NOT open a new window, bump attempts, or clear calendar marks (unlike Start modal).
+   */
+  function convertScheduledTaskToManualReset(game, task, taskType) {
+    if (!game || !task) return { ok: false, reason: "Task not found" };
+    if (isManualResetTask(task)) return { ok: true, already: true };
+    const type = taskType === "endgame" ? "endgame" : "weeklies";
+    const key = game.id + "." + (task.id || task.label);
+    const now = getSimulatedNow();
+    const history = getTaskTallyHistory(game, type, key);
+    const { closed, current } = splitAutoHistoryForManualConvert(history, now);
+
+    task.manualReset = true;
+    task.manualClosedCycles = closed;
+    task.manualAwaitingRestart = false;
+
+    if (current) {
+      const startStr = getDateStr(current.periodStart);
+      task.dateStarted = startStr;
+      if (isValidDateStr(startStr)) {
+        task.weekStartDay = new Date(startStr + "T12:00:00").getDay();
+      }
+      const tz = getRecordingTimezone();
+      const endParts = getDatePartsInTimezone(current.periodEnd, tz);
+      task.manualDueTbd = false;
+      task.manualDueDateStr = getDateStr(current.periodEnd);
+      task.manualDueHour = endParts.hour;
+      task.manualDueMinute = endParts.minute;
+    } else {
+      if (!isValidDateStr(task.dateStarted)) task.dateStarted = getDateStr(now);
+      task.manualDueTbd = true;
+      task.manualDueDateStr = null;
+      task.manualDueHour = undefined;
+      task.manualDueMinute = undefined;
+    }
+
+    // Rebuild tallies from archived + live windows so Sync/UI keep the pre-convert counts.
+    if (typeof syncTaskWithCalendar === "function") {
+      syncTaskWithCalendar(game, type, key, { skipSave: true, skipRender: true });
+    }
+
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    return { ok: true, closedCount: closed.length, hasCurrent: !!current };
+  }
+
+  /**
+   * Convert a manual-reset weekly/endgame task back to scheduled auto cycles.
+   * Keeps calendar marks and tallies; anchors dateStarted to earliest history so past
+   * unmarked cycles can still appear as skips on the interval grid.
+   */
+  function convertManualResetTaskToScheduled(game, task, taskType) {
+    if (!game || !task) return { ok: false, reason: "Task not found" };
+    if (!isManualResetTask(task)) return { ok: true, already: true };
+    const type = taskType === "endgame" ? "endgame" : "weeklies";
+    const key = game.id + "." + (task.id || task.label);
+    const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+
+    let earliest = isValidDateStr(task.dateStarted) ? task.dateStarted : null;
+    closed.forEach((c) => {
+      if (c && isValidDateStr(c.start) && (!earliest || c.start < earliest)) earliest = c.start;
+    });
+    Object.keys(state.completionByDate || {}).forEach((ds) => {
+      const day = state.completionByDate[ds] || {};
+      if ((day[type] || []).includes(key) && (!earliest || ds < earliest)) earliest = ds;
+    });
+    if (earliest) task.dateStarted = earliest;
+
+    if (!(Number(task.frequencyEvery) > 0)) {
+      task.frequencyEvery = type === "endgame" ? 6 : 1;
+    }
+    if (task.frequencyUnit !== "day" && task.frequencyUnit !== "week") {
+      task.frequencyUnit = "week";
+    }
+    if (!(Number(task.timeLimitEvery) > 0)) {
+      task.timeLimitEvery = task.frequencyEvery;
+    }
+    if (task.timeLimitUnit !== "day" && task.timeLimitUnit !== "week") {
+      task.timeLimitUnit = task.frequencyUnit;
+    }
+    task.countFromDateStarted = true;
+
+    delete task.manualReset;
+    delete task.manualDueDateStr;
+    delete task.manualDueTbd;
+    delete task.manualDueHour;
+    delete task.manualDueMinute;
+    delete task.manualAwaitingRestart;
+    delete task.manualClosedCycles;
+
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    return { ok: true };
   }
 
   /**
@@ -2491,11 +3026,175 @@
       if (snap) restoreManualLiveWindow(task, snap);
     }
 
+    if (type === "endgame") {
+      // After live window is restored — so history dates stay on the entered cycle, not the open one.
+      syncEndgameCompletionDatesFromCalendar(game, task, key);
+    }
+
     if (o.processResets !== false) processResets();
     if (o.save !== false) save(o.saveOptions);
     if (typeof bumpDataVersion === "function") bumpDataVersion();
     if (o.render !== false) renderActiveTab();
     return { ok: true, dateStr, pastWindow: !live };
+  }
+
+  /**
+   * Log a skipped attempt for a manual-reset weekly/endgame window.
+   * Archives past windows as completed:0; clears any finish marks in the window.
+   */
+  function applyManualResetSkip(game, task, taskType, opts) {
+    const o = opts || {};
+    if (!game || !task || !isManualResetTask(task)) return { ok: false, reason: "Task not found" };
+    const type = taskType === "endgame" ? "endgame" : "weeklies";
+    const key = game.id + "." + (task.id || task.label);
+
+    const bounds = buildManualResetBoundsFromParts(task, game, type, {
+      startDateStr: o.startDateStr,
+      endDateStr: o.endDateStr,
+      startHour: o.startHour,
+      startMinute: o.startMinute,
+      endHour: o.endHour,
+      endMinute: o.endMinute,
+    });
+    if (!bounds) return { ok: false, reason: "Cycle end must be after cycle start" };
+
+    const live = isSameManualLiveWindow(task, bounds);
+    const conflict = findManualWindowCompletion(key, type, task, bounds);
+
+    // Decrement tallies here; do not call removeTaskCompletion with the finish dateStr.
+    // Shared boundary finishes resolve to the *next* cycle (exact start match) and would
+    // wipe the wrong window while leaving this cycle's end-afternoon stamp in place.
+    if (conflict.dateStr) {
+      if (type === "weeklies") {
+        state.weekliesCompleted[key] = Math.max(0, getCompletedAmount(state.weekliesCompleted, key) - 1);
+      } else {
+        const amt = getCompletedAmount(state.endgameCompleted, key);
+        state.endgameCompleted[key] = Math.max(0, amt - 1);
+        ensureEndgameEarnedArrayLength(game.id, task.id || task.label, Math.max(0, amt - 1));
+      }
+    }
+
+    clearManualResetMarksInRange(key, type, bounds.cycleStart, bounds.cycleEnd);
+
+    if (!live) {
+      upsertManualClosedCycle(task, bounds.startDateStr, bounds.endDateStr, 0);
+    } else {
+      // Live window: leave it open/incomplete (still counts as in-progress, not a past skip).
+      const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+      const idx = closed.findIndex((c) => c && c.start === bounds.startDateStr && c.end === bounds.endDateStr);
+      if (idx >= 0) closed.splice(idx, 1);
+    }
+
+    if (type === "endgame") {
+      syncEndgameCompletionDatesFromCalendar(game, task, key);
+    }
+
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    if (o.processResets !== false) processResets();
+    if (o.save !== false) save(o.saveOptions);
+    if (o.render !== false) renderActiveTab();
+    return { ok: true, skipped: true, pastWindow: !live, liveIncomplete: !!live };
+  }
+
+  /**
+   * Delete a completion for a manual-reset weekly/endgame window.
+   * Unlike skip, removes the closed-cycle archive entirely so the window disappears from History
+   * (neither completed nor skipped) rather than moving under Skipped.
+   */
+  function applyManualResetDelete(game, task, taskType, opts) {
+    const o = opts || {};
+    if (!game || !task || !isManualResetTask(task)) return { ok: false, reason: "Task not found" };
+    const type = taskType === "endgame" ? "endgame" : "weeklies";
+    const key = game.id + "." + (task.id || task.label);
+
+    const bounds = buildManualResetBoundsFromParts(task, game, type, {
+      startDateStr: o.startDateStr,
+      endDateStr: o.endDateStr,
+      startHour: o.startHour,
+      startMinute: o.startMinute,
+      endHour: o.endHour,
+      endMinute: o.endMinute,
+    });
+    if (!bounds) return { ok: false, reason: "Cycle end must be after cycle start" };
+
+    const live = isSameManualLiveWindow(task, bounds);
+    const conflict = findManualWindowCompletion(key, type, task, bounds);
+
+    // Same as skip: avoid removeTaskCompletion(dateStr) on shared boundary finish days.
+    if (conflict.dateStr) {
+      if (type === "weeklies") {
+        state.weekliesCompleted[key] = Math.max(0, getCompletedAmount(state.weekliesCompleted, key) - 1);
+      } else {
+        const amt = getCompletedAmount(state.endgameCompleted, key);
+        state.endgameCompleted[key] = Math.max(0, amt - 1);
+        ensureEndgameEarnedArrayLength(game.id, task.id || task.label, Math.max(0, amt - 1));
+      }
+    }
+
+    clearManualResetMarksInRange(key, type, bounds.cycleStart, bounds.cycleEnd);
+
+    const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+    const idx = closed.findIndex((c) => c && c.start === bounds.startDateStr && c.end === bounds.endDateStr);
+    if (idx >= 0) closed.splice(idx, 1);
+    task.manualClosedCycles = closed;
+
+    if (type === "endgame") {
+      syncEndgameCompletionDatesFromCalendar(game, task, key);
+    }
+
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    if (o.processResets !== false) processResets();
+    if (o.save !== false) save(o.saveOptions);
+    if (o.render !== false) renderActiveTab();
+    return { ok: true, deleted: true, pastWindow: !live };
+  }
+
+  /**
+   * Mark a scheduled weekly/endgame cycle as skipped by clearing any finish in that cycle.
+   * Past empty cycles already show as skipped in Completion History.
+   */
+  function applyScheduledCycleSkip(type, key, dateStr, opts) {
+    const o = opts || {};
+    if (type !== "weeklies" && type !== "endgame") return { ok: false, reason: "Unsupported type" };
+    if (!isValidDateStr(dateStr)) return { ok: false, reason: "Cycle date required" };
+    const resolved = resolveTaskFromKey(type, key);
+    if (!resolved.game || !resolved.task) return { ok: false, reason: "Task not found" };
+    if (isManualResetTask(resolved.task)) {
+      return { ok: false, reason: "Use manual-reset skip for this task" };
+    }
+
+    const bounds = getCycleBoundsForTaskType(type, resolved.task, new Date(dateStr + "T12:00:00"), resolved.game);
+    if (!bounds) return { ok: false, reason: "That date is outside this task's cycles" };
+
+    const existing = getCycleCompletionDateStr(type, key, dateStr);
+    if (existing) {
+      const rem = removeTaskCompletion(type, key, {
+        dateStr: existing,
+        skipUnlockGate: true,
+        recordUndo: o.recordUndo !== false,
+        undoLabel: o.undoLabel || ("Skip " + (resolved.task.label || key)),
+        save: false,
+        render: false,
+        processResets: false,
+      });
+      if (rem && rem.ok === false) return rem;
+    }
+
+    if (type === "endgame") {
+      syncEndgameCompletionDatesFromCalendar(resolved.game, resolved.task, key);
+    }
+
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    if (o.processResets !== false) processResets();
+    if (o.save !== false) save(o.saveOptions);
+    if (o.render !== false) renderActiveTab();
+    return {
+      ok: true,
+      skipped: true,
+      clearedCompletion: !!existing,
+      cycleStart: getDateStr(bounds.cycleStart),
+      cycleEnd: getDateStr(bounds.cycleEnd),
+    };
   }
 
   function getWeekDates() {
@@ -2563,11 +3262,15 @@
 
   function getWeeklyCycleBoundsForMoment(task, moment, game) {
     if (isManualResetTask(task)) {
-      const bounds = getManualResetCycleBounds(task, game, "weeklies");
-      if (!bounds) return null;
+      // Resolve closed archive windows + live window by calendar day. Returning only the
+      // live window hid past Add/Edit completes on the Attendance History calendar
+      // (availability filters marks to tasks "in cycle" that day).
       const d = moment instanceof Date ? moment : new Date();
-      if (d.getTime() < bounds.cycleStart.getTime()) return null;
-      return bounds;
+      const ds = getDateStr(d);
+      if (isValidDateStr(ds)) {
+        return getManualPeriodBoundsForDateStr(task, game, "weeklies", ds);
+      }
+      return null;
     }
     const d = moment instanceof Date ? moment : new Date();
     const anchor = getEndgameAnchorDate(task, game);
@@ -2587,11 +3290,14 @@
 
   function getEndgameCycleBoundsForMoment(task, moment, game) {
     if (isManualResetTask(task)) {
-      const bounds = getManualResetCycleBounds(task, game, "endgame");
-      if (!bounds) return null;
+      // Same as weeklies: closed past windows must resolve so calendar paint / fill /
+      // remove / History finish membership stay on the archived cycle, not only live.
       const d = moment instanceof Date ? moment : new Date();
-      if (d.getTime() < bounds.cycleStart.getTime()) return null;
-      return bounds;
+      const ds = getDateStr(d);
+      if (isValidDateStr(ds)) {
+        return getManualPeriodBoundsForDateStr(task, game, "endgame", ds);
+      }
+      return null;
     }
     const d = moment instanceof Date ? moment : new Date();
     const anchor = getEndgameAnchorDate(task, game);
@@ -5466,7 +6172,28 @@
   }
 
   /** Current schema version for one-shot migrations (not the cache dataVersion). */
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
+
+  /**
+   * Re-sync manual-reset tasks whose closed-cycle history was collapsed onto the live window
+   * (convert auto→manual bug). Safe to re-run: syncTaskWithCalendar is idempotent for correct data.
+   */
+  function repairManualResetHistoryCollapse() {
+    let touched = 0;
+    (state.games || []).forEach((game) => {
+      ["weeklies", "endgame"].forEach((type) => {
+        (game[type] || []).forEach((task) => {
+          if (!isManualResetTask(task)) return;
+          const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+          if (!closed.length) return;
+          const key = game.id + "." + (task.id || task.label);
+          syncTaskWithCalendar(game, type, key, { skipSave: true, skipRender: true });
+          touched++;
+        });
+      });
+    });
+    return touched;
+  }
 
   /**
    * Run safe field migrations once. Does not rewrite completion dates/timestamps;
@@ -5476,8 +6203,13 @@
     const current = Number(state.schemaVersion) || 0;
     if (typeof migrateEndgameCurrencyPotential === "function") migrateEndgameCurrencyPotential();
     if (current >= SCHEMA_VERSION) return;
-    migrateMissingTaskDateStarted();
-    migrateTaskEarliestCompleteFields();
+    if (current < 2) {
+      migrateMissingTaskDateStarted();
+      migrateTaskEarliestCompleteFields();
+    }
+    if (current < 3) {
+      repairManualResetHistoryCollapse();
+    }
     state.schemaVersion = SCHEMA_VERSION;
     bumpDataVersion();
     save({ immediate: true });
@@ -7145,8 +7877,8 @@
         closed.forEach((c) => {
           if (!c || !isValidDateStr(c.start) || !isValidDateStr(c.end)) return;
           const periodStart = getManualResetMomentOnDate(task, c.start, game);
-          const periodEnd = getManualResetMomentOnDate(task, c.end, game);
-          if (!periodStart || !periodEnd) return;
+          const periodEnd = getManualResetEndMomentOnDate(task, c.end, game);
+          if (!periodStart || !periodEnd || !(periodEnd.getTime() > periodStart.getTime())) return;
           result.push({
             periodStart,
             periodEnd,
@@ -7197,8 +7929,8 @@
         closed.forEach((c) => {
           if (!c || !isValidDateStr(c.start) || !isValidDateStr(c.end)) return;
           const periodStart = getManualResetMomentOnDate(task, c.start, game);
-          const periodEnd = getManualResetMomentOnDate(task, c.end, game);
-          if (!periodStart || !periodEnd) return;
+          const periodEnd = getManualResetEndMomentOnDate(task, c.end, game);
+          if (!periodStart || !periodEnd || !(periodEnd.getTime() > periodStart.getTime())) return;
           result.push({
             periodStart,
             periodEnd,

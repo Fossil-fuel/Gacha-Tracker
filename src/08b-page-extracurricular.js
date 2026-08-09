@@ -182,15 +182,16 @@
       earnedStr = String(e);
     }
     const remainingText = getExtracurricularTimeRemainingText(task, getSimulatedNow());
+    // Snippet: description and time-left only — Dates/Currency live in dedicated rows below.
     const snippetParts = [];
     if (task.description) snippetParts.push(task.description);
-    else if (dateLine) snippetParts.push(dateLine);
-    snippetParts.push("Potential: " + pot + " · Earned: " + earnedStr);
     if (remainingText && remainingText !== "TBD") snippetParts.push(remainingText + " left");
-    const snippet = document.createElement("p");
-    snippet.className = "task-card-snippet";
-    snippet.textContent = snippetParts.join(" · ");
-    body.appendChild(snippet);
+    if (snippetParts.length) {
+      const snippet = document.createElement("p");
+      snippet.className = "task-card-snippet";
+      snippet.textContent = snippetParts.join(" · ");
+      body.appendChild(snippet);
+    }
 
     const meta = document.createElement("div");
     meta.className = "task-subrows";
@@ -214,6 +215,87 @@
     currencySpan.appendChild(document.createTextNode("Potential " + pot + " · Earned " + earnedStr));
     currencyRow.appendChild(currencySpan);
     meta.appendChild(currencyRow);
+
+    if (completed) {
+      const completedRow = document.createElement("div");
+      completedRow.className = "task-subrow extracurricular-completed-row";
+      const completedLab = document.createElement("strong");
+      completedLab.textContent = "Completed: ";
+      completedRow.appendChild(completedLab);
+
+      let finishDate = "";
+      let finishHour = 12;
+      let finishMinute = 0;
+      const iso = state.extracurricularCompletedAt && state.extracurricularCompletedAt[task.id];
+      if (iso) {
+        const d = new Date(iso);
+        if (Number.isFinite(d.getTime())) {
+          const tz = typeof getAppTimezone === "function" ? getAppTimezone() : getRecordingTimezone();
+          const parts =
+            typeof getDatePartsInTimezone === "function"
+              ? getDatePartsInTimezone(d, tz)
+              : {
+                  year: d.getFullYear(),
+                  month: d.getMonth(),
+                  day: d.getDate(),
+                  hour: d.getHours(),
+                  minute: d.getMinutes(),
+                };
+          finishDate =
+            String(parts.year) +
+            "-" +
+            String(parts.month + 1).padStart(2, "0") +
+            "-" +
+            String(parts.day).padStart(2, "0");
+          finishHour = Number(parts.hour);
+          finishMinute = Number(parts.minute);
+          if (!Number.isFinite(finishHour)) finishHour = 12;
+          if (!Number.isFinite(finishMinute)) finishMinute = 0;
+        }
+      }
+      const stamp = (state.completionTimestamps || []).find(
+        (t) => t && t.taskType === "extracurricular" && String(t.taskId || "") === String(task.id)
+      );
+      if ((!finishDate || !isValidDateStr(finishDate)) && stamp && isValidDateStr(stamp.dateStr)) {
+        finishDate = stamp.dateStr;
+        if (Number.isFinite(stamp.hour)) finishHour = stamp.hour;
+        if (Number.isFinite(stamp.minute)) finishMinute = stamp.minute;
+      }
+
+      const dateInput = document.createElement("input");
+      dateInput.type = "date";
+      dateInput.value = finishDate || "";
+      dateInput.title = "Completion date (updates calendar / trends)";
+      const timeInput = document.createElement("input");
+      timeInput.type = "time";
+      timeInput.step = "60";
+      timeInput.value =
+        typeof timeToStr === "function"
+          ? timeToStr(finishHour, finishMinute)
+          : String(finishHour).padStart(2, "0") + ":" + String(finishMinute).padStart(2, "0");
+      timeInput.title = "Completion time (updates calendar / trends)";
+      const applyCompletedMoment = () => {
+        if (typeof setExtracurricularCompletionMoment !== "function") return;
+        const parts =
+          typeof parseTimeStr === "function"
+            ? parseTimeStr(timeInput.value || "12:00")
+            : { hour: 12, minute: 0 };
+        const result = setExtracurricularCompletionMoment(task.id, dateInput.value, parts.hour, parts.minute, {
+          skipRender: true,
+        });
+        if (result && !result.ok && result.reason) {
+          alert(result.reason);
+          return;
+        }
+        renderActiveTab();
+      };
+      dateInput.addEventListener("change", applyCompletedMoment);
+      timeInput.addEventListener("change", applyCompletedMoment);
+      completedRow.appendChild(dateInput);
+      completedRow.appendChild(timeInput);
+      meta.appendChild(completedRow);
+    }
+
     body.appendChild(meta);
 
     return li;

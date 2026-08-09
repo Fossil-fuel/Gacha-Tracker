@@ -288,6 +288,161 @@
         assert(scan.counts, "counts present");
       })
     );
+
+    checks.push(
+      check("Browser: setCycleCompletionMoment remaps calendar + stamp without tally bump", function () {
+        var r0 = P.applyTaskCompletion("weeklies", wKey, {
+          dateStr: "2026-07-15",
+          hour: 10,
+          minute: 0,
+          save: false,
+          render: false,
+          processResets: false,
+        });
+        assert(r0 && r0.ok, "seed complete");
+        var cBefore = Number(P.getStateSnapshot().weekliesCompleted[wKey]) || 0;
+        var moved = P.setCycleCompletionMoment("weeklies", wKey, "2026-07-13", "2026-07-17", 16, 45, {
+          skipSave: true,
+          skipRender: true,
+        });
+        assert(moved && moved.ok, "move ok: " + (moved && moved.reason));
+        assert(moved.dateStr === "2026-07-17", "finish day " + moved.dateStr);
+        var snap = P.getStateSnapshot();
+        assert((Number(snap.weekliesCompleted[wKey]) || 0) === cBefore, "tally stable");
+        assert(
+          snap.completionByDate["2026-07-17"] &&
+            snap.completionByDate["2026-07-17"].weeklies.indexOf(wKey) >= 0,
+          "new day marked"
+        );
+        assert(
+          !snap.completionByDate["2026-07-15"] ||
+            snap.completionByDate["2026-07-15"].weeklies.indexOf(wKey) < 0,
+          "old finish cleared"
+        );
+        var stamp = (snap.completionTimestamps || []).some(function (t) {
+          return t.taskType === "weeklies" && t.taskId === "weekly_a" && t.dateStr === "2026-07-17" && t.hour === 16;
+        });
+        assert(stamp, "timestamp updated");
+      })
+    );
+
+    checks.push(
+      check("Browser: scheduled setEndgameCompletionDate is no-op", function () {
+        P.applyTaskCompletion("endgame", eKey, {
+          dateStr: "2026-07-20",
+          hour: 12,
+          save: false,
+          render: false,
+          processResets: false,
+        });
+        var before = JSON.stringify(P.getStateSnapshot().completionByDate);
+        P.setEndgameCompletionDate(gameId, "pure_fiction", 0, "2020-01-01", "2020-01-14", { skipSave: true });
+        var after = JSON.stringify(P.getStateSnapshot().completionByDate);
+        assert(before === after, "scheduled Start/End edit must not mutate calendar");
+        var pfTask = (P.getGame(gameId).endgame || []).find(function (t) {
+          return t.id === "pure_fiction";
+        });
+        assert(pfTask && !pfTask.manualReset, "fixture is scheduled");
+      })
+    );
+
+    checks.push(
+      check("Browser: setExtracurricularCompletionMoment updates completedAt + stamp", function () {
+        var snap = P.getStateSnapshot();
+        snap.extracurricularTasks = [
+          { id: "live_evt", gameId: gameId, label: "Live Event", startDate: "2026-03-01", endDate: "2026-03-10", currency: 10 },
+        ];
+        snap.extracurricularCompleted = { live_evt: true };
+        snap.extracurricularCompletedAt = { live_evt: "2026-03-05T12:00:00.000Z" };
+        P.loadStateSnapshot(snap);
+        var beforeAt = snap.extracurricularCompletedAt.live_evt;
+        var res = P.setExtracurricularCompletionMoment("live_evt", "2026-03-07", 19, 30, {
+          skipSave: true,
+          skipRender: true,
+        });
+        assert(res && res.ok, "extra moment ok: " + (res && res.reason));
+        assert(res.dateStr === "2026-03-07" && res.hour === 19 && res.minute === 30, "return shape");
+        var after = P.getStateSnapshot();
+        var at = after.extracurricularCompletedAt && after.extracurricularCompletedAt.live_evt;
+        assert(!!at && at !== beforeAt, "completedAt rewritten (ISO may shift calendar day in UTC)");
+        assert(Number.isFinite(new Date(at).getTime()), "completedAt is parseable ISO");
+        var hit = (after.completionTimestamps || []).some(function (t) {
+          return t.taskType === "extracurricular" && t.taskId === "live_evt" && t.dateStr === "2026-03-07" && t.hour === 19;
+        });
+        assert(hit, "extracurricular stamp present for Time Trends");
+      })
+    );
+
+    checks.push(
+      check("Browser: Games finish edit remaps calendar and Trends hour/DOW buckets", function () {
+        var r0 = P.applyTaskCompletion("weeklies", wKey, {
+          dateStr: "2026-07-22",
+          hour: 11,
+          minute: 0,
+          save: false,
+          render: false,
+          processResets: false,
+        });
+        assert(r0 && r0.ok, "seed weekly");
+        var moved = P.setCycleCompletionMoment("weeklies", wKey, "2026-07-20", "2026-07-24", 21, 15, {
+          skipSave: true,
+          skipRender: true,
+        });
+        assert(moved && moved.ok && moved.dateStr === "2026-07-24", "finish → Fri");
+        var snap = P.getStateSnapshot();
+        assert(
+          snap.completionByDate["2026-07-24"] &&
+            snap.completionByDate["2026-07-24"].weeklies.indexOf(wKey) >= 0,
+          "calendar marks new finish day"
+        );
+        assert(
+          !snap.completionByDate["2026-07-22"] ||
+            snap.completionByDate["2026-07-22"].weeklies.indexOf(wKey) < 0,
+          "calendar cleared old finish"
+        );
+        var stamp = (snap.completionTimestamps || []).find(function (t) {
+          return t.taskType === "weeklies" && t.taskId === "weekly_a" && t.dateStr === "2026-07-24";
+        });
+        assert(stamp && stamp.hour === 21, "Trends stamp hour 21");
+        // Fri = 5
+        assert(new Date("2026-07-24T12:00:00").getDay() === 5, "finish DOW Friday");
+      })
+    );
+
+    checks.push(
+      check("Browser: simulated clock offset shifts getDateStr for completes", function () {
+        var snap = P.getStateSnapshot();
+        snap.simulatedDateOffset = 0;
+        snap.simulatedHourOffset = 0;
+        P.loadStateSnapshot(snap);
+        var base = P.getDateStr(P.getSimulatedNow());
+        snap = P.getStateSnapshot();
+        snap.simulatedDateOffset = 3;
+        P.loadStateSnapshot(snap);
+        var advanced = P.getDateStr(P.getSimulatedNow());
+        assert(base !== advanced, "offset moves effective today (" + base + " → " + advanced + ")");
+        // Completing a daily on the simulated dateStr lands calendar + stamp there
+        var r = P.applyTaskCompletion("dailies", gameId, {
+          dateStr: advanced,
+          hour: 14,
+          minute: 5,
+          save: false,
+          render: false,
+          processResets: false,
+        });
+        assert(r && r.ok, "daily on sim day");
+        var after = P.getStateSnapshot();
+        assert(
+          after.completionByDate[advanced] &&
+            after.completionByDate[advanced].dailies.indexOf(gameId) >= 0,
+          "calendar day = simulated today"
+        );
+        var ds = (after.completionTimestamps || []).some(function (t) {
+          return t.taskType === "dailies" && t.gameId === gameId && t.dateStr === advanced && t.hour === 14;
+        });
+        assert(ds, "Trends stamp on simulated day @14");
+      })
+    );
   } finally {
     try {
       P.loadStateSnapshot(backup);

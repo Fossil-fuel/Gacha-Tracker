@@ -62,11 +62,15 @@ module.exports = {
     check("Source wires extracurricular into Time Trends charts", () => {
       const core = fs.readFileSync(path.join(root, "src", "01-core.js"), "utf8");
       const attendance = fs.readFileSync(path.join(root, "src", "08-page-attendance.js"), "utf8");
+      const extra = fs.readFileSync(path.join(root, "src", "08b-page-extracurricular.js"), "utf8");
       assert.ok(core.includes("function listExtracurricularTimestampsForTimeTrends"), "list helper in core");
       assert.ok(core.includes('type === "dailies" || type === "extracurricular"'), "getTimestampsForTimeTrends passes extracurricular");
+      assert.ok(core.includes("function setExtracurricularCompletionMoment"), "completed moment writer");
       assert.ok(attendance.includes("listExtracurricularTimestampsForTimeTrends"), "attendance merges extracurricular stamps");
       assert.ok(attendance.includes('extracurricular: Array(24).fill(0)'), "hour stack includes extracurricular");
       assert.ok(attendance.includes('appendDayOfWeekChart("extracurricular"'), "DOW chart for extracurricular");
+      assert.ok(extra.includes("extracurricular-completed-row"), "board card Completed editors");
+      assert.ok(extra.includes("Dates/Currency live in dedicated rows below"), "no duplicated Dates/Currency snippet");
     });
   },
 };
