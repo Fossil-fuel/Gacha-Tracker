@@ -5287,17 +5287,44 @@ function syncTaskCycleEndTimeUI() {
           applySavePayload(data, { isFirstLoad: false });
           state.lastSimulationSnapshot = null;
           if (typeof clearCompletionUndoStack === "function") clearCompletionUndoStack();
-          save({ immediate: true });
-          // bulk state change: full refresh
-          renderAll();
-          const report = qs("settingsDebugReport");
-          if (report && typeof formatConflictScanReport === "function" && typeof scanDataConflicts === "function") {
-            report.textContent =
-              "Import complete. Suggested next step: open Debug and scan for conflicts.\n\n" +
-              formatConflictScanReport(scanDataConflicts());
+          const afterSave = function () {
+            try {
+              // Drop any stale legacy full key; force a fresh slim meta backup for disaster recovery.
+              try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+              if (typeof maybeWriteDailySlimBackup === "function") maybeWriteDailySlimBackup(true);
+            } catch (_) {}
+            // bulk state change: full refresh
+            renderAll();
+            const report = qs("settingsDebugReport");
+            if (report && typeof formatConflictScanReport === "function" && typeof scanDataConflicts === "function") {
+              report.textContent =
+                "Import complete. Suggested next step: open Debug and scan for conflicts.\n\n" +
+                formatConflictScanReport(scanDataConflicts());
+            }
+            const lib = typeof getUserImageLibrary === "function" ? getUserImageLibrary() : [];
+            const withBlobs = lib.filter(function (e) {
+              return e && typeof e.dataUrl === "string" && e.dataUrl.indexOf("data:") === 0;
+            }).length;
+            const fileLib = Array.isArray(data.userImageLibrary) ? data.userImageLibrary : [];
+            const fileBlobs = fileLib.filter(function (e) {
+              return e && typeof e.dataUrl === "string" && e.dataUrl.indexOf("data:") === 0;
+            }).length;
+            let msg = "Import complete. Your local backup is now loaded on this site.";
+            if (fileBlobs > 0 && withBlobs === 0) {
+              msg +=
+                "\n\nWarning: the backup listed My Images but no image data was restored. Re-export from a device where Settings → My Images previews still show pictures.";
+            } else if (withBlobs > 0) {
+              msg += "\n\nMy Images restored: " + withBlobs + " picture(s).";
+            }
+            alert(msg);
+            closeSettingsModal();
+          };
+          const saveRet = save({ immediate: true });
+          if (saveRet && typeof saveRet.then === "function") {
+            saveRet.then(afterSave).catch(afterSave);
+          } else {
+            afterSave();
           }
-          alert("Import complete. Your local backup is now loaded on this site.");
-          closeSettingsModal();
         } catch (err) {
           alert("Failed to import: " + (err.message || "Invalid file"));
         }

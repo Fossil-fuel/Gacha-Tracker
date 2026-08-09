@@ -7,10 +7,14 @@ const {
   buildFullExportPayload,
   buildSlimPayload,
   roundTripExportImport,
+  applySlimOntoLibrary,
   resolveBannerSource,
   findEndgameTask,
   cloneTaskWithoutImages,
   isEmbeddedImageUrl,
+  mergeLoadedUserImageLibrary,
+  countUserImageLibraryBlobs,
+  normalizeLoadedUserImageLibrary,
 } = require("../lib/banner-export-import");
 
 const ROOT = path.join(__dirname, "..", "..");
@@ -122,6 +126,40 @@ module.exports = {
     assert.equal(stockResolved.kind, "stock", "stock path kind");
     assert.equal(stockTask.bannerSourceImage, "assets/banners/demo-stock.png", "stock path unchanged");
 
+    // Real user path: Save to My Images → task uses userimg → export → import → gallery resolves.
+    assert.equal(countUserImageLibraryBlobs(restored.userImageLibrary), 1, "imported library has blob");
+    assert.ok(
+      restored.userImageLibrary[0].dataUrl.indexOf("data:") === 0,
+      "My Images entry keeps dataUrl after export→import"
+    );
+
+    // Slim apply must not wipe in-memory blobs (the post-fix My Images break).
+    const afterSlim = applySlimOntoLibrary(state);
+    assert.equal(
+      countUserImageLibraryBlobs(afterSlim.userImageLibrary),
+      1,
+      "applying slim onto live library preserves dataUrl blobs"
+    );
+    assert.ok(
+      resolveBannerSource(userTask, afterSlim.userImageLibrary).ok,
+      "userimg still resolvable after slim merge"
+    );
+    assert.equal(
+      mergeLoadedUserImageLibrary(
+        [{ id: "uimg_banner1", kind: "banner", label: "My banner", createdAt: 1 }],
+        state.userImageLibrary
+      )[0].dataUrl,
+      TINY_PNG,
+      "merge fills empty incoming dataUrl from existing"
+    );
+    assert.equal(
+      countUserImageLibraryBlobs(
+        normalizeLoadedUserImageLibrary([{ id: "uimg_banner1", kind: "banner", label: "x", createdAt: 1 }])
+      ),
+      0,
+      "normalize alone yields no blobs for slim-shaped entries"
+    );
+
     // Document the old failure mode: reload-from-slim drops embedded banners and library blobs.
     const broken = roundTripExportImport(state, { reloadFromSlim: true });
     const brokenData = findEndgameTask(broken.games, "g1", "eg_data");
@@ -161,6 +199,15 @@ module.exports = {
 
     const core = read("src/01-core.js");
     assert.ok(core.includes("function isEmbeddedImageUrl"), "core defines isEmbeddedImageUrl");
+    assert.ok(core.includes("function mergeLoadedUserImageLibrary"), "core merges library blobs");
+    assert.ok(
+      core.includes("if (storageBackend === \"idb\") return;"),
+      "load() must no-op when IndexedDB is active"
+    );
+    assert.ok(
+      core.includes("prevBlobs > inBlobs"),
+      "IDB save refuses to persist library blob downgrades"
+    );
     assert.ok(
       core.includes("userImageLibrary: cloneUserImageLibraryForSave(omitImages)"),
       "buildSavePayload includes userImageLibrary"
@@ -172,10 +219,10 @@ module.exports = {
 
     const modals = read("src/02-modals.js");
     assert.ok(
-      /settingsImportInput[\s\S]*?applySavePayload\(data,\s*\{\s*isFirstLoad:\s*false\s*\}\)[\s\S]*?save\(\{\s*immediate:\s*true\s*\}\)[\s\S]*?renderAll\(\)/.test(
+      /settingsImportInput[\s\S]*?applySavePayload\(data,\s*\{\s*isFirstLoad:\s*false\s*\}\)[\s\S]*?save\(\{\s*immediate:\s*true\s*\}\)/.test(
         modals
       ),
-      "import must applySavePayload + save + renderAll (no load() slim reload)"
+      "import must applySavePayload + save (no load() slim reload)"
     );
     assert.ok(
       /settingsImportInput[\s\S]*?applySavePayload\(data[\s\S]*?save\(\{\s*immediate:\s*true\s*\}\)/.test(modals) &&
@@ -185,6 +232,10 @@ module.exports = {
     assert.ok(
       /settingsExportBtn[\s\S]*?JSON\.stringify\(buildSavePayload\(\)\)/.test(modals),
       "export uses full buildSavePayload() (images included)"
+    );
+    assert.ok(
+      /settingsImportInput[\s\S]*?My Images restored/.test(modals),
+      "import reports restored My Images blob count"
     );
   },
 };

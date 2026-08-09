@@ -258,6 +258,11 @@ module.exports = {
       "import must not reload from slim via load() after save"
     );
     assert.ok(core.includes("function isEmbeddedImageUrl"), "slim image omit must detect embedded URLs only");
+    assert.ok(core.includes("function mergeLoadedUserImageLibrary"), "core must merge My Images blobs on apply");
+    assert.ok(
+      core.includes("if (storageBackend === \"idb\") return;"),
+      "load() must not apply slim localStorage when IndexedDB is active"
+    );
 
     const extracurricular = read("src/08b-page-extracurricular.js");
     assert.ok(extracurricular.includes("extracurricular-completed-row"), "08b must render Completed editors");

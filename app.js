@@ -397,6 +397,35 @@
       .filter(Boolean);
   }
 
+  function countUserImageLibraryBlobs(library) {
+    let n = 0;
+    (library || []).forEach((e) => {
+      if (e && typeof e.dataUrl === "string" && e.dataUrl.indexOf("data:") === 0) n++;
+    });
+    return n;
+  }
+
+  /**
+   * Merge an incoming library (export/import/slim/cloud) with what's already in memory.
+   * Slim backups intentionally omit dataUrl bytes; applying them must not wipe blobs we still hold.
+   * When incoming entries include data URLs, those win (full import/export).
+   */
+  function mergeLoadedUserImageLibrary(incomingRaw, existing) {
+    const incoming = normalizeLoadedUserImageLibrary(incomingRaw);
+    const prevById = new Map();
+    (existing || []).forEach((e) => {
+      if (e && e.id) prevById.set(e.id, e);
+    });
+    return incoming.map((e) => {
+      if (e.dataUrl) return e;
+      const prev = prevById.get(e.id);
+      if (prev && typeof prev.dataUrl === "string" && prev.dataUrl.indexOf("data:") === 0) {
+        return Object.assign({}, e, { dataUrl: prev.dataUrl });
+      }
+      return e;
+    });
+  }
+
   function resolveStockBannerUrl(path) {
     const raw = String(path || "").trim();
     if (!raw) return "";
@@ -865,6 +894,10 @@
   }
 
   function load() {
+    // IndexedDB is source of truth and may hold full image blobs. localStorage only keeps a
+    // daily slim backup (omitImages) plus maybe a stale legacy key — applying those here
+    // wipes My Images dataUrls while leaving userimg: refs (broken gallery thumbnails).
+    if (storageBackend === "idb") return;
     try {
       const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(STORAGE_SLIM_KEY);
       applySavePayload(raw ? JSON.parse(raw) : null, { isFirstLoad: !raw });
@@ -971,7 +1004,7 @@
         if (parsed.historyYear != null && Number.isFinite(parsed.historyYear)) state.historyYear = parsed.historyYear;
         if (Array.isArray(parsed.extracurricularTasks)) state.extracurricularTasks = parsed.extracurricularTasks;
         if (Array.isArray(parsed.userImageLibrary)) {
-          state.userImageLibrary = normalizeLoadedUserImageLibrary(parsed.userImageLibrary);
+          state.userImageLibrary = mergeLoadedUserImageLibrary(parsed.userImageLibrary, state.userImageLibrary);
         }
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
@@ -1287,11 +1320,36 @@
 
   function persistLocalFull(jsonStr) {
     if (storageBackend === "idb") {
-      return idbPutFullJson(jsonStr)
+      return idbGetFullJson()
+        .catch(function () { return null; })
+        .then(function (existing) {
+          let toWrite = jsonStr;
+          if (existing) {
+            try {
+              const incomingObj = JSON.parse(jsonStr);
+              const prevObj = JSON.parse(existing);
+              const inBlobs = countUserImageLibraryBlobs(incomingObj.userImageLibrary);
+              const prevBlobs = countUserImageLibraryBlobs(prevObj.userImageLibrary);
+              // Slim / cloud / load()-from-localStorage paths can omit dataUrls. Never persist a
+              // downgrade that strips My Images blobs while keeping the same library ids.
+              if (prevBlobs > inBlobs) {
+                incomingObj.userImageLibrary = mergeLoadedUserImageLibrary(
+                  incomingObj.userImageLibrary,
+                  prevObj.userImageLibrary
+                );
+                state.userImageLibrary = incomingObj.userImageLibrary;
+                toWrite = JSON.stringify(incomingObj);
+              }
+            } catch (_) {}
+          }
+          return idbPutFullJson(toWrite);
+        })
         .then(() => {
           lastSavedAtMs = Date.now();
           updateLastSavedIndicator(false);
           maybeWriteDailySlimBackup(false);
+          // Avoid load() ever preferring a stale legacy full key over IndexedDB / slim.
+          try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
         })
         .catch(() => {
           updateLastSavedIndicator(true);
@@ -1321,13 +1379,13 @@
     // localPrimary today: write local first, then best-effort cloud mirror.
     // cloudPrimary later: reverse order (cloud first) and treat IndexedDB as backup in persistLocalFull.
     if (PERSISTENCE_MODE === "cloudPrimary") {
-      persistCloudMirror(jsonStr).finally(function () {
-        persistLocalFull(jsonStr);
+      return persistCloudMirror(jsonStr).finally(function () {
+        return persistLocalFull(jsonStr);
       });
-      return;
     }
-    persistLocalFull(jsonStr);
+    const localP = persistLocalFull(jsonStr);
     persistCloudMirror(jsonStr);
+    return localP;
   }
 
   async function initPersistentStorage() {
@@ -1473,7 +1531,7 @@
   }
 
   function flushPendingSave() {
-    if (!pendingSaveJson) return;
+    if (!pendingSaveJson) return Promise.resolve();
     try {
       const json = pendingSaveJson;
       pendingSaveJson = null;
@@ -1481,13 +1539,15 @@
         clearTimeout(saveTimer);
         saveTimer = null;
       }
-      if (isPerfDebugEnabled()) perfMeasure("save.flush", () => writeSavePayload(json));
-      else writeSavePayload(json);
+      let writeP;
+      if (isPerfDebugEnabled()) writeP = perfMeasure("save.flush", () => writeSavePayload(json));
+      else writeP = writeSavePayload(json);
       // IndexedDB path updates the indicator when the write resolves.
       if (storageBackend !== "idb") {
         lastSavedAtMs = Date.now();
         updateLastSavedIndicator(false);
       }
+      return writeP && typeof writeP.then === "function" ? writeP : Promise.resolve();
     } catch (_) {
       pendingSaveJson = null;
       if (saveTimer) {
@@ -1495,6 +1555,7 @@
         saveTimer = null;
       }
       updateLastSavedIndicator(true);
+      return Promise.resolve();
     }
   }
 
@@ -1504,8 +1565,7 @@
     const jsonStr = JSON.stringify(payload);
     if (options.immediate) {
       pendingSaveJson = jsonStr;
-      flushPendingSave();
-      return;
+      return flushPendingSave();
     }
     pendingSaveJson = jsonStr;
     if (saveTimer) clearTimeout(saveTimer);
@@ -1513,14 +1573,16 @@
       saveTimer = null;
       flushPendingSave();
     }, SAVE_DEBOUNCE_MS);
+    return Promise.resolve();
   }
 
   function save(opts) {
     try {
-      if (isPerfDebugEnabled()) perfMeasure("save", () => saveImpl(opts));
-      else saveImpl(opts);
+      if (isPerfDebugEnabled()) return perfMeasure("save", () => saveImpl(opts));
+      return saveImpl(opts);
     } catch (_) {
       updateLastSavedIndicator(true);
+      return Promise.resolve();
     }
   }
 
@@ -14364,17 +14426,44 @@ function syncTaskCycleEndTimeUI() {
           applySavePayload(data, { isFirstLoad: false });
           state.lastSimulationSnapshot = null;
           if (typeof clearCompletionUndoStack === "function") clearCompletionUndoStack();
-          save({ immediate: true });
-          // bulk state change: full refresh
-          renderAll();
-          const report = qs("settingsDebugReport");
-          if (report && typeof formatConflictScanReport === "function" && typeof scanDataConflicts === "function") {
-            report.textContent =
-              "Import complete. Suggested next step: open Debug and scan for conflicts.\n\n" +
-              formatConflictScanReport(scanDataConflicts());
+          const afterSave = function () {
+            try {
+              // Drop any stale legacy full key; force a fresh slim meta backup for disaster recovery.
+              try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+              if (typeof maybeWriteDailySlimBackup === "function") maybeWriteDailySlimBackup(true);
+            } catch (_) {}
+            // bulk state change: full refresh
+            renderAll();
+            const report = qs("settingsDebugReport");
+            if (report && typeof formatConflictScanReport === "function" && typeof scanDataConflicts === "function") {
+              report.textContent =
+                "Import complete. Suggested next step: open Debug and scan for conflicts.\n\n" +
+                formatConflictScanReport(scanDataConflicts());
+            }
+            const lib = typeof getUserImageLibrary === "function" ? getUserImageLibrary() : [];
+            const withBlobs = lib.filter(function (e) {
+              return e && typeof e.dataUrl === "string" && e.dataUrl.indexOf("data:") === 0;
+            }).length;
+            const fileLib = Array.isArray(data.userImageLibrary) ? data.userImageLibrary : [];
+            const fileBlobs = fileLib.filter(function (e) {
+              return e && typeof e.dataUrl === "string" && e.dataUrl.indexOf("data:") === 0;
+            }).length;
+            let msg = "Import complete. Your local backup is now loaded on this site.";
+            if (fileBlobs > 0 && withBlobs === 0) {
+              msg +=
+                "\n\nWarning: the backup listed My Images but no image data was restored. Re-export from a device where Settings → My Images previews still show pictures.";
+            } else if (withBlobs > 0) {
+              msg += "\n\nMy Images restored: " + withBlobs + " picture(s).";
+            }
+            alert(msg);
+            closeSettingsModal();
+          };
+          const saveRet = save({ immediate: true });
+          if (saveRet && typeof saveRet.then === "function") {
+            saveRet.then(afterSave).catch(afterSave);
+          } else {
+            afterSave();
           }
-          alert("Import complete. Your local backup is now loaded on this site.");
-          closeSettingsModal();
         } catch (err) {
           alert("Failed to import: " + (err.message || "Invalid file"));
         }

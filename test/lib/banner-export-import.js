@@ -83,6 +83,31 @@ function normalizeLoadedUserImageLibrary(raw) {
     .filter(Boolean);
 }
 
+function countUserImageLibraryBlobs(library) {
+  let n = 0;
+  (library || []).forEach((e) => {
+    if (e && typeof e.dataUrl === "string" && e.dataUrl.indexOf("data:") === 0) n++;
+  });
+  return n;
+}
+
+/** Preserve blobs when incoming library is slim/meta-only (matches src/01-core.js). */
+function mergeLoadedUserImageLibrary(incomingRaw, existing) {
+  const incoming = normalizeLoadedUserImageLibrary(incomingRaw);
+  const prevById = new Map();
+  (existing || []).forEach((e) => {
+    if (e && e.id) prevById.set(e.id, e);
+  });
+  return incoming.map((e) => {
+    if (e.dataUrl) return e;
+    const prev = prevById.get(e.id);
+    if (prev && typeof prev.dataUrl === "string" && prev.dataUrl.indexOf("data:") === 0) {
+      return Object.assign({}, e, { dataUrl: prev.dataUrl });
+    }
+    return e;
+  });
+}
+
 /** Minimal full export payload (banner-related fields). */
 function buildFullExportPayload(state) {
   return {
@@ -104,6 +129,7 @@ function buildSlimPayload(state) {
 /**
  * Simulate Settings export wrapper → parse → applySavePayload-style import.
  * opts.reloadFromSlim: if true, mimics the old broken import (save then load from slim).
+ * opts.existingLibrary: in-memory library before apply (tests slim-merge preserve).
  */
 function roundTripExportImport(state, opts) {
   const options = opts || {};
@@ -122,10 +148,21 @@ function roundTripExportImport(state, opts) {
     });
   }
 
+  const existing = options.existingLibrary || [];
   return {
     games: data.games,
     extracurricularTasks: data.extracurricularTasks || [],
-    userImageLibrary: normalizeLoadedUserImageLibrary(data.userImageLibrary),
+    userImageLibrary: mergeLoadedUserImageLibrary(data.userImageLibrary, existing),
+  };
+}
+
+/** Apply a slim payload onto an existing in-memory library (post-fix / stale load). */
+function applySlimOntoLibrary(fullState) {
+  const slim = buildSlimPayload(fullState);
+  return {
+    games: slim.games,
+    extracurricularTasks: slim.extracurricularTasks,
+    userImageLibrary: mergeLoadedUserImageLibrary(slim.userImageLibrary, fullState.userImageLibrary),
   };
 }
 
@@ -163,9 +200,12 @@ module.exports = {
   cloneGameWithoutImages,
   cloneUserImageLibraryForSave,
   normalizeLoadedUserImageLibrary,
+  countUserImageLibraryBlobs,
+  mergeLoadedUserImageLibrary,
   buildFullExportPayload,
   buildSlimPayload,
   roundTripExportImport,
+  applySlimOntoLibrary,
   resolveBannerSource,
   findEndgameTask,
 };

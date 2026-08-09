@@ -1204,7 +1204,7 @@
             <h4 id="settings-my-images-heading" class="settings-section-title">My Images</h4>
             <p class="settings-hint">
               Upload banners and profile pictures you reuse often. Tasks and games store a short reference
-              (<code>userimg:…</code>), so the file is kept once — same idea as Stock Assets. Full Export includes these images.
+              (<code>userimg:…</code>), so the file is kept once — same idea as Stock Assets. <strong>Export data</strong> (JSON) includes these images.
             </p>
             <div class="my-images-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesUploadBannerBtn">Add banner</button>
@@ -1566,7 +1566,7 @@
 
       function loadApp() {
         // Cache-bust so GitHub Pages / browser caches pick up catalog path fixes.
-        return loadScript("app.js?v=1e087d2-wuwa");
+        return loadScript("app.js?v=1e087d2-myimg");
       }
 
       // Phase 2: only pull Firebase SDK when a real project config is present.
