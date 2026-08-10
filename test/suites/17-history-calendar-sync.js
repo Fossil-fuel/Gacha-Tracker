@@ -621,6 +621,191 @@ module.exports = {
     );
 
     checks.push(
+      check("Invariant: Delete Save removes archive when draft dates drifted from closed strings", () => {
+        // Mimics TZ display drift: History draft shows shifted start/end, but archive keeps
+        // the real window strings. Finish day must still locate + drop the closed row.
+        const state = sim.createFixture({ today: "2026-08-10" });
+        const game = sim.getGame(state);
+        const umbral = {
+          id: "umbral_del",
+          label: "Umbral Monument",
+          weekStartDay: 3,
+          weekStartHour: 4,
+          weekStartMinute: 0,
+          dateStarted: "2026-03-01",
+          frequencyEvery: 2,
+          frequencyUnit: "week",
+          timeLimitEvery: 2,
+          timeLimitUnit: "week",
+          currency: 1200,
+          manualReset: true,
+          manualDueTbd: false,
+          manualDueDateStr: "2026-03-15",
+          manualDueHour: 4,
+          manualDueMinute: 0,
+          manualClosedCycles: [{ start: "2026-02-11", end: "2026-02-26", completed: 1 }],
+        };
+        game.endgame.push(umbral);
+        const key = sim.taskKey(game, umbral);
+        state.endgameCompleted[key] = 1;
+        state.endgameCurrencyEarned[game.id] = { umbral_del: [0] };
+        state.completionByDate["2026-02-11"] = { dailies: [], weeklies: [], endgame: [key] };
+        state.completionTimestamps.push({
+          dateStr: "2026-02-11",
+          hour: 12,
+          minute: 0,
+          gameId: game.id,
+          taskType: "endgame",
+          taskId: "umbral_del",
+          taskLabel: "Umbral Monument",
+        });
+
+        const committed = sim.commitEarningsHistoryDraft(state, game.id, "umbral_del", [
+          {
+            origStatus: "completed",
+            status: "deleted",
+            origStartStr: "2026-02-10",
+            startStr: "2026-02-10",
+            origEndStr: "2026-02-25",
+            endStr: "2026-02-25",
+            origFinishDateStr: "2026-02-11",
+            finishDateStr: "2026-02-11",
+            origHour: 12,
+            hour: 12,
+            origMinute: 0,
+            minute: 0,
+            origEarned: 0,
+            earned: 0,
+          },
+        ]);
+        assert.ok(committed.ok, "delete commit ok: " + (committed.errors || []).join("; "));
+        assert.equal(
+          (umbral.manualClosedCycles || []).length,
+          0,
+          "closed archive dropped via finish-day match"
+        );
+        assert.equal(
+          !!(state.completionByDate["2026-02-11"] && (state.completionByDate["2026-02-11"].endgame || []).includes(key)),
+          false,
+          "calendar finish mark cleared"
+        );
+        assert.equal(Number(state.endgameCompleted[key]) || 0, 0, "tally decremented");
+      })
+    );
+
+    checks.push(
+      check("Invariant: Mark skipped Save flips archive when draft dates drifted (no twin skip row)", () => {
+        // Reproduces Umbral screenshot: Save used drifted dates and created a second skipped
+        // window while the original completed archive stayed completed.
+        const state = sim.createFixture({ today: "2026-08-10" });
+        const game = sim.getGame(state);
+        const umbral = {
+          id: "umbral_skip",
+          label: "Umbral Monument",
+          weekStartDay: 3,
+          weekStartHour: 4,
+          weekStartMinute: 0,
+          dateStarted: "2026-03-01",
+          frequencyEvery: 2,
+          frequencyUnit: "week",
+          timeLimitEvery: 2,
+          timeLimitUnit: "week",
+          currency: 1200,
+          manualReset: true,
+          manualDueTbd: false,
+          manualDueDateStr: "2026-03-15",
+          manualDueHour: 4,
+          manualDueMinute: 0,
+          manualClosedCycles: [
+            { start: "2026-02-11", end: "2026-02-26", completed: 1 },
+            { start: "2026-02-08", end: "2026-02-26", completed: 1 },
+          ],
+        };
+        game.endgame.push(umbral);
+        const key = sim.taskKey(game, umbral);
+        state.endgameCompleted[key] = 2;
+        state.endgameCurrencyEarned[game.id] = { umbral_skip: [0, 0] };
+        state.completionByDate["2026-02-11"] = { dailies: [], weeklies: [], endgame: [key] };
+        state.completionByDate["2026-02-08"] = { dailies: [], weeklies: [], endgame: [key] };
+        state.completionTimestamps.push(
+          {
+            dateStr: "2026-02-11",
+            hour: 12,
+            minute: 0,
+            gameId: game.id,
+            taskType: "endgame",
+            taskId: "umbral_skip",
+          },
+          {
+            dateStr: "2026-02-08",
+            hour: 12,
+            minute: 0,
+            gameId: game.id,
+            taskType: "endgame",
+            taskId: "umbral_skip",
+          }
+        );
+
+        const committed = sim.commitEarningsHistoryDraft(state, game.id, "umbral_skip", [
+          {
+            origStatus: "completed",
+            status: "skipped",
+            // Drifted labels (would previously upsert a twin skipped row).
+            origStartStr: "2026-02-10",
+            startStr: "2026-02-10",
+            origEndStr: "2026-02-25",
+            endStr: "2026-02-25",
+            origFinishDateStr: "2026-02-11",
+            finishDateStr: "2026-02-11",
+            origHour: 12,
+            hour: 12,
+            origMinute: 0,
+            minute: 0,
+            origEarned: 0,
+            earned: 0,
+          },
+          {
+            origStatus: "completed",
+            status: "completed",
+            origStartStr: "2026-02-08",
+            startStr: "2026-02-08",
+            origEndStr: "2026-02-26",
+            endStr: "2026-02-26",
+            origFinishDateStr: "2026-02-08",
+            finishDateStr: "2026-02-08",
+            origHour: 12,
+            hour: 12,
+            origMinute: 0,
+            minute: 0,
+            origEarned: 0,
+            earned: 0,
+          },
+        ]);
+        assert.ok(committed.ok, "skip commit ok: " + (committed.errors || []).join("; "));
+
+        const closed = umbral.manualClosedCycles || [];
+        const skipped = closed.filter((c) => c && !c.completed);
+        const completed = closed.filter((c) => c && c.completed);
+        assert.equal(skipped.length, 1, "exactly one skipped archive row");
+        assert.equal(skipped[0].start, "2026-02-11", "keeps real archive start (not drifted 02-10)");
+        assert.equal(skipped[0].end, "2026-02-26", "keeps real archive end");
+        assert.equal(completed.length, 1, "sibling completion preserved");
+        assert.equal(completed[0].start, "2026-02-08");
+        assert.equal(
+          closed.some((c) => c.start === "2026-02-10"),
+          false,
+          "no drifted twin skipped row"
+        );
+        assert.equal(
+          !!(state.completionByDate["2026-02-11"] && (state.completionByDate["2026-02-11"].endgame || []).includes(key)),
+          false,
+          "skipped finish day cleared from calendar"
+        );
+        assert.equal(Number(state.endgameCompleted[key]) || 0, 1, "tally after one skip");
+      })
+    );
+
+    checks.push(
       check("Sim: past Add (skipped→completed Save) paints finish + fill; visible past current live", () => {
         const state = sim.createFixture({ today: "2026-08-07" });
         const game = sim.getGame(state);
@@ -828,6 +1013,9 @@ module.exports = {
         );
         assert.ok(modals.includes("blockedCycleStarts") || modals.includes('status !== "skipped"'));
         assert.ok(core.includes("function applyManualResetDelete"));
+        assert.ok(core.includes("function findManualClosedCycleIndex"));
+        assert.ok(core.includes("function pruneDriftedManualClosedDuplicates"));
+        assert.ok(core.includes("timezone-drifted History dates"));
         // Past closed windows must resolve via period bounds (not live-only).
         assert.ok(
           /function getWeeklyCycleBoundsForMoment[\s\S]*?getManualPeriodBoundsForDateStr\(task,\s*game,\s*"weeklies"/.test(core),

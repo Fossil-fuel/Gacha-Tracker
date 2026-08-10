@@ -305,7 +305,8 @@ function commitEarningsHistoryDraft(state, gameId, taskId, draftItems) {
   const items = (draftItems || []).slice();
   const errors = [];
 
-  function clearManualEndgameWindow(startStr) {
+  function clearManualEndgameWindow(startStr, opts) {
+    const o = opts || {};
     const bounds = getManualPeriodBoundsForDateStr(task, "endgame", startStr);
     if (bounds) {
       const startMs = bounds.cycleStart.getTime();
@@ -335,29 +336,88 @@ function commitEarningsHistoryDraft(state, gameId, taskId, draftItems) {
         return true;
       });
     }
-    state.endgameCompleted[key] = Math.max(0, (Number(state.endgameCompleted[key]) || 0) - 1);
+    if (o.decrement !== false) {
+      state.endgameCompleted[key] = Math.max(0, (Number(state.endgameCompleted[key]) || 0) - 1);
+    }
   }
 
   // Phase 0: completed → deleted (drop closed archive entirely).
   items.forEach((item) => {
     if (item.origStatus !== "completed" || item.status !== "deleted") return;
     if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
-    const start = item.startStr || item.origStartStr;
-    const end = item.endStr || item.origEndStr;
-    clearManualEndgameWindow(start);
-    task.manualClosedCycles = task.manualClosedCycles.filter(
-      (c) => !(c && c.start === start && c.end === end)
-    );
+    const start = item.origStartStr || item.startStr;
+    const end = item.origEndStr || item.endStr;
+    const finish = item.origFinishDateStr || item.finishDateStr || start;
+    const closed = task.manualClosedCycles;
+    let idx = closed.findIndex((c) => c && c.start === start && c.end === end);
+    if (idx < 0 && item.startStr && item.endStr) {
+      idx = closed.findIndex((c) => c && c.start === item.startStr && c.end === item.endStr);
+    }
+    if (idx < 0 && start) {
+      idx = closed.findIndex((c) => c && c.completed && c.start === start);
+    }
+    if (idx < 0 && finish) {
+      idx = closed.findIndex((c) => c && c.completed && finish >= c.start && finish <= c.end);
+    }
+    const archiveStart = idx >= 0 && closed[idx] ? closed[idx].start : start;
+    clearManualEndgameWindow(archiveStart);
+    if (start && start !== archiveStart) clearManualEndgameWindow(start, { decrement: false });
+    if (item.startStr && item.startStr !== archiveStart && item.startStr !== start) {
+      clearManualEndgameWindow(item.startStr, { decrement: false });
+    }
+    if (idx >= 0) closed.splice(idx, 1);
+    else if (finish) {
+      const day = state.completionByDate[finish];
+      if (day && Array.isArray(day.endgame)) {
+        const i = day.endgame.indexOf(key);
+        if (i >= 0) day.endgame.splice(i, 1);
+      }
+      state.completionTimestamps = (state.completionTimestamps || []).filter(
+        (t) => !(t && t.taskType === "endgame" && t.taskId === taskId && t.dateStr === finish)
+      );
+    }
+    task.manualClosedCycles = closed;
   });
 
   items.forEach((item) => {
     if (item.origStatus !== "completed" || item.status !== "skipped") return;
     if (!Array.isArray(task.manualClosedCycles)) task.manualClosedCycles = [];
-    const hit = task.manualClosedCycles.find((c) => c && c.start === item.startStr && c.end === item.endStr);
-    if (hit) hit.completed = 0;
-    else task.manualClosedCycles.push({ start: item.startStr, end: item.endStr, completed: 0 });
-    // Clear calendar + stamps in window
-    clearManualEndgameWindow(item.startStr);
+    const start = item.origStartStr || item.startStr;
+    const end = item.origEndStr || item.endStr;
+    const finish = item.origFinishDateStr || item.finishDateStr || start;
+    const closed = task.manualClosedCycles;
+    let hit =
+      closed.find((c) => c && c.start === start && c.end === end) ||
+      closed.find((c) => c && item.startStr && item.endStr && c.start === item.startStr && c.end === item.endStr) ||
+      closed.find((c) => c && c.completed && c.start === start) ||
+      closed.find((c) => c && c.completed && finish && finish >= c.start && finish <= c.end);
+    if (hit) {
+      hit.completed = 0;
+      clearManualEndgameWindow(hit.start);
+      if (start && start !== hit.start) clearManualEndgameWindow(start, { decrement: false });
+      if (item.startStr && item.startStr !== hit.start && item.startStr !== start) {
+        clearManualEndgameWindow(item.startStr, { decrement: false });
+      }
+      // Drop drifted twin rows (e.g. 02-10—02-26 while keep is 02-11—02-26).
+      // Never remove sibling completed cycles (they often share an end day).
+      for (let i = closed.length - 1; i >= 0; i--) {
+        const c = closed[i];
+        if (!c || (c.start === hit.start && c.end === hit.end)) continue;
+        if (c.completed) continue;
+        const starts = [start, item.startStr, hit.start].filter(Boolean);
+        const ends = [end, item.endStr, hit.end].filter(Boolean);
+        if (
+          (starts.includes(c.start) && ends.includes(c.end)) ||
+          (finish && finish >= c.start && finish <= c.end && (starts.includes(c.start) || ends.includes(c.end)))
+        ) {
+          closed.splice(i, 1);
+        }
+      }
+    } else {
+      closed.push({ start: start, end: end, completed: 0 });
+      clearManualEndgameWindow(start);
+    }
+    task.manualClosedCycles = closed;
   });
 
   items.forEach((item) => {

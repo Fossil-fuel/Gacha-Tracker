@@ -1699,6 +1699,11 @@
     const items = ctx.draft.items.slice();
     const quiet = { save: false, render: false, processResets: false, skipSave: true, skipRender: true };
     let firstError = null;
+    const taskList = type === "endgame" ? game.endgame : game.weeklies;
+    const ownedTask =
+      (taskList || []).find((t) => (t.id || t.label) === taskId) || task;
+    // Keep draft operations on the in-state task (card refs can go stale after Edit task).
+    ctx.task = ownedTask;
 
     // Prefer original cycle ref for finish remaps when Start was also edited (Phase 3 rehomes first).
     // Phase order: delete → skip → complete → rehome bounds → finish moment → earned.
@@ -1706,13 +1711,28 @@
     // Phase 0: completed → deleted (clears tallies/marks/timestamps; manual also drops closed archive).
     items.forEach((item) => {
       if (item.origStatus !== "completed" || item.status !== "deleted") return;
-      const start = isValidDateStr(item.startStr) ? item.startStr : item.origStartStr;
-      const end = isValidDateStr(item.endStr) ? item.endStr : item.origEndStr;
+      const start = isValidDateStr(item.origStartStr)
+        ? item.origStartStr
+        : isValidDateStr(item.startStr)
+          ? item.startStr
+          : "";
+      const end = isValidDateStr(item.origEndStr)
+        ? item.origEndStr
+        : isValidDateStr(item.endStr)
+          ? item.endStr
+          : "";
       let result;
       if (isManual && typeof applyManualResetDelete === "function") {
-        result = applyManualResetDelete(game, task, type, {
+        result = applyManualResetDelete(game, ownedTask, type, {
           startDateStr: start,
           endDateStr: end,
+          origStartDateStr: item.origStartStr,
+          origEndDateStr: item.origEndStr,
+          altStartDateStr: item.startStr,
+          altEndDateStr: item.endStr,
+          finishDateStr: isValidDateStr(item.origFinishDateStr)
+            ? item.origFinishDateStr
+            : item.finishDateStr,
           ...quiet,
         });
       } else if (typeof applyScheduledCycleSkip === "function") {
@@ -1730,7 +1750,7 @@
           ...quiet,
         });
         if (type === "endgame" && typeof syncEndgameCompletionDatesFromCalendar === "function") {
-          syncEndgameCompletionDatesFromCalendar(game, task, key);
+          syncEndgameCompletionDatesFromCalendar(game, ownedTask, key);
         }
       }
       if (result && !result.ok && result.reason && !firstError) firstError = result.reason;
@@ -1739,13 +1759,28 @@
     // Phase 1: completed → skipped (use draft bounds so an edited window is skipped correctly).
     items.forEach((item) => {
       if (item.origStatus !== "completed" || item.status !== "skipped") return;
-      const start = isValidDateStr(item.startStr) ? item.startStr : item.origStartStr;
-      const end = isValidDateStr(item.endStr) ? item.endStr : item.origEndStr;
+      const start = isValidDateStr(item.origStartStr)
+        ? item.origStartStr
+        : isValidDateStr(item.startStr)
+          ? item.startStr
+          : "";
+      const end = isValidDateStr(item.origEndStr)
+        ? item.origEndStr
+        : isValidDateStr(item.endStr)
+          ? item.endStr
+          : "";
       let result;
       if (isManual && typeof applyManualResetSkip === "function") {
-        result = applyManualResetSkip(game, task, type, {
+        result = applyManualResetSkip(game, ownedTask, type, {
           startDateStr: start,
           endDateStr: end,
+          origStartDateStr: item.origStartStr,
+          origEndDateStr: item.origEndStr,
+          altStartDateStr: item.startStr,
+          altEndDateStr: item.endStr,
+          finishDateStr: isValidDateStr(item.origFinishDateStr)
+            ? item.origFinishDateStr
+            : item.finishDateStr,
           ...quiet,
         });
       } else if (typeof applyScheduledCycleSkip === "function") {
@@ -1762,7 +1797,7 @@
       const finish = isValidDateStr(item.finishDateStr) ? item.finishDateStr : start;
       let result;
       if (isManual && typeof applyManualResetCompletion === "function") {
-        result = applyManualResetCompletion(game, task, type, {
+        result = applyManualResetCompletion(game, ownedTask, type, {
           startDateStr: start,
           endDateStr: end,
           dateStr: finish,
@@ -1795,7 +1830,7 @@
         if (item.origStatus === "skipped") return; // already applied with new bounds in phase 2
         if (!isValidDateStr(item.startStr) || !isValidDateStr(item.endStr)) return;
         if (item.startStr === item.origStartStr && item.endStr === item.origEndStr) return;
-        const entries = getEndgameCompletedPeriodsFromCalendar(game, task, key);
+        const entries = getEndgameCompletedPeriodsFromCalendar(game, ownedTask, key);
         let idx = entries.findIndex(
           (e) => e.range.start === item.origStartStr && e.range.end === item.origEndStr
         );
@@ -1854,7 +1889,7 @@
 
     // Phase 5: endgame earned amounts (match by current or original window).
     if (type === "endgame" && typeof setEndgameEarnedAt === "function") {
-      const entries = getEndgameCompletedPeriodsFromCalendar(game, task, key);
+      const entries = getEndgameCompletedPeriodsFromCalendar(game, ownedTask, key);
       ensureEndgameEarnedArrayLength(gameId, taskId, entries.length);
       const completedDraft = items.filter((i) => i.status === "completed");
       entries.forEach((entry, i) => {
@@ -1878,7 +1913,7 @@
     }
 
     // Refresh draft from persisted state; keep modal open for review.
-    openEarningsModal(gameId, task, type);
+    openEarningsModal(gameId, ownedTask, type);
   }
 
   let endgameCompleteModalCtx = null;

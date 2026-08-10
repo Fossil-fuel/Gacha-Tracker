@@ -2073,13 +2073,24 @@
         period.nextCycleStart
       );
       if (!refDate && manual && period.completed) {
-        refDate = getDateStr(period.periodStart);
+        refDate =
+          (isValidDateStr(period.manualStartStr) && period.manualStartStr) ||
+          getDateStr(period.periodStart);
       }
       if (!refDate) return;
       // Manual windows are irregular: always use this period's own bounds.
+      // Prefer archived start/end strings so History Delete/Save matches manualClosedCycles
+      // (getDateStr(moments) can drift a calendar day across game vs recording timezones).
       // (getEndgameCycleDatesForDate used to return only the live window, collapsing history.)
       const range = manual
-        ? { start: getDateStr(period.periodStart), end: getDateStr(period.periodEnd) }
+        ? {
+            start:
+              (isValidDateStr(period.manualStartStr) && period.manualStartStr) ||
+              getDateStr(period.periodStart),
+            end:
+              (isValidDateStr(period.manualEndStr) && period.manualEndStr) ||
+              getDateStr(period.periodEnd),
+          }
         : getEndgameCycleDatesForDate(task, refDate, game);
       const rangeKey = range.start + "|" + range.end;
       if (seen.has(rangeKey)) return;
@@ -2990,6 +3001,68 @@
   }
 
   /**
+   * Locate a manualClosedCycles row when History draft dates may have drifted from archive strings.
+   * Prefer exact start+end, then start-only, then finish day inside the window.
+   * @returns {{ idx: number, row: object|null, closed: object[] }}
+   */
+  function findManualClosedCycleIndex(task, opts) {
+    const o = opts || {};
+    const closed = Array.isArray(task && task.manualClosedCycles) ? task.manualClosedCycles : [];
+    const starts = [o.startDateStr, o.origStartDateStr, o.altStartDateStr].filter(isValidDateStr);
+    const ends = [o.endDateStr, o.origEndDateStr, o.altEndDateStr].filter(isValidDateStr);
+    const finish = isValidDateStr(o.finishDateStr) ? o.finishDateStr : "";
+    const requireCompleted = !!o.requireCompleted;
+
+    const matches = (c) => {
+      if (!c) return false;
+      if (requireCompleted && !c.completed) return false;
+      return true;
+    };
+
+    let idx = -1;
+    for (let i = 0; i < starts.length && idx < 0; i++) {
+      for (let j = 0; j < ends.length && idx < 0; j++) {
+        idx = closed.findIndex((c) => matches(c) && c.start === starts[i] && c.end === ends[j]);
+      }
+    }
+    if (idx < 0 && starts.length) {
+      idx = closed.findIndex((c) => matches(c) && starts.includes(c.start));
+    }
+    if (idx < 0 && finish) {
+      idx = closed.findIndex((c) => matches(c) && finish >= c.start && finish <= c.end);
+    }
+    return { idx, row: idx >= 0 ? closed[idx] : null, closed };
+  }
+
+  /**
+   * Drop drifted closed rows created by older Skip Saves that used timezone-shifted dates,
+   * while keeping the canonical archive window.
+   * Never removes other completed cycles (siblings can share an end day).
+   */
+  function pruneDriftedManualClosedDuplicates(task, keepStart, keepEnd, opts) {
+    const o = opts || {};
+    if (!task || !isValidDateStr(keepStart) || !isValidDateStr(keepEnd)) return;
+    if (!Array.isArray(task.manualClosedCycles)) return;
+    const starts = [o.startDateStr, o.origStartDateStr, o.altStartDateStr, keepStart].filter(isValidDateStr);
+    const ends = [o.endDateStr, o.origEndDateStr, o.altEndDateStr, keepEnd].filter(isValidDateStr);
+    const finish = isValidDateStr(o.finishDateStr) ? o.finishDateStr : "";
+    const closed = task.manualClosedCycles;
+    for (let i = closed.length - 1; i >= 0; i--) {
+      const c = closed[i];
+      if (!c) continue;
+      if (c.start === keepStart && c.end === keepEnd) continue;
+      // Sibling completed cycles often share an end day — never prune those.
+      if (c.completed && !o.allowCompleted) continue;
+      const driftedPair = starts.includes(c.start) && ends.includes(c.end);
+      const finishOverlap = finish && finish >= c.start && finish <= c.end;
+      // Only prune likely drift twins of this window (not unrelated older cycles).
+      if (driftedPair || (finishOverlap && (starts.includes(c.start) || ends.includes(c.end)))) {
+        closed.splice(i, 1);
+      }
+    }
+  }
+
+  /**
    * Find an existing completion for a manual window (calendar/timestamps or closed-cycle flag).
    * @returns {{ dateStr: string|null, fromClosed: boolean }}
    */
@@ -3233,16 +3306,44 @@
   /**
    * Log a skipped attempt for a manual-reset weekly/endgame window.
    * Archives past windows as completed:0; clears any finish marks in the window.
+   * Uses archive-string / finish-day matching so timezone-drifted History dates do not
+   * create a second skipped row while leaving the original completed archive intact.
    */
   function applyManualResetSkip(game, task, taskType, opts) {
     const o = opts || {};
-    if (!game || !task || !isManualResetTask(task)) return { ok: false, reason: "Task not found" };
+    if (!game || !task) return { ok: false, reason: "Task not found" };
     const type = taskType === "endgame" ? "endgame" : "weeklies";
-    const key = game.id + "." + (task.id || task.label);
+    const taskId = task.id || task.label;
+    const owned =
+      ((type === "endgame" ? game.endgame : game.weeklies) || []).find((t) => (t.id || t.label) === taskId) ||
+      task;
+    if (!isManualResetTask(owned)) return { ok: false, reason: "Task not found" };
+    const key = game.id + "." + (owned.id || owned.label);
 
-    const bounds = buildManualResetBoundsFromParts(task, game, type, {
-      startDateStr: o.startDateStr,
-      endDateStr: o.endDateStr,
+    const startCandidates = [o.startDateStr, o.origStartDateStr, o.altStartDateStr].filter(isValidDateStr);
+    const endCandidates = [o.endDateStr, o.origEndDateStr, o.altEndDateStr].filter(isValidDateStr);
+    const startDateStr = startCandidates[0];
+    const endDateStr = endCandidates[0];
+    if (!startDateStr || !endDateStr) return { ok: false, reason: "Cycle dates required" };
+
+    const finishHint = isValidDateStr(o.finishDateStr) ? o.finishDateStr : startDateStr;
+    const found = findManualClosedCycleIndex(owned, {
+      startDateStr,
+      endDateStr,
+      origStartDateStr: o.origStartDateStr,
+      origEndDateStr: o.origEndDateStr,
+      altStartDateStr: o.altStartDateStr,
+      altEndDateStr: o.altEndDateStr,
+      finishDateStr: finishHint,
+      requireCompleted: true,
+    });
+    // Prefer the real archive window for clear/upsert so Save keeps History dates stable.
+    const archiveStart = found.row ? found.row.start : startDateStr;
+    const archiveEnd = found.row ? found.row.end : endDateStr;
+
+    const bounds = buildManualResetBoundsFromParts(owned, game, type, {
+      startDateStr: archiveStart,
+      endDateStr: archiveEnd,
       startHour: o.startHour,
       startMinute: o.startMinute,
       endHour: o.endHour,
@@ -3250,8 +3351,11 @@
     });
     if (!bounds) return { ok: false, reason: "Cycle end must be after cycle start" };
 
-    const live = isSameManualLiveWindow(task, bounds);
-    const conflict = findManualWindowCompletion(key, type, task, bounds);
+    const live = isSameManualLiveWindow(owned, bounds);
+    let conflict = findManualWindowCompletion(key, type, owned, bounds);
+    if (!conflict.dateStr && found.row && found.row.completed) {
+      conflict = { dateStr: archiveStart, fromClosed: true };
+    }
 
     // Decrement tallies here; do not call removeTaskCompletion with the finish dateStr.
     // Shared boundary finishes resolve to the *next* cycle (exact start match) and would
@@ -3262,23 +3366,52 @@
       } else {
         const amt = getCompletedAmount(state.endgameCompleted, key);
         state.endgameCompleted[key] = Math.max(0, amt - 1);
-        ensureEndgameEarnedArrayLength(game.id, task.id || task.label, Math.max(0, amt - 1));
+        ensureEndgameEarnedArrayLength(game.id, owned.id || owned.label, Math.max(0, amt - 1));
       }
     }
 
     clearManualResetMarksInRange(key, type, bounds.cycleStart, bounds.cycleEnd);
+    // Also clear using drifted draft candidate windows (older Saves may have painted there).
+    startCandidates.forEach((s) => {
+      endCandidates.forEach((e) => {
+        if (s === archiveStart && e === archiveEnd) return;
+        const startMom = getManualResetMomentOnDate(owned, s, game);
+        const endMom = getManualResetEndMomentOnDate(owned, e, game);
+        if (startMom && endMom && endMom.getTime() > startMom.getTime()) {
+          clearManualResetMarksInRange(key, type, startMom, endMom);
+        }
+      });
+    });
 
     if (!live) {
-      upsertManualClosedCycle(task, bounds.startDateStr, bounds.endDateStr, 0);
+      if (found.row) {
+        found.row.completed = 0;
+      } else {
+        upsertManualClosedCycle(owned, archiveStart, archiveEnd, 0);
+      }
+      pruneDriftedManualClosedDuplicates(owned, archiveStart, archiveEnd, {
+        startDateStr,
+        endDateStr,
+        origStartDateStr: o.origStartDateStr,
+        origEndDateStr: o.origEndDateStr,
+        altStartDateStr: o.altStartDateStr,
+        altEndDateStr: o.altEndDateStr,
+        finishDateStr: finishHint,
+      });
     } else {
       // Live window: leave it open/incomplete (still counts as in-progress, not a past skip).
-      const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
+      const closed = Array.isArray(owned.manualClosedCycles) ? owned.manualClosedCycles : [];
       const idx = closed.findIndex((c) => c && c.start === bounds.startDateStr && c.end === bounds.endDateStr);
       if (idx >= 0) closed.splice(idx, 1);
+      owned.manualClosedCycles = closed;
+    }
+
+    if (task !== owned && Array.isArray(task.manualClosedCycles)) {
+      task.manualClosedCycles = (owned.manualClosedCycles || []).slice();
     }
 
     if (type === "endgame") {
-      syncEndgameCompletionDatesFromCalendar(game, task, key);
+      syncEndgameCompletionDatesFromCalendar(game, owned, key);
     }
 
     if (typeof bumpDataVersion === "function") bumpDataVersion();
@@ -3295,13 +3428,25 @@
    */
   function applyManualResetDelete(game, task, taskType, opts) {
     const o = opts || {};
-    if (!game || !task || !isManualResetTask(task)) return { ok: false, reason: "Task not found" };
+    if (!game || !task) return { ok: false, reason: "Task not found" };
     const type = taskType === "endgame" ? "endgame" : "weeklies";
-    const key = game.id + "." + (task.id || task.label);
+    const taskId = task.id || task.label;
+    // Always mutate the live task on the game object (History may hold a stale card reference).
+    const owned =
+      ((type === "endgame" ? game.endgame : game.weeklies) || []).find((t) => (t.id || t.label) === taskId) ||
+      task;
+    if (!isManualResetTask(owned)) return { ok: false, reason: "Task not found" };
+    const key = game.id + "." + (owned.id || owned.label);
 
-    const bounds = buildManualResetBoundsFromParts(task, game, type, {
-      startDateStr: o.startDateStr,
-      endDateStr: o.endDateStr,
+    const startCandidates = [o.startDateStr, o.origStartDateStr, o.altStartDateStr].filter(isValidDateStr);
+    const endCandidates = [o.endDateStr, o.origEndDateStr, o.altEndDateStr].filter(isValidDateStr);
+    const startDateStr = startCandidates[0];
+    const endDateStr = endCandidates[0];
+    if (!startDateStr || !endDateStr) return { ok: false, reason: "Cycle dates required" };
+
+    const bounds = buildManualResetBoundsFromParts(owned, game, type, {
+      startDateStr,
+      endDateStr,
       startHour: o.startHour,
       startMinute: o.startMinute,
       endHour: o.endHour,
@@ -3309,29 +3454,81 @@
     });
     if (!bounds) return { ok: false, reason: "Cycle end must be after cycle start" };
 
-    const live = isSameManualLiveWindow(task, bounds);
-    const conflict = findManualWindowCompletion(key, type, task, bounds);
+    const live = isSameManualLiveWindow(owned, bounds);
+    let conflict = findManualWindowCompletion(key, type, owned, bounds);
+    const finishHint = isValidDateStr(o.finishDateStr)
+      ? o.finishDateStr
+      : conflict.dateStr || startDateStr;
+    const found = findManualClosedCycleIndex(owned, {
+      startDateStr,
+      endDateStr,
+      origStartDateStr: o.origStartDateStr,
+      origEndDateStr: o.origEndDateStr,
+      altStartDateStr: o.altStartDateStr,
+      altEndDateStr: o.altEndDateStr,
+      finishDateStr: finishHint,
+      requireCompleted: true,
+    });
+    if (!conflict.dateStr && found.row && found.row.completed) {
+      conflict = { dateStr: found.row.start, fromClosed: true };
+    }
+    const archiveStart = found.row ? found.row.start : startDateStr;
+    const archiveEnd = found.row ? found.row.end : endDateStr;
 
     // Same as skip: avoid removeTaskCompletion(dateStr) on shared boundary finish days.
-    if (conflict.dateStr) {
+    if (conflict.dateStr || found.row) {
       if (type === "weeklies") {
         state.weekliesCompleted[key] = Math.max(0, getCompletedAmount(state.weekliesCompleted, key) - 1);
       } else {
         const amt = getCompletedAmount(state.endgameCompleted, key);
         state.endgameCompleted[key] = Math.max(0, amt - 1);
-        ensureEndgameEarnedArrayLength(game.id, task.id || task.label, Math.max(0, amt - 1));
+        ensureEndgameEarnedArrayLength(game.id, owned.id || owned.label, Math.max(0, amt - 1));
       }
     }
 
-    clearManualResetMarksInRange(key, type, bounds.cycleStart, bounds.cycleEnd);
+    const archiveBounds = buildManualResetBoundsFromParts(owned, game, type, {
+      startDateStr: archiveStart,
+      endDateStr: archiveEnd,
+      startHour: o.startHour,
+      startMinute: o.startMinute,
+      endHour: o.endHour,
+      endMinute: o.endMinute,
+    });
+    if (archiveBounds) {
+      clearManualResetMarksInRange(key, type, archiveBounds.cycleStart, archiveBounds.cycleEnd);
+    } else {
+      clearManualResetMarksInRange(key, type, bounds.cycleStart, bounds.cycleEnd);
+    }
+    // Also clear using archived moment builders for each candidate pair (TZ / clock drift).
+    startCandidates.forEach((s) => {
+      endCandidates.forEach((e) => {
+        if (s === archiveStart && e === archiveEnd) return;
+        const startMom = getManualResetMomentOnDate(owned, s, game);
+        const endMom = getManualResetEndMomentOnDate(owned, e, game);
+        if (startMom && endMom && endMom.getTime() > startMom.getTime()) {
+          clearManualResetMarksInRange(key, type, startMom, endMom);
+        }
+      });
+    });
 
-    const closed = Array.isArray(task.manualClosedCycles) ? task.manualClosedCycles : [];
-    const idx = closed.findIndex((c) => c && c.start === bounds.startDateStr && c.end === bounds.endDateStr);
-    if (idx >= 0) closed.splice(idx, 1);
-    task.manualClosedCycles = closed;
+    if (!Array.isArray(owned.manualClosedCycles)) owned.manualClosedCycles = [];
+    if (found.idx >= 0) owned.manualClosedCycles.splice(found.idx, 1);
+    pruneDriftedManualClosedDuplicates(owned, archiveStart, archiveEnd, {
+      startDateStr,
+      endDateStr,
+      origStartDateStr: o.origStartDateStr,
+      origEndDateStr: o.origEndDateStr,
+      altStartDateStr: o.altStartDateStr,
+      altEndDateStr: o.altEndDateStr,
+      finishDateStr: finishHint,
+    });
+    // Keep caller's task reference in sync when it was a stale card copy.
+    if (task !== owned && Array.isArray(task.manualClosedCycles)) {
+      task.manualClosedCycles = owned.manualClosedCycles.slice();
+    }
 
     if (type === "endgame") {
-      syncEndgameCompletionDatesFromCalendar(game, task, key);
+      syncEndgameCompletionDatesFromCalendar(game, owned, key);
     }
 
     if (typeof bumpDataVersion === "function") bumpDataVersion();
@@ -8076,6 +8273,8 @@
             periodEnd,
             nextCycleStart: new Date(periodEnd.getTime()),
             completed: c.completed ? 1 : 0,
+            manualStartStr: c.start,
+            manualEndStr: c.end,
           });
         });
         const bounds = getManualResetCycleBounds(task, game, "weeklies");
@@ -8086,6 +8285,8 @@
             periodEnd: bounds.cycleEnd,
             nextCycleStart: bounds.nextCycleStart,
             completed,
+            manualStartStr: getDateStr(bounds.cycleStart),
+            manualEndStr: getDateStr(bounds.cycleEnd),
           });
         }
         tallyCacheSet(cacheKey, result);
@@ -8128,6 +8329,8 @@
             periodEnd,
             nextCycleStart: new Date(periodEnd.getTime()),
             completed: c.completed ? 1 : 0,
+            manualStartStr: c.start,
+            manualEndStr: c.end,
           });
         });
         const bounds = getManualResetCycleBounds(task, game, "endgame");
@@ -8138,6 +8341,8 @@
             periodEnd: bounds.cycleEnd,
             nextCycleStart: bounds.nextCycleStart,
             completed,
+            manualStartStr: getDateStr(bounds.cycleStart),
+            manualEndStr: getDateStr(bounds.cycleEnd),
           });
         }
         tallyCacheSet(cacheKey, result);
@@ -8227,7 +8432,18 @@
     history.forEach((p) => {
       if (p.periodEnd.getTime() > now.getTime()) return;
       if (periodHasCalendarMarkInRange(key, "endgame", p.periodStart, p.periodEnd, p.nextCycleStart)) return;
-      const range = { start: getDateStr(p.periodStart), end: getDateStr(p.periodEnd) };
+      const range = {
+        start:
+          (typeof isValidDateStr === "function" &&
+            isValidDateStr(p.manualStartStr) &&
+            p.manualStartStr) ||
+          getDateStr(p.periodStart),
+        end:
+          (typeof isValidDateStr === "function" &&
+            isValidDateStr(p.manualEndStr) &&
+            p.manualEndStr) ||
+          getDateStr(p.periodEnd),
+      };
       const rangeKey = range.start + "|" + range.end;
       if (completedRangeKeys.has(rangeKey) || seen.has(rangeKey)) return;
       seen.add(rangeKey);
@@ -10838,6 +11054,11 @@
     const items = ctx.draft.items.slice();
     const quiet = { save: false, render: false, processResets: false, skipSave: true, skipRender: true };
     let firstError = null;
+    const taskList = type === "endgame" ? game.endgame : game.weeklies;
+    const ownedTask =
+      (taskList || []).find((t) => (t.id || t.label) === taskId) || task;
+    // Keep draft operations on the in-state task (card refs can go stale after Edit task).
+    ctx.task = ownedTask;
 
     // Prefer original cycle ref for finish remaps when Start was also edited (Phase 3 rehomes first).
     // Phase order: delete → skip → complete → rehome bounds → finish moment → earned.
@@ -10845,13 +11066,28 @@
     // Phase 0: completed → deleted (clears tallies/marks/timestamps; manual also drops closed archive).
     items.forEach((item) => {
       if (item.origStatus !== "completed" || item.status !== "deleted") return;
-      const start = isValidDateStr(item.startStr) ? item.startStr : item.origStartStr;
-      const end = isValidDateStr(item.endStr) ? item.endStr : item.origEndStr;
+      const start = isValidDateStr(item.origStartStr)
+        ? item.origStartStr
+        : isValidDateStr(item.startStr)
+          ? item.startStr
+          : "";
+      const end = isValidDateStr(item.origEndStr)
+        ? item.origEndStr
+        : isValidDateStr(item.endStr)
+          ? item.endStr
+          : "";
       let result;
       if (isManual && typeof applyManualResetDelete === "function") {
-        result = applyManualResetDelete(game, task, type, {
+        result = applyManualResetDelete(game, ownedTask, type, {
           startDateStr: start,
           endDateStr: end,
+          origStartDateStr: item.origStartStr,
+          origEndDateStr: item.origEndStr,
+          altStartDateStr: item.startStr,
+          altEndDateStr: item.endStr,
+          finishDateStr: isValidDateStr(item.origFinishDateStr)
+            ? item.origFinishDateStr
+            : item.finishDateStr,
           ...quiet,
         });
       } else if (typeof applyScheduledCycleSkip === "function") {
@@ -10869,7 +11105,7 @@
           ...quiet,
         });
         if (type === "endgame" && typeof syncEndgameCompletionDatesFromCalendar === "function") {
-          syncEndgameCompletionDatesFromCalendar(game, task, key);
+          syncEndgameCompletionDatesFromCalendar(game, ownedTask, key);
         }
       }
       if (result && !result.ok && result.reason && !firstError) firstError = result.reason;
@@ -10878,13 +11114,28 @@
     // Phase 1: completed → skipped (use draft bounds so an edited window is skipped correctly).
     items.forEach((item) => {
       if (item.origStatus !== "completed" || item.status !== "skipped") return;
-      const start = isValidDateStr(item.startStr) ? item.startStr : item.origStartStr;
-      const end = isValidDateStr(item.endStr) ? item.endStr : item.origEndStr;
+      const start = isValidDateStr(item.origStartStr)
+        ? item.origStartStr
+        : isValidDateStr(item.startStr)
+          ? item.startStr
+          : "";
+      const end = isValidDateStr(item.origEndStr)
+        ? item.origEndStr
+        : isValidDateStr(item.endStr)
+          ? item.endStr
+          : "";
       let result;
       if (isManual && typeof applyManualResetSkip === "function") {
-        result = applyManualResetSkip(game, task, type, {
+        result = applyManualResetSkip(game, ownedTask, type, {
           startDateStr: start,
           endDateStr: end,
+          origStartDateStr: item.origStartStr,
+          origEndDateStr: item.origEndStr,
+          altStartDateStr: item.startStr,
+          altEndDateStr: item.endStr,
+          finishDateStr: isValidDateStr(item.origFinishDateStr)
+            ? item.origFinishDateStr
+            : item.finishDateStr,
           ...quiet,
         });
       } else if (typeof applyScheduledCycleSkip === "function") {
@@ -10901,7 +11152,7 @@
       const finish = isValidDateStr(item.finishDateStr) ? item.finishDateStr : start;
       let result;
       if (isManual && typeof applyManualResetCompletion === "function") {
-        result = applyManualResetCompletion(game, task, type, {
+        result = applyManualResetCompletion(game, ownedTask, type, {
           startDateStr: start,
           endDateStr: end,
           dateStr: finish,
@@ -10934,7 +11185,7 @@
         if (item.origStatus === "skipped") return; // already applied with new bounds in phase 2
         if (!isValidDateStr(item.startStr) || !isValidDateStr(item.endStr)) return;
         if (item.startStr === item.origStartStr && item.endStr === item.origEndStr) return;
-        const entries = getEndgameCompletedPeriodsFromCalendar(game, task, key);
+        const entries = getEndgameCompletedPeriodsFromCalendar(game, ownedTask, key);
         let idx = entries.findIndex(
           (e) => e.range.start === item.origStartStr && e.range.end === item.origEndStr
         );
@@ -10993,7 +11244,7 @@
 
     // Phase 5: endgame earned amounts (match by current or original window).
     if (type === "endgame" && typeof setEndgameEarnedAt === "function") {
-      const entries = getEndgameCompletedPeriodsFromCalendar(game, task, key);
+      const entries = getEndgameCompletedPeriodsFromCalendar(game, ownedTask, key);
       ensureEndgameEarnedArrayLength(gameId, taskId, entries.length);
       const completedDraft = items.filter((i) => i.status === "completed");
       entries.forEach((entry, i) => {
@@ -11017,7 +11268,7 @@
     }
 
     // Refresh draft from persisted state; keep modal open for review.
-    openEarningsModal(gameId, task, type);
+    openEarningsModal(gameId, ownedTask, type);
   }
 
   let endgameCompleteModalCtx = null;
