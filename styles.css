@@ -4008,6 +4008,10 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   z-index: 999;
 }
 
+.modal.modal-stack-top {
+  z-index: 1100;
+}
+
 .modal[hidden] {
   display: none !important;
 }

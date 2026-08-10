@@ -224,6 +224,12 @@ module.exports = {
       assert.ok(modals.includes(needle), "02-modals.js must contain " + needle);
     });
     assert.ok(modals.includes('earningsModalSave'), "Completion History has Save control");
+    assert.ok(modals.includes("function openEarningsMarkCompleteModal"), "skipped cycles can open Mark completed popup");
+    assert.ok(modals.includes("Cycle timeframe (kept)"), "Mark completed popup preserves cycle range");
+    assert.ok(
+      /Mark completed[\s\S]{0,400}openEarningsMarkCompleteModal/.test(modals),
+      "Skipped Mark completed wires finish popup for scheduled + manual"
+    );
     assert.ok(
       modals.includes("Mark skipped") && modals.includes("Mark completed"),
       "manual-reset history exposes completed↔skipped toggle"
@@ -348,6 +354,8 @@ module.exports = {
       "index.html Add Attempt modal must offer Completed/Skipped"
     );
     assert.ok(html.includes("Add Attempt"), "index.html references Add Attempt");
+    assert.ok(html.includes('id="earningsMarkCompleteModal"'), "index.html has Mark completed popup for skipped cycles");
+    assert.ok(html.includes("When was this cycle completed?"), "Mark completed popup asks for finish moment");
     assert.ok(html.includes("firebase-config.js"), "index.html loads firebase-config.js before app");
     assert.ok(
       html.includes("YOUR_API_KEY") || html.includes("isFirebaseConfigured"),

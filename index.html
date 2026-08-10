@@ -803,6 +803,36 @@
     </div>
   </div>
 
+  <!-- Mark skipped cycle completed (Completion History): keep cycle range, pick finish day/time -->
+  <div id="earningsMarkCompleteModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="earningsMarkCompleteModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="earningsMarkCompleteModalTitle">
+      <div class="modal-header">
+        <h3 id="earningsMarkCompleteModalTitle" class="modal-title">When was this cycle completed?</h3>
+        <button type="button" class="icon-btn" id="earningsMarkCompleteModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="earningsMarkCompleteCycleRange" class="settings-hint">Cycle: —</p>
+        <div class="form-row">
+          <label for="earningsMarkCompleteDate">Completion date</label>
+          <input id="earningsMarkCompleteDate" type="date" />
+        </div>
+        <div class="form-row">
+          <label for="earningsMarkCompleteTime">Completion time</label>
+          <input id="earningsMarkCompleteTime" type="time" step="60" />
+        </div>
+        <div class="form-row" id="earningsMarkCompleteCurrencyRow" hidden>
+          <label for="earningsMarkCompleteCurrency">Currency earned</label>
+          <input id="earningsMarkCompleteCurrency" type="number" min="0" step="1" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="earningsMarkCompleteModalCancel">Cancel</button>
+        <button type="button" class="btn btn-add" id="earningsMarkCompleteModalConfirm">Mark completed</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Endgame: currency earned when marking complete -->
   <div id="endgameCompleteModal" class="modal" hidden aria-hidden="true">
     <div class="modal-backdrop" data-close="true"></div>

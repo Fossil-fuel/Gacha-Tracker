@@ -426,6 +426,44 @@ function commitEarningsHistoryDraft(state, gameId, taskId, draftItems) {
 }
 
 /**
+ * Mirror Completion History Save Phase 2 for scheduled weeklies/endgame:
+ * skipped → completed via applyTaskCompletion-equivalent (markComplete).
+ */
+function commitScheduledSkipToComplete(state, type, key, opts) {
+  const o = opts || {};
+  if (type !== "weeklies" && type !== "endgame") return { ok: false, reason: "Unsupported type" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(o.finishDateStr || ""))) {
+    return { ok: false, reason: "Finish date required" };
+  }
+  const game = getGame(state);
+  const task = findTask(game, type, key);
+  if (!task) return { ok: false, reason: "Task not found" };
+  if (task.manualReset) return { ok: false, reason: "Use manual commit path" };
+
+  const finish = markComplete(
+    state,
+    type,
+    key,
+    o.finishDateStr,
+    Number.isFinite(o.hour) ? o.hour : 12,
+    Number.isFinite(o.minute) ? o.minute : 0
+  );
+  if (type === "endgame" && o.currencyValue != null) {
+    const gameId = key.slice(0, key.indexOf("."));
+    const taskId = key.slice(key.indexOf(".") + 1);
+    if (!state.endgameCurrencyEarned[gameId]) state.endgameCurrencyEarned[gameId] = {};
+    const n = Math.max(0, Number(state.endgameCompleted[key]) || 0);
+    const arr = Array.isArray(state.endgameCurrencyEarned[gameId][taskId])
+      ? state.endgameCurrencyEarned[gameId][taskId].slice()
+      : [];
+    while (arr.length < n) arr.push(0);
+    if (n > 0) arr[n - 1] = Math.max(0, Number(o.currencyValue) || 0);
+    state.endgameCurrencyEarned[gameId][taskId] = arr.slice(0, n);
+  }
+  return { ok: true, dateStr: finish, hour: o.hour, minute: o.minute };
+}
+
+/**
  * Move finish day/time inside an existing cycle. Remaps marks + timestamps; no tally bump.
  * Mirrors setCycleCompletionMoment in src/01-core.js.
  */
@@ -1395,6 +1433,7 @@ module.exports = {
   setExtracurricularCompletionMoment,
   getManualPeriodBoundsForDateStr,
   commitEarningsHistoryDraft,
+  commitScheduledSkipToComplete,
   isCompletedInCurrentCycle,
   isCompletedInCycleForDate,
   simulateCalendarDayUncheck,

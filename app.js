@@ -10450,19 +10450,143 @@
 
   function toggleEarningsDraftStatus(uid) {
     const item = findEarningsDraftItem(uid);
-    if (!item || !earningsModal.draft || !earningsModal.draft.isManual) return;
+    if (!item || !earningsModal.draft) return;
     if (item.status === "completed") {
+      // Mark skipped stays manual-reset only (scheduled skips use Delete / history).
+      if (!earningsModal.draft.isManual) return;
       item.status = "skipped";
-    } else if (item.status === "skipped") {
-      item.status = "completed";
-      if (!isValidDateStr(item.finishDateStr)) item.finishDateStr = item.startStr;
-      if (!Number.isFinite(item.hour)) item.hour = 12;
-      if (!Number.isFinite(item.minute)) item.minute = 0;
-      if (earningsModal.taskType === "endgame" && !(Number(item.earned) > 0)) {
-        item.earned = Number(item.maxPot) || 0;
+      markEarningsModalDirty();
+      renderEarningsModalFromDraft();
+      return;
+    }
+    if (item.status === "skipped") {
+      openEarningsMarkCompleteModal(uid);
+    }
+  }
+
+  function clampEarningsFinishToCycle(item, finishDateStr) {
+    let finish = isValidDateStr(finishDateStr) ? finishDateStr : "";
+    if (!finish) finish = isValidDateStr(item.startStr) ? item.startStr : getDateStr();
+    if (isValidDateStr(item.startStr) && finish < item.startStr) finish = item.startStr;
+    // Period end display often shares the next cycle's reset day — keep finish on an owned day.
+    if (isValidDateStr(item.endStr) && finish >= item.endStr) {
+      const d = new Date(item.endStr + "T12:00:00");
+      d.setDate(d.getDate() - 1);
+      finish = getDateStr(d);
+      if (isValidDateStr(item.startStr) && finish < item.startStr) finish = item.startStr;
+    }
+    return finish;
+  }
+
+  const earningsMarkCompleteState = { uid: null, open: false };
+
+  function setEarningsMarkCompleteModalOpen(open) {
+    const el = qs("earningsMarkCompleteModal");
+    if (!el) return;
+    earningsMarkCompleteState.open = !!open;
+    el.hidden = !open;
+    el.setAttribute("aria-hidden", open ? "false" : "true");
+    if (open) {
+      el.classList.add("modal-stack-top");
+      activateModalFocus(el);
+    } else {
+      el.classList.remove("modal-stack-top");
+      earningsMarkCompleteState.uid = null;
+      const earningsEl = qs("earningsModal");
+      if (earningsEl && !earningsEl.hidden) activateModalFocus(earningsEl);
+      else deactivateModalFocus();
+    }
+  }
+
+  function closeEarningsMarkCompleteModal() {
+    setEarningsMarkCompleteModalOpen(false);
+  }
+
+  function openEarningsMarkCompleteModal(uid) {
+    const item = findEarningsDraftItem(uid);
+    if (!item || item.status !== "skipped") return;
+    earningsMarkCompleteState.uid = uid;
+
+    const rangeEl = qs("earningsMarkCompleteCycleRange");
+    const dateInput = qs("earningsMarkCompleteDate");
+    const timeInput = qs("earningsMarkCompleteTime");
+    const currencyRow = qs("earningsMarkCompleteCurrencyRow");
+    const currencyInput = qs("earningsMarkCompleteCurrency");
+
+    const rangeText =
+      item.startStr && item.endStr
+        ? item.startStr + " — " + item.endStr
+        : "(unknown cycle range)";
+    if (rangeEl) {
+      rangeEl.textContent =
+        "Cycle timeframe (kept): " + rangeText + ". Choose when you finished inside this window.";
+    }
+
+    const defaultFinish = clampEarningsFinishToCycle(
+      item,
+      isValidDateStr(item.finishDateStr) ? item.finishDateStr : item.startStr
+    );
+    if (dateInput) {
+      dateInput.value = defaultFinish;
+      if (isValidDateStr(item.startStr)) dateInput.min = item.startStr;
+      // Allow selecting up to day before exclusive end when set.
+      if (isValidDateStr(item.endStr)) {
+        const d = new Date(item.endStr + "T12:00:00");
+        d.setDate(d.getDate() - 1);
+        const maxStr = getDateStr(d);
+        dateInput.max = maxStr >= item.startStr ? maxStr : item.endStr;
+      } else {
+        dateInput.removeAttribute("max");
       }
     }
+    if (timeInput) {
+      timeInput.value = timeToStr(
+        Number.isFinite(item.hour) ? item.hour : 12,
+        Number.isFinite(item.minute) ? item.minute : 0
+      );
+    }
+    const showCurrency = earningsModal.taskType === "endgame";
+    if (currencyRow) currencyRow.hidden = !showCurrency;
+    if (currencyInput) {
+      const earned =
+        Number(item.earned) > 0 ? Number(item.earned) : Math.max(0, Number(item.maxPot) || 0);
+      currencyInput.value = String(earned);
+    }
+
+    setEarningsMarkCompleteModalOpen(true);
+  }
+
+  function confirmEarningsMarkCompleteModal() {
+    const item = findEarningsDraftItem(earningsMarkCompleteState.uid);
+    if (!item || item.status !== "skipped") {
+      closeEarningsMarkCompleteModal();
+      return;
+    }
+    const dateInput = qs("earningsMarkCompleteDate");
+    const timeInput = qs("earningsMarkCompleteTime");
+    const currencyInput = qs("earningsMarkCompleteCurrency");
+    const rawDate = dateInput && isValidDateStr(dateInput.value) ? dateInput.value : "";
+    if (!rawDate) {
+      if (dateInput) dateInput.focus();
+      return;
+    }
+    const finish = clampEarningsFinishToCycle(item, rawDate);
+    const parts =
+      typeof parseTimeStr === "function"
+        ? parseTimeStr((timeInput && timeInput.value) || "12:00")
+        : { hour: 12, minute: 0 };
+
+    item.status = "completed";
+    item.finishDateStr = finish;
+    item.hour = parts.hour;
+    item.minute = parts.minute;
+    // Keep original cycle bounds — do not rewrite startStr/endStr.
+    if (earningsModal.taskType === "endgame") {
+      item.earned = Math.max(0, Number(currencyInput && currencyInput.value) || 0);
+      if (!(item.earned > 0) && Number(item.maxPot) > 0) item.earned = Number(item.maxPot) || 0;
+    }
     markEarningsModalDirty();
+    closeEarningsMarkCompleteModal();
     renderEarningsModalFromDraft();
   }
 
@@ -10626,15 +10750,14 @@
           label.textContent =
             row.startStr + " — " + row.endStr + " (skipped) · Max: " + row.maxPot;
           item.appendChild(label);
-          if (isManual) {
-            const toggleBtn = document.createElement("button");
-            toggleBtn.type = "button";
-            toggleBtn.className = "btn btn-ghost btn-sm earnings-modal-status-toggle";
-            toggleBtn.textContent = "Mark completed";
-            toggleBtn.title = "Move this cycle to Completed (applied on Save)";
-            toggleBtn.addEventListener("click", () => toggleEarningsDraftStatus(row.uid));
-            item.appendChild(toggleBtn);
-          }
+          const toggleBtn = document.createElement("button");
+          toggleBtn.type = "button";
+          toggleBtn.className = "btn btn-ghost btn-sm earnings-modal-status-toggle";
+          toggleBtn.textContent = "Mark completed";
+          toggleBtn.title =
+            "Mark this skipped cycle completed — pick finish date/time (applied on Save). Cycle range is kept.";
+          toggleBtn.addEventListener("click", () => openEarningsMarkCompleteModal(row.uid));
+          item.appendChild(toggleBtn);
           skippedListEl.appendChild(item);
         });
       }
@@ -10672,6 +10795,7 @@
 
   function closeEarningsModal() {
     // Close discards unsaved draft edits (no confirm — typical modal Cancel/Close UX).
+    if (earningsMarkCompleteState.open) closeEarningsMarkCompleteModal();
     earningsModal.gameId = null;
     earningsModal.task = null;
     earningsModal.taskType = null;
@@ -13052,6 +13176,30 @@ function syncTaskCycleEndTimeUI() {
     if (closeBtn) closeBtn.addEventListener("click", closeEarningsModal);
     if (cancelBtn) cancelBtn.addEventListener("click", closeEarningsModal);
     if (saveBtn) saveBtn.addEventListener("click", saveEarningsModal);
+
+    const markEl = qs("earningsMarkCompleteModal");
+    if (markEl) {
+      markEl.addEventListener("click", (e) => {
+        const target = e.target;
+        if (target && target.getAttribute && target.getAttribute("data-close") === "earningsMarkCompleteModal") {
+          closeEarningsMarkCompleteModal();
+        }
+      });
+      const markClose = qs("earningsMarkCompleteModalClose");
+      const markCancel = qs("earningsMarkCompleteModalCancel");
+      const markConfirm = qs("earningsMarkCompleteModalConfirm");
+      if (markClose) markClose.addEventListener("click", closeEarningsMarkCompleteModal);
+      if (markCancel) markCancel.addEventListener("click", closeEarningsMarkCompleteModal);
+      if (markConfirm) markConfirm.addEventListener("click", confirmEarningsMarkCompleteModal);
+      document.addEventListener("keydown", (e) => {
+        if (!earningsMarkCompleteState.open) return;
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          closeEarningsMarkCompleteModal();
+        }
+      });
+    }
   }
 
   function initEndgameCompleteModal() {
