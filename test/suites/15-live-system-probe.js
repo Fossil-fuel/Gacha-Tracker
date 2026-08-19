@@ -14,6 +14,7 @@ const assert = require("../lib/assert");
 const sim = require("../lib/sim-tracker");
 const math = require("../lib/cycle-math");
 const integrity = require("../lib/integrity-sim");
+const productMap = require("../lib/product-map");
 
 const BASE = process.env.GATCHA_TEST_URL || "http://localhost:4000";
 
@@ -59,20 +60,27 @@ module.exports = {
     }
 
     checks.push(
-      check("Live smoke: home brand + D/W/E tabs + app.js ref", () => {
+      check("Live smoke: home brand + every tab/panel/modal from product map", () => {
         assert.ok(html.includes("Gacha Tracker"), "brand");
-        assert.ok(html.includes('data-tab="dailies"'), "dailies");
-        assert.ok(html.includes('data-tab="weeklies"'), "weeklies");
-        assert.ok(html.includes('data-tab="endgame"'), "endgame");
+        const surfaces = productMap.extractFromHtml(html);
+        assert.equal(surfaces.tabs, productMap.expectedSidebarTabs(), "sidebar tabs");
+        assert.equal(surfaces.panels, productMap.expectedPanels(), "panels");
+        assert.equal(surfaces.modals, productMap.expectedModals(), "modals");
+        productMap.SUBVIEWS.forEach((v) => {
+          assert.ok(html.includes(v.needle), v.id);
+        });
         assert.ok(html.includes("app.js"), "app.js ref");
       })
     );
 
     checks.push(
-      check("Live smoke: served app.js has completion + home", () => {
-        assert.ok(appJs.includes("function recordCompletion"), "recordCompletion");
-        assert.ok(appJs.includes("function renderHome"), "renderHome");
-        assert.ok(appJs.includes("function applyTaskCompletion"), "applyTaskCompletion");
+      check("Live smoke: served app.js has every write path + renderer", () => {
+        productMap.WRITE_PATHS.forEach((w) => {
+          assert.ok(appJs.includes(w.name), w.name);
+        });
+        productMap.expectedRenders().forEach((fn) => {
+          assert.ok(appJs.includes("function " + fn), fn);
+        });
         assert.ok(appJs.includes("__gachaLiveProbe") || appJs.includes("liveProbe=1"), "liveProbe surface present in bundle");
       })
     );

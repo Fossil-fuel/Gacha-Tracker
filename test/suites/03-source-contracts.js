@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const assert = require("../lib/assert");
+const productMap = require("../lib/product-map");
 
 const ROOT = path.join(__dirname, "..", "..");
 const SRC = path.join(ROOT, "src");
@@ -111,11 +112,9 @@ module.exports = {
     });
 
     const main = read("src/12-main.js");
-    ["renderHome", "renderDailies", "renderWeeklies", "renderEndgame", "renderAttendance", "renderData", "renderGames"].forEach(
-      (fn) => {
-        assert.ok(main.includes(fn), "12-main.js must dispatch " + fn);
-      }
-    );
+    productMap.expectedRenders().forEach((fn) => {
+      assert.ok(main.includes(fn), "12-main.js must dispatch " + fn);
+    });
     assert.ok(main.includes("function renderSharedChrome"), "12-main.js must define renderSharedChrome");
     assert.ok(main.includes("function renderActiveTab"), "12-main.js must define renderActiveTab");
     assert.ok(main.includes("function renderAll"), "12-main.js must keep renderAll for bulk refresh");

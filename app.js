@@ -3029,7 +3029,22 @@
       idx = closed.findIndex((c) => matches(c) && starts.includes(c.start));
     }
     if (idx < 0 && finish) {
-      idx = closed.findIndex((c) => matches(c) && finish >= c.start && finish <= c.end);
+      let bestIdx = -1;
+      let bestSpan = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < closed.length; i++) {
+        const c = closed[i];
+        if (!matches(c) || finish < c.start || finish > c.end) continue;
+        const startMs = Date.parse(c.start + "T12:00:00");
+        const endMs = Date.parse(c.end + "T12:00:00");
+        const span = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : Number.POSITIVE_INFINITY;
+        // Overlapping Umbral-style windows: finish day can sit in several rows —
+        // pick the tightest cover so Skip/Delete does not hit a sibling.
+        if (span < bestSpan || (span === bestSpan && (bestIdx < 0 || c.start > closed[bestIdx].start))) {
+          bestSpan = span;
+          bestIdx = i;
+        }
+      }
+      idx = bestIdx;
     }
     return { idx, row: idx >= 0 ? closed[idx] : null, closed };
   }
@@ -3225,7 +3240,14 @@
       dateStr + "T" + String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0") + ":00"
     ).getTime();
     if (!Number.isFinite(completeMs) || completeMs < bounds.cycleStart.getTime() || completeMs >= bounds.cycleEnd.getTime()) {
-      return { ok: false, reason: "Completion time must fall inside the cycle start/end window" };
+      const owned = getCalendarDatesForBounds(bounds);
+      const overdue =
+        Number.isFinite(completeMs) && completeMs >= bounds.cycleEnd.getTime() && owned.length > 0;
+      if (!overdue) {
+        return { ok: false, reason: "Completion time must fall inside the cycle start/end window" };
+      }
+      // Live/closed window already ended: land on the last owned day (same as board complete).
+      dateStr = owned[owned.length - 1];
     }
 
     const live = isSameManualLiveWindow(task, bounds);
@@ -3723,6 +3745,41 @@
   }
 
   /**
+   * Cycle used for "complete now" / current-cycle status.
+   * Closed archive windows still win when the date falls inside one; otherwise the live
+   * manual window is used even after it has expired (board stays actionable until Start).
+   */
+  function resolveCycleBoundsForCompletionDate(type, task, game, dateStr) {
+    if (!task || (type !== "weeklies" && type !== "endgame")) return null;
+    const moment = isValidDateStr(dateStr) ? new Date(dateStr + "T12:00:00") : getSimulatedNow();
+    let bounds =
+      type === "weeklies"
+        ? getWeeklyCycleBoundsForMoment(task, moment, game)
+        : getEndgameCycleBoundsForMoment(task, moment, game);
+    if (!bounds && isManualResetTask(task)) {
+      bounds = getManualResetCycleBounds(task, game, type);
+    }
+    return bounds || null;
+  }
+
+  /** Snap a completion date onto owned calendar days of its cycle (never onto an empty fill). */
+  function clampDateStrToTaskCycle(type, task, game, dateStr) {
+    if (!isValidDateStr(dateStr)) return dateStr;
+    const bounds = resolveCycleBoundsForCompletionDate(type, task, game, dateStr);
+    if (!bounds) return dateStr;
+    const owned = getCalendarDatesForBounds(bounds);
+    if (!owned.length) return dateStr;
+    if (owned.indexOf(dateStr) >= 0) return dateStr;
+    if (dateStr > owned[owned.length - 1]) return owned[owned.length - 1];
+    if (dateStr < owned[0]) return owned[0];
+    let best = owned[0];
+    for (let i = 0; i < owned.length; i++) {
+      if (owned[i] <= dateStr) best = owned[i];
+    }
+    return best;
+  }
+
+  /**
    * Completion date inside a cycle. Timestamps in [cycleStart, cycleEnd) win.
    * For adjacent full periods, a bare calendar mark on the shared reset day is ignored
    * (leftover fill from the prior cycle) unless a timestamp proves this-cycle completion.
@@ -3769,10 +3826,8 @@
     const taskList = type === "weeklies" ? game.weeklies : game.endgame;
     const task = (taskList || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const refMoment = isValidDateStr(refDateStr) ? new Date(refDateStr + "T12:00:00") : new Date();
-    const bounds = type === "weeklies"
-      ? getWeeklyCycleBoundsForMoment(task, refMoment, game)
-      : getEndgameCycleBoundsForMoment(task, refMoment, game);
+    const refStr = isValidDateStr(refDateStr) ? refDateStr : getDateStr();
+    const bounds = resolveCycleBoundsForCompletionDate(type, task, game, refStr);
     return findCompletionDateInBounds(key, type, bounds);
   }
 
@@ -3804,13 +3859,13 @@
     if (type === "weeklies") {
       const task = (game.weeklies || []).find((t) => (t.id || t.label) === taskId);
       if (!task) return [dateStr];
-      const bounds = getWeeklyCycleBoundsForMoment(task, new Date(dateStr + "T12:00:00"), game);
+      const bounds = resolveCycleBoundsForCompletionDate("weeklies", task, game, dateStr);
       return getRemainingDatesInCycleFrom(bounds, dateStr);
     }
     if (type === "endgame") {
       const task = (game.endgame || []).find((t) => (t.id || t.label) === taskId);
       if (!task) return [dateStr];
-      const bounds = getEndgameCycleBoundsForMoment(task, new Date(dateStr + "T12:00:00"), game);
+      const bounds = resolveCycleBoundsForCompletionDate("endgame", task, game, dateStr);
       return getRemainingDatesInCycleFrom(bounds, dateStr);
     }
     return [dateStr];
@@ -3827,14 +3882,14 @@
     if (type === "weeklies") {
       const task = (game.weeklies || []).find((t) => (t.id || t.label) === taskId);
       if (!task) return [dateStr];
-      const bounds = getWeeklyCycleBoundsForMoment(task, new Date(dateStr + "T12:00:00"), game);
+      const bounds = resolveCycleBoundsForCompletionDate("weeklies", task, game, dateStr);
       const all = getCalendarDatesForBounds(bounds);
       return all.length ? all : [dateStr];
     }
     if (type === "endgame") {
       const task = (game.endgame || []).find((t) => (t.id || t.label) === taskId);
       if (!task) return [dateStr];
-      const bounds = getEndgameCycleBoundsForMoment(task, new Date(dateStr + "T12:00:00"), game);
+      const bounds = resolveCycleBoundsForCompletionDate("endgame", task, game, dateStr);
       const all = getCalendarDatesForBounds(bounds);
       return all.length ? all : [dateStr];
     }
@@ -5736,8 +5791,9 @@
     if (type === "weeklies" || type === "endgame") {
       // Block writes into cycles after the task's final cycle. Past cycles stay editable
       // in calendar history even after the event has stopped (remove already allowed this).
+      // Manual-reset stays actionable after the live window ends until the next Start.
       const lastBounds = getLastCycleBounds(task, game);
-      if (lastBounds) {
+      if (lastBounds && !isManualResetTask(task)) {
         const moment = new Date(dateStr + "T12:00:00");
         const cycleBounds =
           type === "weeklies"
@@ -5759,6 +5815,12 @@
         }
       }
       if (o.clampToUnlock && dateStr < unlockDateStr) dateStr = unlockDateStr;
+
+      // Manual windows stay on the board after they expire ("Cycle Ended") so they can
+      // still be finished. Today's date is then outside the live window, and fill-remaining
+      // would paint zero days — the checkbox stays Incomplete. Clamp onto owned cycle days.
+      // Same clamp covers scheduled shared-boundary days excluded from the prior cycle.
+      dateStr = clampDateStrToTaskCycle(type, task, game, dateStr);
     }
 
     const already = type === "dailies"
@@ -8103,7 +8165,10 @@
     const game = getGame(gameId);
     const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const bounds = getWeeklyCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
+    const periodStr = getTaskPeriodDateStr("weeklies", task, game, getSimulatedNow());
+    const bounds =
+      resolveCycleBoundsForCompletionDate("weeklies", task, game, periodStr) ||
+      getWeeklyCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
     return findCompletionDateInBounds(key, "weeklies", bounds);
   }
 
@@ -8125,7 +8190,10 @@
     const game = getGame(gameId);
     const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const bounds = getEndgameCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
+    const periodStr = getTaskPeriodDateStr("endgame", task, game, getSimulatedNow());
+    const bounds =
+      resolveCycleBoundsForCompletionDate("endgame", task, game, periodStr) ||
+      getEndgameCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
     return findCompletionDateInBounds(key, "endgame", bounds);
   }
 

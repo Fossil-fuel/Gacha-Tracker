@@ -273,11 +273,59 @@
     );
 
     checks.push(
-      check("Browser: DOM shell still has Home + Weeklies tabs", function () {
-        assert(!!document.querySelector('[data-tab="home"]'), "home tab");
-        assert(!!document.querySelector('[data-tab="weeklies"]'), "weeklies tab");
-        assert(!!document.querySelector('[data-tab="endgame"]'), "endgame tab");
+      check("Browser: DOM shell has every product tab, panel, and modal", function () {
+        var tabs = ["home", "extracurricular", "dailies", "weeklies", "endgame", "attendance"];
+        var panels = [
+          "panel-home",
+          "panel-extracurricular",
+          "panel-dailies",
+          "panel-weeklies",
+          "panel-endgame",
+          "panel-attendance",
+          "panel-data",
+          "panel-games",
+          "panel-about",
+        ];
+        var modals = [
+          "taskModal",
+          "dailyTaskModal",
+          "calendarDayModal",
+          "completionTimeModal",
+          "extracurricularTaskModal",
+          "gameModal",
+          "gameIdentityModal",
+          "earningsModal",
+          "earningsMarkCompleteModal",
+          "endgameCompleteModal",
+          "extracurricularCompleteModal",
+          "settingsModal",
+          "stockBannerPickerModal",
+          "manualResetModal",
+          "manualCompletionModal",
+          "colorWheelModal",
+          "savePresetModal",
+          "deletePresetModal",
+          "clearDataModal",
+          "clearGameDataModal",
+          "clearTimeTrendsModal",
+          "timeTrendsDetailModal",
+          "attendanceSkippedModal",
+          "deleteGameModal",
+          "deleteTaskModal",
+        ];
+        tabs.forEach(function (id) {
+          assert(!!document.querySelector('[data-tab="' + id + '"]'), "tab " + id);
+        });
+        panels.forEach(function (id) {
+          assert(!!document.getElementById(id), "panel " + id);
+        });
+        modals.forEach(function (id) {
+          assert(!!document.getElementById(id), "modal " + id);
+        });
         assert(!!document.getElementById("homeContainer"), "home container");
+        assert(!!document.querySelector('[data-attendance-view="history"]'), "Attendance History");
+        assert(!!document.querySelector('[data-attendance-view="timestamps"]'), "Time Trends");
+        assert(!!document.querySelector('[data-extracurricular-view-mode="history"]'), "Extracurricular History");
       })
     );
 
@@ -441,6 +489,93 @@
           return t.taskType === "dailies" && t.gameId === gameId && t.dateStr === advanced && t.hour === 14;
         });
         assert(ds, "Trends stamp on simulated day @14");
+      })
+    );
+
+    checks.push(
+      check("Browser: complete daily+weekly+endgame+extra keeps calendar, tally, Trends together", function () {
+        var snap = P.getStateSnapshot();
+        snap.completionByDate = {};
+        snap.completionTimestamps = [];
+        snap.dailiesCompleted = {};
+        snap.weekliesCompleted = {};
+        snap.endgameCompleted = {};
+        snap.dailiesAttempted = {};
+        snap.weekliesAttempted = {};
+        snap.endgameAttempted = {};
+        snap.extracurricularTasks = [
+          { id: "live_extra", gameId: gameId, label: "Live Extra", startDate: "2026-07-01", endDate: "2026-08-31", currency: 10 },
+        ];
+        snap.extracurricularCompleted = {};
+        snap.extracurricularCompletedAt = {};
+        P.loadStateSnapshot(snap);
+
+        var d = P.applyTaskCompletion("dailies", gameId, {
+          dateStr: "2026-08-03",
+          hour: 14,
+          minute: 0,
+          save: false,
+          render: false,
+          processResets: false,
+        });
+        assert(d && d.ok, "daily complete");
+        var w = P.applyTaskCompletion("weeklies", wKey, {
+          dateStr: "2026-08-03",
+          hour: 19,
+          minute: 0,
+          save: false,
+          render: false,
+          processResets: false,
+        });
+        assert(w && w.ok, "weekly complete");
+        var e = P.applyTaskCompletion("endgame", eKey, {
+          dateStr: "2026-08-03",
+          hour: 21,
+          minute: 0,
+          save: false,
+          render: false,
+          processResets: false,
+        });
+        assert(e && e.ok, "endgame complete");
+
+        var after = P.getStateSnapshot();
+        assert((Number(after.dailiesCompleted[gameId]) || 0) >= 1, "Games daily tally");
+        assert((Number(after.weekliesCompleted[wKey]) || 0) >= 1, "Games weekly tally");
+        assert((Number(after.endgameCompleted[eKey]) || 0) >= 1, "Games endgame tally");
+        assert(
+          after.completionByDate["2026-08-03"] &&
+            after.completionByDate["2026-08-03"].dailies.indexOf(gameId) >= 0,
+          "History daily"
+        );
+        assert(
+          after.completionByDate["2026-08-03"] &&
+            after.completionByDate["2026-08-03"].weeklies.indexOf(wKey) >= 0,
+          "History weekly finish"
+        );
+        var weeklyFill = Object.keys(after.completionByDate).filter(function (ds) {
+          return (after.completionByDate[ds].weeklies || []).indexOf(wKey) >= 0;
+        });
+        assert(weeklyFill.length > 1, "weekly fill-remaining on History");
+        var weeklyStamps = (after.completionTimestamps || []).filter(function (t) {
+          return t.taskType === "weeklies" && t.taskId === "weekly_a";
+        });
+        assert(weeklyStamps.length === 1, "Trends one weekly finish");
+        assert(P.isCompletedInCycleForDate(wKey, "weeklies", "2026-08-03"), "Home/board weekly done");
+        assert(P.isCompletedInCycleForDate(eKey, "endgame", "2026-08-03"), "Home/board endgame done");
+
+        after.extracurricularCompleted.live_extra = true;
+        P.loadStateSnapshot(after);
+        var extra = P.setExtracurricularCompletionMoment("live_extra", "2026-08-03", 16, 0, {
+          skipSave: true,
+          skipRender: true,
+        });
+        assert(extra && extra.ok, "extra complete");
+        var extraSnap = P.getStateSnapshot();
+        assert(extraSnap.extracurricularCompleted.live_extra, "Home extra done");
+        var extraStamp = (extraSnap.completionTimestamps || []).some(function (t) {
+          return t.taskType === "extracurricular" && t.taskId === "live_extra" && t.hour === 16;
+        });
+        assert(extraStamp, "Trends extra stamp");
       })
     );
   } finally {

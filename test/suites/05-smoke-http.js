@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("../lib/assert");
+const productMap = require("../lib/product-map");
 
 const BASE = process.env.GATCHA_TEST_URL || "http://localhost:4000";
 
@@ -26,16 +27,22 @@ module.exports = {
     }
 
     assert.ok(html.includes("Gacha Tracker"), "home page title/brand present");
-    assert.ok(html.includes('data-tab="dailies"'), "dailies tab present in served HTML");
-    assert.ok(html.includes('data-tab="weeklies"'), "weeklies tab present");
-    assert.ok(html.includes('data-tab="endgame"'), "endgame tab present");
+    const surfaces = productMap.extractFromHtml(html);
+    assert.equal(surfaces.tabs, productMap.expectedSidebarTabs(), "served HTML sidebar tabs");
+    assert.equal(surfaces.panels, productMap.expectedPanels(), "served HTML panels");
+    assert.equal(surfaces.modals, productMap.expectedModals(), "served HTML modals");
+    productMap.SUBVIEWS.forEach((v) => {
+      assert.ok(html.includes(v.needle), "served HTML has " + v.id);
+    });
     assert.ok(html.includes("app.js"), "app.js script referenced");
 
     const app = await fetchText(BASE + "/app.js");
-    assert.ok(app.includes("function recordCompletion"), "served app.js has recordCompletion");
-    assert.ok(app.includes("function renderHome"), "served app.js has renderHome");
-    assert.ok(app.includes("function setCycleCompletionMoment"), "served app.js has finish-moment edits");
-    assert.ok(app.includes("function setExtracurricularCompletionMoment"), "served app.js has extracurricular moment edits");
+    productMap.WRITE_PATHS.forEach((w) => {
+      assert.ok(app.includes(w.name), "served app.js has " + w.name);
+    });
+    productMap.expectedRenders().forEach((fn) => {
+      assert.ok(app.includes("function " + fn), "served app.js has " + fn);
+    });
     assert.ok(app.includes("Only applies for manual-reset endgame"), "served app.js locks Start/End to manual-reset");
 
     const css = await fetchText(BASE + "/styles.css");

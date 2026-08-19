@@ -153,21 +153,44 @@ function markComplete(state, type, key, dateStr, hour, minute) {
   if (type === "dailies") {
     const day = ensureDay(state, dateStr);
     if (day.dailies.includes(key)) return completion;
-  } else if (isCompletedInCycleForDate(state, type, key, dateStr)) {
-    return completion;
-  }
-
-  if (type === "dailies") {
-    const day = ensureDay(state, dateStr);
     if (!day.dailies.includes(key)) day.dailies.push(key);
   } else {
     const task = findTask(game, type, key);
     if (!task) throw new Error("Unknown task " + key);
-    const cycle = math.getDatesInCycle(task, dateStr);
-    if (type === "endgame") {
-      completion = math.clampCompletionToUnlock(task, cycle, dateStr);
+    let fillDates = null;
+    // Mirror resolveCycleBoundsForCompletionDate: overdue manual completes fill the
+    // live window only, never a scheduled grid that can paint outside History.
+    if (task.manualReset) {
+      let bounds = getManualPeriodBoundsForDateStr(task, type, dateStr);
+      if (!bounds && task.dateStarted && task.manualDueDateStr) {
+        bounds = getManualPeriodBoundsForDateStr(task, type, task.dateStarted);
+      }
+      if (bounds) {
+        const owned = math.getCalendarDatesInCycleRange(
+          bounds.cycleStart,
+          bounds.cycleEnd,
+          bounds.nextCycleStart
+        );
+        if (owned.length && owned.indexOf(completion) < 0) {
+          if (completion > owned[owned.length - 1]) completion = owned[owned.length - 1];
+          else if (completion < owned[0]) completion = owned[0];
+        }
+        fillDates = owned.filter((ds) => ds >= completion);
+        if (!fillDates.length && owned.length) fillDates = [owned[owned.length - 1]];
+      }
     }
-    math.getRemainingDatesFrom(task, completion).forEach((ds) => {
+    if (isCompletedInCycleForDate(state, type, key, completion)) return completion;
+    if (!fillDates) {
+      const cycle = math.getDatesInCycle(task, completion);
+      if (type === "endgame") {
+        completion = math.clampCompletionToUnlock(task, cycle, completion);
+      }
+      fillDates = math.getRemainingDatesFrom(task, completion);
+    } else if (type === "endgame") {
+      completion = math.clampCompletionToUnlock(task, fillDates, completion);
+      fillDates = fillDates.filter((ds) => ds >= completion);
+    }
+    fillDates.forEach((ds) => {
       const day = ensureDay(state, ds);
       if (!day[type].includes(key)) day[type].push(key);
     });
@@ -627,6 +650,85 @@ function setEndgameCompletionDate(state, gameId, taskId, index, start, end) {
   return { ok: true, applied: true };
 }
 
+/** Mark an extracurricular complete and stamp Trends (Home checkbox + Completed editors). */
+function completeExtracurricular(state, taskId, dateStr, hour, minute) {
+  if (!state.extracurricularCompleted) state.extracurricularCompleted = {};
+  state.extracurricularCompleted[taskId] = true;
+  return setExtracurricularCompletionMoment(state, taskId, dateStr, hour, minute);
+}
+
+function uncompleteExtracurricular(state, taskId) {
+  if (state.extracurricularCompleted) state.extracurricularCompleted[taskId] = false;
+  if (state.extracurricularCompletedAt) delete state.extracurricularCompletedAt[taskId];
+  state.completionTimestamps = (state.completionTimestamps || []).filter(
+    (t) => !(t && t.taskType === "extracurricular" && String(t.taskId || "") === String(taskId))
+  );
+}
+
+/** Cross-tab snapshot: Home + Games tallies + Data + Attendance day + Trends. */
+function getProductSnapshot(state, opts) {
+  const game = getGame(state);
+  const today = (opts && opts.today) || state.today;
+  const extraIds = (state.extracurricularTasks || []).map((t) => t.id).filter(Boolean);
+  const dailyStamps = (state.completionTimestamps || []).filter(
+    (t) => t.taskType === "dailies" && t.gameId === game.id
+  );
+  const extraStamps = (state.completionTimestamps || []).filter((t) => t.taskType === "extracurricular");
+  const day = state.completionByDate[today] || { dailies: [], weeklies: [], endgame: [] };
+  return {
+    today,
+    home: {
+      dailies: isCompletedInCycleForDate(state, "dailies", game.id, today),
+      weeklies: (game.weeklies || []).map((t) => {
+        const key = taskKey(game, t);
+        return { key, completed: isCompletedInCycleForDate(state, "weeklies", key, today) };
+      }),
+      endgame: (game.endgame || []).map((t) => {
+        const key = taskKey(game, t);
+        return { key, completed: isCompletedInCycleForDate(state, "endgame", key, today) };
+      }),
+      extracurricular: extraIds.map((id) => !!(state.extracurricularCompleted && state.extracurricularCompleted[id])),
+    },
+    games: {
+      dailiesCompleted: Number(state.dailiesCompleted[game.id]) || 0,
+      weeklies: Object.fromEntries(
+        (game.weeklies || []).map((t) => {
+          const key = taskKey(game, t);
+          return [key, Number(state.weekliesCompleted[key]) || 0];
+        })
+      ),
+      endgame: Object.fromEntries(
+        (game.endgame || []).map((t) => {
+          const key = taskKey(game, t);
+          return [key, Number(state.endgameCompleted[key]) || 0];
+        })
+      ),
+    },
+    data: getDataTotals(state, game),
+    attendanceToday: {
+      dailies: (day.dailies || []).slice(),
+      weeklies: (day.weeklies || []).slice(),
+      endgame: (day.endgame || []).slice(),
+    },
+    trends: {
+      dailyStamps: dailyStamps.length,
+      extraStamps: extraStamps.length,
+      weeklies: Object.fromEntries(
+        (game.weeklies || []).map((t) => {
+          const key = taskKey(game, t);
+          return [key, getTrendEvents(state, "weeklies", key).length];
+        })
+      ),
+      endgame: Object.fromEntries(
+        (game.endgame || []).map((t) => {
+          const key = taskKey(game, t);
+          return [key, getTrendEvents(state, "endgame", key).length];
+        })
+      ),
+    },
+  };
+}
+
 /** Update extracurricular completedAt + stamp (mirror setExtracurricularCompletionMoment). */
 function setExtracurricularCompletionMoment(state, taskId, dateStr, hour, minute) {
   if (!state.extracurricularCompleted || !state.extracurricularCompleted[taskId]) {
@@ -663,7 +765,10 @@ function isCompletedInCycleForDate(state, type, key, refDateStr) {
   const game = getGame(state);
   const task = findTask(game, type, key);
   if (!task) return false;
-  const bounds = math.getCycleBoundsForMoment(task, new Date(refDateStr + "T12:00:00"));
+  let bounds = task.manualReset
+    ? getManualPeriodBoundsForDateStr(task, type, refDateStr) ||
+      (task.dateStarted ? getManualPeriodBoundsForDateStr(task, type, task.dateStarted) : null)
+    : math.getCycleBoundsForMoment(task, new Date(refDateStr + "T12:00:00"));
   if (!bounds) return false;
   const marks = marksByDateForKey(state, type, key);
   const stamps = timestampsForKey(state, type, key);
@@ -782,7 +887,18 @@ function markIncomplete(state, type, key, dateStr) {
     const task = findTask(game, type, key);
     if (!task) return;
     // Clear from earliest marked day in cycle (or provided date) through end
-    const cycle = math.getDatesInCycle(task, dateStr);
+    let cycle = math.getDatesInCycle(task, dateStr);
+    if (task.manualReset) {
+      let bounds = getManualPeriodBoundsForDateStr(task, type, dateStr);
+      if (!bounds && task.dateStarted) bounds = getManualPeriodBoundsForDateStr(task, type, task.dateStarted);
+      if (bounds) {
+        cycle = math.getCalendarDatesInCycleRange(
+          bounds.cycleStart,
+          bounds.cycleEnd,
+          bounds.nextCycleStart
+        );
+      }
+    }
     let first = null;
     for (const ds of cycle) {
       if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) {
@@ -791,7 +907,9 @@ function markIncomplete(state, type, key, dateStr) {
       }
     }
     if (!first) first = dateStr;
-    dates = math.getRemainingDatesFrom(task, first);
+    dates = task.manualReset && cycle.length
+      ? cycle.filter((ds) => ds >= first)
+      : math.getRemainingDatesFrom(task, first);
   }
   dates.forEach((ds) => {
     const day = state.completionByDate[ds];
@@ -1409,6 +1527,7 @@ function getAttendanceSkippedGroups(state, type, includeMap) {
 /** Persistable subset mirroring app buildSavePayload fields used by core features. */
 function buildSavePayload(state) {
   return {
+    today: state.today,
     games: state.games,
     completionByDate: state.completionByDate,
     completionTimestamps: state.completionTimestamps,
@@ -1420,6 +1539,9 @@ function buildSavePayload(state) {
     endgameAttempted: state.endgameAttempted,
     endgameCurrencyEarned: state.endgameCurrencyEarned,
     endgameCurrencyPotential: state.endgameCurrencyPotential,
+    extracurricularTasks: state.extracurricularTasks || [],
+    extracurricularCompleted: state.extracurricularCompleted || {},
+    extracurricularCompletedAt: state.extracurricularCompletedAt || {},
     historyCompact: state.historyCompact || null,
     dataVersion: state.dataVersion || 0,
     schemaVersion: state.schemaVersion || 0,
@@ -1457,7 +1579,8 @@ function loadState(store, key) {
   const raw = store.getItem(k);
   if (!raw) return null;
   const parsed = JSON.parse(raw);
-  const state = createFixture({ today: "2026-07-31" });
+  const state = createFixture({ today: parsed.today || "2026-07-31" });
+  if (parsed.today) state.today = parsed.today;
   if (parsed.games) state.games = parsed.games;
   if (parsed.completionByDate) state.completionByDate = parsed.completionByDate;
   if (Array.isArray(parsed.completionTimestamps)) state.completionTimestamps = parsed.completionTimestamps;
@@ -1468,6 +1591,9 @@ function loadState(store, key) {
   );
   if (parsed.endgameCurrencyEarned) state.endgameCurrencyEarned = parsed.endgameCurrencyEarned;
   if (parsed.endgameCurrencyPotential) state.endgameCurrencyPotential = parsed.endgameCurrencyPotential;
+  if (Array.isArray(parsed.extracurricularTasks)) state.extracurricularTasks = parsed.extracurricularTasks;
+  if (parsed.extracurricularCompleted) state.extracurricularCompleted = parsed.extracurricularCompleted;
+  if (parsed.extracurricularCompletedAt) state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
   if (parsed.historyCompact) state.historyCompact = parsed.historyCompact;
   state.dataVersion = Number(parsed.dataVersion) || 0;
   state.schemaVersion = Number(parsed.schemaVersion) || 0;
@@ -1491,6 +1617,9 @@ module.exports = {
   setCycleCompletionMoment,
   setEndgameCompletionDate,
   setExtracurricularCompletionMoment,
+  completeExtracurricular,
+  uncompleteExtracurricular,
+  getProductSnapshot,
   getManualPeriodBoundsForDateStr,
   commitEarningsHistoryDraft,
   commitScheduledSkipToComplete,

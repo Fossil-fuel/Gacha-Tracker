@@ -806,6 +806,55 @@ module.exports = {
     );
 
     checks.push(
+      check("Sim: overdue manual endgame complete from today lands in live window", () => {
+        // Board keeps expired manual tasks actionable; completing "today" used to paint
+        // zero days because today is outside the live window.
+        const state = sim.createFixture({ today: "2026-08-18" });
+        const game = sim.getGame(state);
+        const umbral = {
+          id: "umbral_overdue",
+          label: "Umbral Monument",
+          weekStartHour: 4,
+          weekStartMinute: 0,
+          dateStarted: "2026-07-17",
+          manualReset: true,
+          manualDueTbd: false,
+          manualDueDateStr: "2026-08-01",
+          manualDueHour: 4,
+          manualDueMinute: 0,
+          currency: 1200,
+          manualClosedCycles: [],
+        };
+        game.endgame.push(umbral);
+        const key = sim.taskKey(game, umbral);
+        state.endgameCompleted[key] = 0;
+
+        const finish = sim.markComplete(state, "endgame", key, "2026-08-18", 15, 0);
+        assert.ok(finish <= "2026-08-01", "clamped into live window, not left on today");
+        assert.ok(
+          (state.completionByDate[finish] && (state.completionByDate[finish].endgame || []).includes(key)),
+          "owned finish day marked"
+        );
+        assert.equal(
+          sim.isCompletedInCycleForDate(state, "endgame", key, "2026-07-17"),
+          true,
+          "live window counts as complete"
+        );
+        assert.equal(Number(state.endgameCompleted[key]) || 0, 1, "tally bumped once");
+        const again = sim.markComplete(state, "endgame", key, "2026-08-18", 16, 0);
+        assert.equal(Number(state.endgameCompleted[key]) || 0, 1, "second complete does not double-count");
+        assert.equal(again, finish, "already-complete returns clamped finish");
+        sim.markIncomplete(state, "endgame", key, "2026-08-18");
+        assert.equal(
+          sim.isCompletedInCycleForDate(state, "endgame", key, "2026-07-17"),
+          false,
+          "uncomplete from today clears the overdue live window"
+        );
+        assert.equal(Number(state.endgameCompleted[key]) || 0, 0, "tally restored after uncomplete");
+      })
+    );
+
+    checks.push(
       check("Sim: past Add (skipped→completed Save) paints finish + fill; visible past current live", () => {
         const state = sim.createFixture({ today: "2026-08-07" });
         const game = sim.getGame(state);
@@ -1004,6 +1053,9 @@ module.exports = {
         assert.ok(html.includes('id="earningsModalSave"'));
         assert.ok(core.includes("if (!game || !task || !isManualResetTask(task)) return;"));
         assert.ok(core.includes("function getManualPeriodBoundsForDateStr"));
+        assert.ok(core.includes("function clampDateStrToTaskCycle"));
+        assert.ok(core.includes("function resolveCycleBoundsForCompletionDate"));
+        assert.ok(core.includes("dateStr = clampDateStrToTaskCycle(type, task, game, dateStr)"));
         assert.ok(core.includes("function getManualResetEndMomentOnDate"));
         assert.ok(core.includes("function clearManualResetMarksInRange"));
         assert.ok(
