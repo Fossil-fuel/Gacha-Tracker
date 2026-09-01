@@ -202,7 +202,9 @@ function findCalendarCompletionInBounds(marksByDate, key, bounds) {
   const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
   const adjacent = bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === bounds.cycleEnd.getTime();
   const startDateStr = formatLocalDate(bounds.cycleStart);
+  const firstOwned = dates[0];
   for (const ds of dates) {
+    if (firstOwned && ds === firstOwned) continue;
     if (adjacent && ds === startDateStr) continue;
     if ((marksByDate[ds] || []).includes(key)) return ds;
   }

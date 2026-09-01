@@ -301,6 +301,53 @@ module.exports = {
       })
     );
 
+    checks.push(
+      check("Simulation: 6-week Apocalyptic Shadow legacy bleed after Aug 31 reset", () => {
+        const state = sim.createFixture({ today: "2026-08-31" });
+        const game = sim.getGame(state);
+        game.endgame.push({
+          id: "apocalyptic",
+          label: "Apocalyptic Shadow",
+          weekStartDay: 1,
+          weekStartHour: 4,
+          dateStarted: "2026-02-02",
+          frequencyEvery: 6,
+          frequencyUnit: "week",
+          timeLimitEvery: 6,
+          timeLimitUnit: "week",
+          currency: 900,
+        });
+        const task = game.endgame.find((t) => t.id === "apocalyptic");
+        const key = sim.taskKey(game, task);
+        const afterReset = new Date(2026, 7, 31, 21, 30, 0);
+
+        sim.markCompleteWithLegacyBoundaryBleed(state, "endgame", key, "2026-07-25", 14);
+
+        assert.ok(
+          (state.completionByDate["2026-08-31"] || {}).endgame &&
+            (state.completionByDate["2026-08-31"].endgame || []).includes(key),
+          "legacy bleed mark on shared reset day"
+        );
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", key, afterReset),
+          false,
+          "new 6-week cycle incomplete despite bleed mark"
+        );
+
+        sim.cleanupCycleBoundaryBleedMarks(state, afterReset);
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", key, afterReset),
+          false,
+          "still incomplete after cleanup"
+        );
+        assert.ok(
+          !(state.completionByDate["2026-08-31"] || {}).endgame ||
+            !(state.completionByDate["2026-08-31"].endgame || []).includes(key),
+          "bleed mark removed from Aug 31"
+        );
+      })
+    );
+
     const failed = checks.filter((c) => !c.ok);
     return {
       ok: failed.length === 0,

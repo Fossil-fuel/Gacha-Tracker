@@ -3656,10 +3656,30 @@
     return best;
   }
 
+  /** Whether any completion timestamp falls inside [cycleStart, cycleEnd). */
+  function hasCompletionTimestampInBounds(key, type, bounds, gameId, taskId) {
+    if (!bounds) return false;
+    const startMs = bounds.cycleStart.getTime();
+    const endMs = bounds.cycleEnd.getTime();
+    for (const t of state.completionTimestamps || []) {
+      if (t.taskType !== type || t.gameId !== gameId) continue;
+      if (type !== "dailies" && t.taskId !== taskId) continue;
+      if (!isValidDateStr(t.dateStr)) continue;
+      const h = Number.isFinite(t.hour) ? t.hour : 12;
+      const m = Number.isFinite(t.minute) ? t.minute : 0;
+      const ms = new Date(
+        t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+      ).getTime();
+      if (!Number.isFinite(ms)) continue;
+      if (ms >= startMs && ms < endMs) return true;
+    }
+    return false;
+  }
+
   /**
    * Completion date inside a cycle. Timestamps in [cycleStart, cycleEnd) win.
-   * For adjacent full periods, a bare calendar mark on the shared reset day is ignored
-   * (leftover fill from the prior cycle) unless a timestamp proves this-cycle completion.
+   * Bare calendar marks on the shared reset / first-owned day are ignored unless a
+   * timestamp proves this-cycle completion (leftover fill from the prior cycle).
    */
   function findCompletionDateInBounds(key, type, bounds) {
     if (!bounds) return null;
@@ -3672,6 +3692,7 @@
     const endMs = bounds.cycleEnd.getTime();
     const adjacent = bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === endMs;
     const startDateStr = getDateStr(bounds.cycleStart);
+    const firstOwned = dates[0];
 
     for (const t of state.completionTimestamps || []) {
       if (t.taskType !== type || t.gameId !== gameId) continue;
@@ -3687,6 +3708,8 @@
     }
 
     for (const ds of dates) {
+      // First owned day = shared reset boundary; calendar-only marks there are legacy bleed.
+      if (firstOwned && ds === firstOwned) continue;
       if (adjacent && ds === startDateStr) continue;
       if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) return ds;
     }
@@ -7734,17 +7757,37 @@
       ["weeklies", "endgame"].forEach((type) => {
         (game[type] || []).forEach((task) => {
           const key = game.id + "." + (task.id || task.label);
+          const dot = key.indexOf(".");
+          const gameId = dot > 0 ? key.slice(0, dot) : key;
+          const taskId = dot > 0 ? key.slice(dot + 1) : "";
           const bounds = getCycleBoundsForTaskType(type, task, now, game);
           if (!bounds || !(bounds.nextCycleStart instanceof Date)) return;
           if (bounds.nextCycleStart.getTime() !== bounds.cycleEnd.getTime()) return;
-          if (findCompletionDateInBounds(key, type, bounds) != null) return;
+          if (hasCompletionTimestampInBounds(key, type, bounds, gameId, taskId)) return;
+          const dates = getCalendarDatesForBounds(bounds);
+          const firstOwned = dates[0];
           const startDateStr = getDateStr(bounds.cycleStart);
-          const dayData = state.completionByDate[startDateStr];
-          if (!dayData || !dayData[type]) return;
-          const idx = dayData[type].indexOf(key);
-          if (idx < 0) return;
-          dayData[type].splice(idx, 1);
-          changed = true;
+          const toClean = new Set();
+          if (
+            firstOwned &&
+            (state.completionByDate[firstOwned] && state.completionByDate[firstOwned][type] || []).includes(key)
+          ) {
+            toClean.add(firstOwned);
+          }
+          if (
+            startDateStr !== firstOwned &&
+            (state.completionByDate[startDateStr] && state.completionByDate[startDateStr][type] || []).includes(key)
+          ) {
+            toClean.add(startDateStr);
+          }
+          toClean.forEach((ds) => {
+            const dayData = state.completionByDate[ds];
+            if (!dayData || !dayData[type]) return;
+            const idx = dayData[type].indexOf(key);
+            if (idx < 0) return;
+            dayData[type].splice(idx, 1);
+            changed = true;
+          });
         });
       });
     });
