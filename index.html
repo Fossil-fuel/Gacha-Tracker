@@ -295,6 +295,10 @@
               <button type="button" class="btn btn-ghost btn-sm" id="taskBannerStockBtn">Library / Stock</button>
               <button type="button" class="btn btn-ghost btn-sm" id="taskBannerSaveLibraryBtn" hidden>Save to My Images</button>
               <button type="button" class="btn btn-ghost btn-sm" id="taskBannerClearBtn" hidden>Clear</button>
+              <label class="task-banner-keep-full" id="taskBannerKeepFullWrap" for="taskBannerKeepFullImage" hidden title="On (filled) = save the full upload so you can re-frame later. Off (outline) = on save, trim unused edges to your Home/Games/Board frames.">
+                <input type="checkbox" id="taskBannerKeepFullImage" class="fill-toggle" checked aria-label="Keep full image" />
+                <span>Keep full image</span>
+              </label>
               <input type="file" id="taskBannerFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
             </div>
             <div id="taskBannerCropWrap" class="task-banner-crop-wrap" aria-label="Banner image editor">
@@ -592,6 +596,10 @@
               <button type="button" class="btn btn-ghost btn-sm" id="extraBannerStockBtn">Library / Stock</button>
               <button type="button" class="btn btn-ghost btn-sm" id="extraBannerSaveLibraryBtn" hidden>Save to My Images</button>
               <button type="button" class="btn btn-ghost btn-sm" id="extraBannerClearBtn" hidden>Clear</button>
+              <label class="task-banner-keep-full" id="extraBannerKeepFullWrap" for="extraBannerKeepFullImage" hidden title="On (filled) = save the full upload so you can re-frame later. Off (outline) = on save, trim unused edges to your banner frames.">
+                <input type="checkbox" id="extraBannerKeepFullImage" class="fill-toggle" checked aria-label="Keep full image" />
+                <span>Keep full image</span>
+              </label>
               <input type="file" id="extraBannerFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
             </div>
             <div id="extraBannerCropWrap" class="task-banner-crop-wrap" aria-label="Banner image editor">
@@ -1005,6 +1013,43 @@
           </section>
           <section id="settings-section-data" class="settings-section" aria-labelledby="settings-data-heading">
             <h4 id="settings-data-heading" class="settings-section-title">Data &amp; Backup</h4>
+            <div class="settings-storage-usage" id="settingsStorageUsage" aria-label="Browser storage usage">
+              <div class="settings-label">Browser storage</div>
+              <div class="settings-storage-warning" id="settingsStorageWarning" hidden role="status"></div>
+              <p class="settings-storage-surfaces" id="settingsStorageSurfaces" data-storage-surfaces>Checking storage surfaces…</p>
+              <div class="settings-storage-bars" id="settingsStorageBars">
+                <div class="settings-storage-bar-block" data-storage-bar="indexedDB">
+                  <div class="settings-storage-bar-label">IndexedDB <span class="settings-storage-bar-role">(primary save)</span></div>
+                  <div class="settings-storage-track" data-storage-track role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="IndexedDB usage">
+                    <div class="settings-storage-fill settings-storage-fill-idb" data-storage-fill style="width: 0%"></div>
+                  </div>
+                  <p class="settings-storage-usage-text" data-storage-usage>Measuring…</p>
+                </div>
+                <div class="settings-storage-bar-block" data-storage-bar="localStorage">
+                  <div class="settings-storage-bar-label">localStorage <span class="settings-storage-bar-role">(slim backup)</span></div>
+                  <div class="settings-storage-track" data-storage-track role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="localStorage usage">
+                    <div class="settings-storage-fill settings-storage-fill-local" data-storage-fill style="width: 0%"></div>
+                  </div>
+                  <p class="settings-storage-usage-text" data-storage-usage>Measuring…</p>
+                </div>
+                <div class="settings-storage-bar-block" data-storage-bar="myImages">
+                  <div class="settings-storage-bar-label">My Images <span class="settings-storage-bar-role">(inside IndexedDB)</span></div>
+                  <div class="settings-storage-track" data-storage-track role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="My Images size">
+                    <div class="settings-storage-fill settings-storage-fill-images" data-storage-fill style="width: 0%"></div>
+                  </div>
+                  <p class="settings-storage-usage-text" data-storage-usage>Measuring…</p>
+                </div>
+                <div class="settings-storage-bar-block" data-storage-bar="firebase">
+                  <div class="settings-storage-bar-label">Firebase <span class="settings-storage-bar-role">(cloud, not browser disk)</span></div>
+                  <div class="settings-storage-track settings-storage-track-cloud" data-storage-track role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Firebase sync status">
+                    <div class="settings-storage-fill settings-storage-fill-firebase" data-storage-fill style="width: 0%"></div>
+                  </div>
+                  <p class="settings-storage-usage-text" data-storage-usage>Checking…</p>
+                </div>
+              </div>
+              <p class="settings-storage-detail" id="settingsStorageDetail" data-storage-detail></p>
+              <span class="settings-hint">The IndexedDB “of X GB” number comes from Opera’s storage estimate. On Chromium browsers that is usually a theoretical site ceiling (often tied to total disk size), not free space left on your drive. You may not be able to use all of it.</span>
+            </div>
             <div class="settings-row">
               <button type="button" class="btn btn-ghost" id="settingsExportBtn">Export data</button>
               <span class="settings-hint">Download your data as a JSON file</span>
@@ -1160,20 +1205,6 @@
               </div>
 
             </div>
-            <div class="settings-row">
-              <label class="settings-label" for="settingsCompactMonths">Compact history older than</label>
-              <select id="settingsCompactMonths" class="settings-select" aria-label="Months of calendar history to keep">
-                <option value="3">3 months</option>
-                <option value="6">6 months</option>
-                <option value="12" selected>12 months</option>
-                <option value="24">24 months</option>
-              </select>
-            </div>
-            <div class="settings-row settings-row-actions">
-              <button type="button" class="btn btn-ghost" id="settingsCompactPreviewBtn">Preview compact</button>
-              <button type="button" class="btn btn-ghost" id="settingsCompactApplyBtn">Compact history…</button>
-            </div>
-            <span class="settings-hint">Drops old calendar day marks; keeps completion tallies. Sync stays correct via archived baselines. Does not run on load — only when you apply. Download a full backup first if unsure.</span>
             <pre id="settingsDebugReport" class="settings-debug-report" aria-live="polite">Click “Scan for conflicts” to check your data.</pre>
           </section>
           <section id="settings-section-display" class="settings-section" aria-labelledby="settings-display-heading">
@@ -1234,7 +1265,9 @@
             <h4 id="settings-my-images-heading" class="settings-section-title">My Images</h4>
             <p class="settings-hint">
               Upload banners and profile pictures you reuse often. Tasks and games store a short reference
-              (<code>userimg:…</code>), so the file is kept once — same idea as Stock Assets. <strong>Export data</strong> (JSON) includes these images.
+              (<code>userimg:…</code>), so the file is kept once — same idea as Stock Assets.
+              Use <strong>Replace</strong> to swap the picture while keeping that reference (banners stay linked).
+              <strong>Export data</strong> (JSON) includes these images.
             </p>
             <div class="my-images-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesUploadBannerBtn">Add banner</button>
@@ -1458,6 +1491,29 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="clearDataCancel">Cancel</button>
           <button type="button" class="btn btn-danger" id="clearDataConfirm">Clear all</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IndexedDB full / fallback notice -->
+  <div id="indexedDbFullModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="indexedDbFullModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="indexedDbFullModalTitle">
+      <div class="modal-header">
+        <h3 id="indexedDbFullModalTitle" class="modal-title">IndexedDB is full</h3>
+        <button type="button" class="icon-btn" id="indexedDbFullModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="indexedDbFullMessage">
+          Your browser could not write the main IndexedDB save (usually because storage is full).
+          This session was saved to a localStorage backup instead. When space is free, the next successful save will move data back into IndexedDB.
+        </p>
+        <p class="settings-hint" id="indexedDbFullHint">Export a full backup now so you do not lose progress if the browser clears site data.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="indexedDbFullDismiss">Dismiss</button>
+          <button type="button" class="btn btn-ghost" id="indexedDbFullOpenData">Settings → Data</button>
+          <button type="button" class="btn btn-add" id="indexedDbFullExport">Export data</button>
         </div>
       </div>
     </div>

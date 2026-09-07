@@ -3239,6 +3239,112 @@ html[data-compact="true"] .history-calendar-grid {
   color: var(--text);
 }
 
+/* Settings → Data: browser storage usage */
+.settings-storage-usage {
+  width: 100%;
+  margin: 0 0 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-storage-usage .settings-label {
+  margin-bottom: 0.35rem;
+}
+
+.settings-storage-warning {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: color-mix(in srgb, #c45c26 18%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, #c45c26 55%, var(--border));
+  border-radius: var(--radius-sm);
+}
+
+.settings-storage-surfaces {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.settings-storage-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.settings-storage-bar-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.settings-storage-bar-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-storage-bar-role {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.settings-storage-track {
+  height: 1.15rem;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.settings-storage-track.is-unavailable {
+  opacity: 0.55;
+}
+
+.settings-storage-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: calc(var(--radius-sm) - 1px);
+  transition: width 0.25s ease;
+}
+
+.settings-storage-fill-idb {
+  background: var(--accent);
+}
+
+.settings-storage-fill-local {
+  background: var(--pie-weeklies, #5b8def);
+}
+
+.settings-storage-fill-images {
+  background: var(--pie-endgame, #c47a3a);
+}
+
+.settings-storage-fill-firebase {
+  background: var(--pie-dailies, #6bcf8e);
+}
+
+.settings-storage-usage-text {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.settings-storage-detail {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 .data-excl-toggle-wrap {
   margin-bottom: 1rem;
 }
@@ -6380,6 +6486,23 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
+  align-items: center;
+}
+
+.task-banner-keep-full {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.15rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted, #9aa3b2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.task-banner-keep-full .fill-toggle {
+  margin: 0;
 }
 
 .task-banner-crop-wrap {

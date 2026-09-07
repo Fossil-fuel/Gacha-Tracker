@@ -1345,81 +1345,6 @@ function dropCalendarMarksOnOrBefore(state, cutoffDateStr) {
   state.completionTimestamps = (state.completionTimestamps || []).filter((t) => t.dateStr > cutoffDateStr);
 }
 
-/**
- * Sync-safe compact: archive marks on/before cutoff into baselines so Sync keeps tallies.
- */
-function applyHistoryCompactSafe(state, cutoffDateStr) {
-  const game = getGame(state);
-  const keys = {
-    dailies: game.dailies ? [game.id] : [],
-    weeklies: (game.weeklies || []).map((t) => taskKey(game, t)),
-    endgame: (game.endgame || []).map((t) => taskKey(game, t)),
-  };
-  keys.dailies.forEach((k) => syncTalliesFromCalendar(state, "dailies", k));
-  keys.weeklies.forEach((k) => syncTalliesFromCalendar(state, "weeklies", k));
-  keys.endgame.forEach((k) => syncTalliesFromCalendar(state, "endgame", k));
-
-  const full = {
-    dailiesCompleted: Object.assign({}, state.dailiesCompleted),
-    dailiesAttempted: Object.assign({}, state.dailiesAttempted),
-    weekliesCompleted: Object.assign({}, state.weekliesCompleted),
-    weekliesAttempted: Object.assign({}, state.weekliesAttempted),
-    endgameCompleted: Object.assign({}, state.endgameCompleted),
-    endgameAttempted: Object.assign({}, state.endgameAttempted),
-  };
-
-  const saved = state.completionByDate;
-  const filtered = {};
-  Object.keys(saved || {}).forEach((ds) => {
-    if (ds > cutoffDateStr) filtered[ds] = saved[ds];
-  });
-  const prev = state.historyCompact;
-  state.completionByDate = filtered;
-  state.historyCompact = null;
-  keys.dailies.forEach((k) => syncTalliesFromCalendar(state, "dailies", k));
-  keys.weeklies.forEach((k) => syncTalliesFromCalendar(state, "weeklies", k));
-  keys.endgame.forEach((k) => syncTalliesFromCalendar(state, "endgame", k));
-  const after = {
-    dailiesCompleted: Object.assign({}, state.dailiesCompleted),
-    dailiesAttempted: Object.assign({}, state.dailiesAttempted),
-    weekliesCompleted: Object.assign({}, state.weekliesCompleted),
-    weekliesAttempted: Object.assign({}, state.weekliesAttempted),
-    endgameCompleted: Object.assign({}, state.endgameCompleted),
-    endgameAttempted: Object.assign({}, state.endgameAttempted),
-  };
-
-  function sub(a, b) {
-    const out = {};
-    new Set([].concat(Object.keys(a || {}), Object.keys(b || {}))).forEach((k) => {
-      const n = (Number(a[k]) || 0) - (Number(b[k]) || 0);
-      if (n > 0) out[k] = n;
-    });
-    return out;
-  }
-
-  state.completionByDate = saved;
-  state.historyCompact = prev;
-  dropCalendarMarksOnOrBefore(state, cutoffDateStr);
-  state.historyCompact = {
-    cutoffDateStr,
-    baselines: {
-      dailiesCompleted: sub(full.dailiesCompleted, after.dailiesCompleted),
-      dailiesAttempted: sub(full.dailiesAttempted, after.dailiesAttempted),
-      weekliesCompleted: sub(full.weekliesCompleted, after.weekliesCompleted),
-      weekliesAttempted: sub(full.weekliesAttempted, after.weekliesAttempted),
-      endgameCompleted: sub(full.endgameCompleted, after.endgameCompleted),
-      endgameAttempted: sub(full.endgameAttempted, after.endgameAttempted),
-    },
-  };
-  state.dailiesCompleted = full.dailiesCompleted;
-  state.dailiesAttempted = full.dailiesAttempted;
-  state.weekliesCompleted = full.weekliesCompleted;
-  state.weekliesAttempted = full.weekliesAttempted;
-  state.endgameCompleted = full.endgameCompleted;
-  state.endgameAttempted = full.endgameAttempted;
-  return state.historyCompact;
-}
-
 function buildExportSummaryMarkdown(state, opts) {
   const o = opts || {};
   const days = Math.max(1, Number(o.days) || 90);
@@ -1642,7 +1567,6 @@ module.exports = {
   pushUndo,
   undoLast,
   dropCalendarMarksOnOrBefore,
-  applyHistoryCompactSafe,
   buildShareCardModel,
   buildExportSummaryMarkdown,
   buildExportSummaryCsv,

@@ -68,6 +68,9 @@ module.exports = {
       "function migrateSchemaIfNeeded",
       "function getTaskTallyHistory",
       "function ensureCycleCompletionMarksFillRemainingDays",
+      "function estimateBrowserStorageUsage",
+      "function getPersistenceSurfaceStatus",
+      "function formatStorageBytes",
       "function fillMissingCompletionTimes",
       "function listMissingCompletionTimes",
       "function listDuplicateCompletionTimestamps",
@@ -85,8 +88,6 @@ module.exports = {
       "function listExtracurricularTimestampsForTimeTrends",
       "function getCycleCompletionDateStr",
       "function isCarriedCompletionMark",
-      "function previewHistoryCompact",
-      "function applyHistoryCompact",
       "function getHistoryCompactBaseline",
       "function splitAutoHistoryForManualConvert",
       "function convertScheduledTaskToManualReset",
@@ -219,6 +220,11 @@ module.exports = {
       "function flushEarningsModalDraftFromDom",
       "function toggleEarningsDraftStatus",
       "setCycleCompletionMoment(",
+      "function maybeApplyBannerUnionCropToSavePayload",
+      "function computePaddedBannerUnionCropRect",
+      "function remapBannerViewAfterSourceCrop",
+      "Keep full image",
+      "BANNER_UNION_CROP_PAD_RATIO",
     ].forEach((needle) => {
       assert.ok(modals.includes(needle), "02-modals.js must contain " + needle);
     });
@@ -286,6 +292,18 @@ module.exports = {
     assert.ok(css.includes("history-dwe-carried-mark"), "styles.css must style carried marks");
     assert.ok(css.includes(".earnings-modal-finish-row"), "styles.css must style Finished editors");
     assert.ok(css.includes(".extracurricular-completed-row"), "styles.css must style Completed row");
+    assert.ok(css.includes(".settings-storage-usage"), "styles.css must style Settings storage usage");
+    assert.ok(css.includes(".settings-storage-track"), "styles.css must style Settings storage bar track");
+    assert.ok(css.includes(".settings-storage-fill"), "styles.css must style Settings storage bar fill");
+    assert.ok(css.includes(".settings-storage-bars"), "styles.css must style per-surface storage bars");
+
+    const modalsPage = read("src/02-modals.js");
+    assert.ok(modalsPage.includes("refreshSettingsStorageUsage"), "Settings must refresh browser storage usage");
+    assert.ok(modalsPage.includes("estimateBrowserStorageUsage"), "Settings must call browser storage estimate");
+    assert.ok(modalsPage.includes("openIndexedDbFullModal"), "Settings/modals must open IndexedDB full popup");
+    assert.ok(core.includes("showIdbFullModalOnNextSave"), "core arms IndexedDB-full modal for next save");
+    assert.ok(core.includes("persistToLocalStorageFull"), "core falls back to localStorage when IndexedDB fails");
+    assert.ok(core.includes("isCloudSaveAvailable"), "core can prefer Firebase when signed in");
 
     const weeklies = read("src/06-page-weeklies.js");
     assert.ok(weeklies.includes("aria-describedby"), "weeklies locked checkbox must use aria-describedby");
@@ -293,6 +311,13 @@ module.exports = {
     assert.ok(endgame.includes("aria-describedby"), "endgame locked checkbox must use aria-describedby");
 
     const html = read("index.html");
+    assert.ok(html.includes('id="settingsStorageUsage"'), "index.html has Settings storage usage block");
+    assert.ok(html.includes('id="settings-section-data"'), "index.html has Settings Data section");
+    assert.ok(html.includes('id="settingsStorageWarning"'), "Settings Data has near-full warning banner");
+    assert.ok(html.includes('id="indexedDbFullModal"'), "index.html has IndexedDB full modal");
+    assert.ok(html.includes('data-storage-bar="indexedDB"'), "Settings storage has IndexedDB bar");
+    assert.ok(html.includes('data-storage-bar="localStorage"'), "Settings storage has localStorage bar");
+    assert.ok(html.includes('data-storage-bar="firebase"'), "Settings storage has Firebase bar");
     [
       'data-tab="home"',
       'data-tab="dailies"',
@@ -314,9 +339,6 @@ module.exports = {
       'id="settingsDebugRepairTimestampsBtn"',
       'id="settingsDebugRepairTalliesBtn"',
       'id="settingsRepairDataBtn"',
-      'id="settingsCompactPreviewBtn"',
-      'id="settingsCompactApplyBtn"',
-      'id="settingsCompactMonths"',
       'id="settingsUndoCompletionBtn"',
       'id="settingsExportSummaryMdBtn"',
       'id="settingsExportSummaryCsvBtn"',
@@ -332,6 +354,8 @@ module.exports = {
       'id="settingsShareCardPreviewBtn"',
       'id="settingsShareCardDays"',
       'id="settingsShareCardGames"',
+      'id="taskBannerKeepFullImage"',
+      'id="extraBannerKeepFullImage"',
       'id="extracurricularOcrDrop"',
       'id="extracurricularOcrSkipDescription"',
       'id="sidebarLastSaved"',

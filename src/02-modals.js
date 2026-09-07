@@ -209,6 +209,46 @@
   }
 
   let clearDataModalOpen = false;
+  let indexedDbFullModalOpen = false;
+
+  function openIndexedDbFullModal(opts) {
+    const modal = qs("indexedDbFullModal");
+    if (!modal) return;
+    const o = opts || {};
+    const msg = qs("indexedDbFullMessage");
+    const hint = qs("indexedDbFullHint");
+    if (msg) {
+      msg.textContent = o.cloudAvailable
+        ? "Your browser could not write the main IndexedDB save (usually because storage is full). Cloud sync was tried when signed in; this device also kept a localStorage backup. When space is free, the next successful save will move data back into IndexedDB."
+        : "Your browser could not write the main IndexedDB save (usually because storage is full). This session was saved to a localStorage backup instead. When space is free, the next successful save will move data back into IndexedDB.";
+    }
+    if (hint) {
+      hint.textContent =
+        "Export a full backup now so you do not lose progress if the browser clears site data. Freeing My Images can make room for IndexedDB again.";
+    }
+    indexedDbFullModalOpen = true;
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    document.body.style.overflow = "hidden";
+    activateModalFocus(modal);
+  }
+  window.openIndexedDbFullModal = openIndexedDbFullModal;
+
+  function closeIndexedDbFullModal() {
+    const modal = qs("indexedDbFullModal");
+    if (!modal) return;
+    indexedDbFullModalOpen = false;
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+    if (!settingsModalOpen) document.body.style.overflow = "";
+    deactivateModalFocus();
+  }
+
+  window.__onIndexedDbRecovered = function () {
+    if (typeof updateLastSavedIndicator === "function") updateLastSavedIndicator(false);
+    if (settingsModalOpen) refreshSettingsStorageUsage();
+  };
+
   function openClearDataModal() {
     const modal = qs("clearDataModal");
     if (!modal) return;
@@ -4375,7 +4415,176 @@ function syncTaskCycleEndTimeUI() {
     syncSettingsUI();
     syncShareCardCustomRow();
     renderShareCardGamePills();
+    refreshSettingsStorageUsage();
     activateModalFocus(modalEl);
+  }
+
+  let settingsStorageEstimateGen = 0;
+
+  function applySettingsStorageBar(block, opts) {
+    if (!block) return;
+    const o = opts || {};
+    const fillEl = block.querySelector("[data-storage-fill]");
+    const trackEl = block.querySelector("[data-storage-track]");
+    const usageEl = block.querySelector("[data-storage-usage]");
+    const pct = Math.max(0, Math.min(100, Number(o.pct) || 0));
+    const usageText = o.text || "—";
+    if (fillEl) fillEl.style.width = pct + "%";
+    if (trackEl) {
+      trackEl.setAttribute("aria-valuenow", String(Math.round(pct)));
+      trackEl.setAttribute("aria-valuetext", usageText);
+      trackEl.classList.toggle("is-unavailable", !!o.unavailable);
+    }
+    if (usageEl) usageEl.textContent = usageText;
+  }
+
+  function applySettingsStorageEstimate(card, info) {
+    if (!card || !info) return;
+    const surfacesEl = card.querySelector("[data-storage-surfaces]");
+    const detailEl = card.querySelector("[data-storage-detail]");
+    const warnEl = qs("settingsStorageWarning") || card.querySelector("#settingsStorageWarning");
+    const surfaces = info.surfaces || {};
+    if (surfacesEl) {
+      surfacesEl.textContent = [
+        (surfaces.indexedDB && surfaces.indexedDB.label) || "IndexedDB",
+        (surfaces.localStorage && surfaces.localStorage.label) || "localStorage",
+        (surfaces.firebase && surfaces.firebase.label) || "Firebase",
+      ].join(" · ");
+    }
+
+    const browserQuota = info.quota;
+    const usage = info.usage;
+    const lsBytes = Number(info.localStorageBytes) || 0;
+    const lsQuota = Number(info.localStorageQuotaBytes) || 5 * 1024 * 1024;
+    const idbBlocked = typeof getIdbWriteBlocked === "function" ? getIdbWriteBlocked() : !!(surfaces.indexedDB && /full/i.test(surfaces.indexedDB.label || ""));
+    const nearBrowser =
+      info.supported && usage != null && browserQuota != null && browserQuota > 0 && usage / browserQuota >= 0.85;
+    const nearLocal = lsQuota > 0 && lsBytes / lsQuota >= 0.85;
+    if (warnEl) {
+      if (idbBlocked) {
+        warnEl.hidden = false;
+        warnEl.textContent =
+          "Warning: IndexedDB could not be written. Saves are on a localStorage backup until space is free — Export data recommended.";
+      } else if (nearBrowser || nearLocal) {
+        warnEl.hidden = false;
+        warnEl.textContent = nearLocal
+          ? "Warning: localStorage is nearly full (~5 MB limit). Free space or export a backup before saves start failing."
+          : "Warning: browser storage is nearly full. New saves may fail — export a backup and free space (My Images).";
+      } else {
+        warnEl.hidden = true;
+        warnEl.textContent = "";
+      }
+    }
+
+    const idbBytes = info.indexedDBBytes != null ? info.indexedDBBytes : info.usage;
+    let idbPct = 0;
+    let idbText = "Measuring…";
+    if (info.supported && idbBytes != null && browserQuota != null && browserQuota > 0) {
+      idbPct = (idbBytes / browserQuota) * 100;
+      idbText =
+        formatStorageBytes(idbBytes) +
+        " of ~" +
+        formatStorageBytes(browserQuota) +
+        " browser ceiling (" +
+        (idbPct < 10 ? idbPct.toFixed(2) : Math.round(idbPct)) +
+        "%)";
+    } else if (info.supported && idbBytes != null) {
+      idbText = formatStorageBytes(idbBytes) + " used · no quota reported";
+    } else if (!info.supported) {
+      idbText = "Browser did not report IndexedDB usage";
+    }
+    applySettingsStorageBar(card.querySelector('[data-storage-bar="indexedDB"]'), {
+      pct: idbPct,
+      text: idbText,
+    });
+
+    const lsPct = lsQuota > 0 ? (lsBytes / lsQuota) * 100 : 0;
+    applySettingsStorageBar(card.querySelector('[data-storage-bar="localStorage"]'), {
+      pct: lsPct,
+      text:
+        formatStorageBytes(lsBytes) +
+        " of ~" +
+        formatStorageBytes(lsQuota) +
+        " typical localStorage limit (" +
+        (lsPct < 10 ? lsPct.toFixed(2) : Math.round(lsPct)) +
+        "%)",
+    });
+
+    const imgBytes = Number(info.myImagesBytes) || 0;
+    let imgPct = 0;
+    let imgText = formatStorageBytes(imgBytes);
+    if (browserQuota != null && browserQuota > 0) {
+      imgPct = (imgBytes / browserQuota) * 100;
+      imgText =
+        formatStorageBytes(imgBytes) +
+        " of ~" +
+        formatStorageBytes(browserQuota) +
+        " browser ceiling (already counted in IndexedDB)";
+    } else {
+      imgText = formatStorageBytes(imgBytes) + " (already counted in IndexedDB)";
+    }
+    applySettingsStorageBar(card.querySelector('[data-storage-bar="myImages"]'), {
+      pct: imgPct,
+      text: imgText,
+    });
+
+    const fb = surfaces.firebase || {};
+    const fbBytes = Number(info.firebasePayloadBytes) || 0;
+    let fbPct = 0;
+    let fbText = fb.label || "Firebase";
+    let fbUnavailable = false;
+    if (!fb.configured) {
+      fbUnavailable = true;
+      fbText = "Not configured — not using cloud storage";
+      fbPct = 0;
+    } else if (fb.signedIn) {
+      fbPct = 100;
+      fbText =
+        "Signed in · sync payload ~" +
+        formatStorageBytes(fbBytes) +
+        " (Firestore, not browser disk)";
+    } else {
+      fbPct = 0;
+      fbText =
+        "Configured · signed out · local payload ~" +
+        formatStorageBytes(fbBytes) +
+        " (not on browser disk until sync)";
+    }
+    applySettingsStorageBar(card.querySelector('[data-storage-bar="firebase"]'), {
+      pct: fbPct,
+      text: fbText,
+      unavailable: fbUnavailable,
+    });
+
+    if (detailEl) {
+      const bits = [];
+      if (info.supported && info.usage != null) {
+        bits.push("Origin total reported " + formatStorageBytes(info.usage));
+      }
+      if (idbBlocked) bits.push("Currently writing emergency localStorage backup");
+      if (info.quotaNote) bits.push(info.quotaNote);
+      detailEl.textContent = bits.join(" · ");
+    }
+  }
+
+  function refreshSettingsStorageUsage() {
+    const card = qs("settingsStorageUsage");
+    if (!card) return;
+    const gen = ++settingsStorageEstimateGen;
+    if (typeof estimateBrowserStorageUsage !== "function") {
+      applySettingsStorageEstimate(card, {
+        supported: false,
+        surfaces: typeof getPersistenceSurfaceStatus === "function" ? getPersistenceSurfaceStatus() : {},
+        localStorageBytes: 0,
+        myImagesBytes: 0,
+      });
+      return;
+    }
+    estimateBrowserStorageUsage().then((info) => {
+      if (gen !== settingsStorageEstimateGen) return;
+      if (!card.isConnected) return;
+      applySettingsStorageEstimate(card, info);
+    });
   }
 
   function closeSettingsModal() {
@@ -5158,6 +5367,7 @@ function syncTaskCycleEndTimeUI() {
       setSettingsSectionDropdownOpen(false);
       if (section === "stock-assets") fillSettingsStockAssetsGallery();
       if (section === "my-images") fillSettingsMyImagesGallery();
+      if (section === "data") refreshSettingsStorageUsage();
     }
 
     document.querySelectorAll(".settings-nav-item[data-settings-section]").forEach((btn) => {
@@ -5280,12 +5490,14 @@ function syncTaskCycleEndTimeUI() {
     const myImagesPfpBtn = qs("settingsMyImagesUploadPfpBtn");
     if (myImagesBannerBtn && myImagesFile) {
       myImagesBannerBtn.addEventListener("click", () => {
+        delete myImagesFile.dataset.replaceId;
         myImagesUploadKind = "banner";
         myImagesFile.click();
       });
     }
     if (myImagesPfpBtn && myImagesFile) {
       myImagesPfpBtn.addEventListener("click", () => {
+        delete myImagesFile.dataset.replaceId;
         myImagesUploadKind = "pfp";
         myImagesFile.click();
       });
@@ -5293,18 +5505,30 @@ function syncTaskCycleEndTimeUI() {
     if (myImagesFile) {
       myImagesFile.addEventListener("change", async () => {
         const file = myImagesFile.files && myImagesFile.files[0];
+        const replaceId = myImagesFile.dataset.replaceId || "";
+        delete myImagesFile.dataset.replaceId;
         myImagesFile.value = "";
         if (!file) return;
         try {
-          const maxW = myImagesUploadKind === "pfp" ? 1200 : 1400;
+          const existing = replaceId && typeof getUserImageById === "function" ? getUserImageById(replaceId) : null;
+          const kind = existing ? (existing.kind === "pfp" ? "pfp" : "banner") : myImagesUploadKind;
+          const maxW = kind === "pfp" ? 1200 : 1400;
           const dataUrl = await compressImageFileToDataUrl(file, { maxWidth: maxW, quality: 0.92 });
-          const base = (file.name ? String(file.name).replace(/\.[^.]+$/, "") : "") || (myImagesUploadKind === "pfp" ? "Profile" : "Banner");
-          const entry = addUserImage({ kind: myImagesUploadKind, label: base, dataUrl: dataUrl });
+          if (replaceId) {
+            const entry = replaceUserImageData(replaceId, dataUrl);
+            if (!entry) throw new Error("Could not replace image.");
+            save();
+            fillSettingsMyImagesGallery();
+            if (typeof renderActiveTab === "function") renderActiveTab();
+            return;
+          }
+          const base = (file.name ? String(file.name).replace(/\.[^.]+$/, "") : "") || (kind === "pfp" ? "Profile" : "Banner");
+          const entry = addUserImage({ kind: kind, label: base, dataUrl: dataUrl });
           if (!entry) throw new Error("Could not add image.");
           save();
           fillSettingsMyImagesGallery();
         } catch (err) {
-          alert((err && err.message) || "Could not add that image.");
+          alert((err && err.message) || (replaceId ? "Could not replace that image." : "Could not add that image."));
         }
       });
     }
@@ -5580,84 +5804,6 @@ function syncTaskCycleEndTimeUI() {
     const debugFixTimesDatesBtn = qs("settingsDebugFixTimesDatesBtn");
     if (debugFixTimesDatesBtn) debugFixTimesDatesBtn.addEventListener("click", () => openDebugFixTimesDates());
 
-    function getSelectedCompactMonths() {
-      const sel = qs("settingsCompactMonths");
-      return sel ? Number(sel.value) || 12 : 12;
-    }
-
-    function formatCompactPreview(preview) {
-      if (!preview) return "No preview.";
-      const lines = [];
-      lines.push("Compact preview");
-      lines.push("Keep calendar after: " + preview.cutoffDateStr + " (drop on/before)");
-      lines.push("Months: " + preview.months);
-      lines.push("Calendar days to remove: " + preview.removedCalendarDays);
-      lines.push("Completion marks to remove: " + preview.removedMarks);
-      lines.push("Tallies: unchanged (archived baselines keep Sync correct)");
-      if (preview.existingCutoff) lines.push("Existing archive cutoff: " + preview.existingCutoff);
-      if (preview.removedCalendarDays === 0) lines.push("Nothing to compact for this range.");
-      return lines.join("\n");
-    }
-
-    const compactPreviewBtn = qs("settingsCompactPreviewBtn");
-    if (compactPreviewBtn) compactPreviewBtn.addEventListener("click", () => {
-      const report = qs("settingsDebugReport");
-      if (!report || typeof previewHistoryCompact !== "function") return;
-      report.textContent = formatCompactPreview(previewHistoryCompact(getSelectedCompactMonths()));
-    });
-
-    const compactApplyBtn = qs("settingsCompactApplyBtn");
-    if (compactApplyBtn) compactApplyBtn.addEventListener("click", () => {
-      if (typeof previewHistoryCompact !== "function" || typeof applyHistoryCompact !== "function") return;
-      const months = getSelectedCompactMonths();
-      const preview = previewHistoryCompact(months);
-      const report = qs("settingsDebugReport");
-      if (report) report.textContent = formatCompactPreview(preview);
-      if (preview.removedCalendarDays === 0) {
-        alert("Nothing to compact for the selected range.");
-        return;
-      }
-      if (
-        !confirm(
-          "Compact history older than " +
-            months +
-            " month(s)?\n\n" +
-            "Remove " +
-            preview.removedCalendarDays +
-            " calendar day(s) and " +
-            preview.removedMarks +
-            " mark(s) on/before " +
-            preview.cutoffDateStr +
-            ".\nTallies stay the same; Sync will use archived baselines.\n\nContinue?"
-        )
-      ) {
-        return;
-      }
-      if (confirm("Download a full JSON backup before compacting?\n\nOK = download then compact\nCancel = compact without new download")) {
-        const data = JSON.stringify(buildSavePayload(), null, 2);
-        const blob = new Blob([data], { type: "application/json" });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "gacha-tracker-pre-compact-" + new Date().toISOString().slice(0, 10) + ".json";
-        a.click();
-        URL.revokeObjectURL(a.href);
-      }
-      const result = applyHistoryCompact(months);
-      if (report) {
-        const lines = [formatCompactPreview(result.preview || preview)];
-        if (result.ok) {
-          lines.push("");
-          lines.push("Applied. New archive cutoff: " + (result.historyCompact && result.historyCompact.cutoffDateStr));
-        } else {
-          lines.push("");
-          lines.push("Not applied: " + (result.reason || "unknown"));
-        }
-        report.textContent = lines.join("\n");
-      }
-      if (result.ok) alert("History compacted. Tallies unchanged.");
-      else alert(result.reason || "Compact did not run.");
-    });
-
     const simulateBtn = qs("settingsSimulateBtn");
     if (simulateBtn) simulateBtn.addEventListener("click", () => {
       runSimulation();
@@ -5745,13 +5891,38 @@ function syncTaskCycleEndTimeUI() {
     qs("clearDataCancel")?.addEventListener("click", closeClearDataModal);
     qs("clearDataConfirm")?.addEventListener("click", confirmClearData);
 
+    qs("indexedDbFullModal")?.addEventListener("click", (e) => {
+      if (
+        e.target.classList.contains("modal-backdrop") ||
+        (e.target.getAttribute && e.target.getAttribute("data-close") === "indexedDbFullModal")
+      ) {
+        closeIndexedDbFullModal();
+      }
+    });
+    qs("indexedDbFullModalClose")?.addEventListener("click", closeIndexedDbFullModal);
+    qs("indexedDbFullDismiss")?.addEventListener("click", closeIndexedDbFullModal);
+    qs("indexedDbFullOpenData")?.addEventListener("click", () => {
+      closeIndexedDbFullModal();
+      openSettingsModal();
+      activateSettingsSection("data");
+      refreshSettingsStorageUsage();
+    });
+    qs("indexedDbFullExport")?.addEventListener("click", () => {
+      closeIndexedDbFullModal();
+      const exportBtn = qs("settingsExportBtn");
+      if (exportBtn) exportBtn.click();
+      else if (typeof exportData === "function") exportData();
+    });
+
     document.addEventListener("keydown", (e) => {
-      if (!settingsModalOpen && !clearDataModalOpen) return;
+      if (!settingsModalOpen && !clearDataModalOpen && !indexedDbFullModalOpen) return;
       if (e.key === "Escape") {
         const top = typeof getTopOpenModal === "function" ? getTopOpenModal() : null;
         // Nested modals (Fill missing times, etc.) handle their own Escape.
-        if (top && top.id && top.id !== "settingsModal" && top.id !== "clearDataModal") return;
-        if (clearDataModalOpen) {
+        if (top && top.id && top.id !== "settingsModal" && top.id !== "clearDataModal" && top.id !== "indexedDbFullModal") return;
+        if (indexedDbFullModalOpen) {
+          closeIndexedDbFullModal();
+        } else if (clearDataModalOpen) {
           closeClearDataModal();
         } else if (colorPickerEditingLayerId) {
           applyColorPickerToLayer();
@@ -5838,6 +6009,208 @@ function syncTaskCycleEndTimeUI() {
     return cloneBannerView(taskModal.bannerViews[key], fallback);
   }
 
+  /** Padding outside the union of surface frames so re-framing / CSS cover does not clip oddly. */
+  const BANNER_UNION_CROP_PAD_RATIO = 0.06;
+  /** Skip trim when union (+pad) still covers almost the whole source (by pixel area). */
+  const BANNER_UNION_CROP_MIN_SAVE_FRAC = 0.05;
+
+  function isBannerKeepFullImageEnabled() {
+    const el = typeof bannerEl === "function" ? bannerEl("keepFullToggle") : null;
+    return !!(el && el.checked);
+  }
+
+  function isEmbeddedBannerSourceForUnionCrop(url, img) {
+    const src = String(url || "");
+    if (typeof isUserImageRef === "function" && isUserImageRef(src)) return false;
+    if (/^assets\//i.test(src)) return false;
+    if (src.indexOf("data:image") === 0) return true;
+    if (img && img.src && String(img.src).indexOf("data:image") === 0) return true;
+    if (img && img.src && String(img.src).indexOf("blob:") === 0) return true;
+    return false;
+  }
+
+  /** Crop window of a bannerView in source-image pixel space (may extend outside). */
+  function bannerViewCropRectInImage(view, imgW, imgH) {
+    if (!view || !(imgW > 0) || !(imgH > 0)) return null;
+    const x = Number(view.x) || 0;
+    const y = Number(view.y) || 0;
+    const w = Math.max(0.001, Number(view.w) || 1);
+    const h = Math.max(0.001, Number(view.h) || 1);
+    return {
+      left: (-x / w) * imgW,
+      top: (-y / h) * imgH,
+      right: ((1 - x) / w) * imgW,
+      bottom: ((1 - y) / h) * imgH,
+    };
+  }
+
+  function clampBannerPixelRect(rect, imgW, imgH) {
+    const left = Math.max(0, Math.min(imgW, rect.left));
+    const top = Math.max(0, Math.min(imgH, rect.top));
+    const right = Math.max(0, Math.min(imgW, rect.right));
+    const bottom = Math.max(0, Math.min(imgH, rect.bottom));
+    return {
+      left: left,
+      top: top,
+      right: right,
+      bottom: bottom,
+      w: Math.max(1, right - left),
+      h: Math.max(1, bottom - top),
+    };
+  }
+
+  /**
+   * Bounding box covering all provided surface frames, plus pad so edges are not flush.
+   * Returns null when there is nothing useful to trim.
+   */
+  function computePaddedBannerUnionCropRect(viewsMap, imgW, imgH, padRatio) {
+    if (!(imgW > 0) || !(imgH > 0) || !viewsMap) return null;
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    let count = 0;
+    Object.keys(viewsMap).forEach((key) => {
+      const view = viewsMap[key];
+      if (!view) return;
+      const raw = bannerViewCropRectInImage(view, imgW, imgH);
+      if (!raw) return;
+      left = Math.min(left, raw.left);
+      top = Math.min(top, raw.top);
+      right = Math.max(right, raw.right);
+      bottom = Math.max(bottom, raw.bottom);
+      count++;
+    });
+    if (!count || !Number.isFinite(left)) return null;
+
+    const uniW = Math.max(1, right - left);
+    const uniH = Math.max(1, bottom - top);
+    const pad = Math.max(0, Number(padRatio) || 0);
+    const padX = uniW * pad;
+    const padY = uniH * pad;
+    const padded = clampBannerPixelRect(
+      {
+        left: left - padX,
+        top: top - padY,
+        right: right + padX,
+        bottom: bottom + padY,
+      },
+      imgW,
+      imgH
+    );
+
+    const areaFrac = (padded.w * padded.h) / (imgW * imgH);
+    if (areaFrac >= 1 - BANNER_UNION_CROP_MIN_SAVE_FRAC) return null;
+    if (padded.w >= imgW - 1 && padded.h >= imgH - 1) return null;
+    return padded;
+  }
+
+  /** Remap a view so the same on-screen framing applies after the source was cropped to cropRect. */
+  function remapBannerViewAfterSourceCrop(view, cropRect, srcW, srcH) {
+    if (!view || !cropRect) return view;
+    const fallbackAspect = Number(view.aspect) > 0 ? Number(view.aspect) : 16 / 9;
+    const raw = bannerViewCropRectInImage(view, srcW, srcH);
+    if (!raw) return cloneBannerView(view, fallbackAspect);
+    const newW = Math.max(1, cropRect.w);
+    const newH = Math.max(1, cropRect.h);
+    const left = raw.left - cropRect.left;
+    const top = raw.top - cropRect.top;
+    const width = Math.max(0.001, raw.right - raw.left);
+    const height = Math.max(0.001, raw.bottom - raw.top);
+    const w = newW / width;
+    const h = newH / height;
+    return {
+      aspect: fallbackAspect,
+      x: (-left * w) / newW,
+      y: (-top * h) / newH,
+      w: w,
+      h: h,
+    };
+  }
+
+  function renderBannerSourceRegionDataUrl(img, cropRect) {
+    if (!img || !cropRect) return null;
+    const sx = Math.max(0, cropRect.left);
+    const sy = Math.max(0, cropRect.top);
+    const sw = Math.max(1, Math.round(cropRect.w));
+    const sh = Math.max(1, Math.round(cropRect.h));
+    const canvas = document.createElement("canvas");
+    canvas.width = sw;
+    canvas.height = sh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    try {
+      return canvas.toDataURL("image/jpeg", 0.88);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Trim embedded banner uploads to a padded union of Home/Games/Board frames.
+   * Skipped for My Images / stock refs, or when "Keep full image" is checked (default).
+   */
+  function maybeApplyBannerUnionCropToSavePayload(next, img) {
+    if (!next || !img) return;
+    if (isBannerKeepFullImageEnabled()) return;
+    if (!isEmbeddedBannerSourceForUnionCrop(next.bannerSourceImage || taskModal.bannerSource, img)) return;
+
+    const srcW = img.naturalWidth || img.width || 0;
+    const srcH = img.naturalHeight || img.height || 0;
+    if (!(srcW > 0) || !(srcH > 0)) return;
+
+    const sourceViews = {};
+    const incoming = next.bannerViews || {};
+    ["home", "games", "board"].forEach((key) => {
+      if (taskModal.bannerViews && taskModal.bannerViews[key]) {
+        sourceViews[key] = cloneBannerView(taskModal.bannerViews[key], (TASK_BANNER_TARGETS[key] || TASK_BANNER_TARGETS.board).aspect);
+      } else if (incoming[key]) {
+        sourceViews[key] = cloneBannerView(incoming[key], (TASK_BANNER_TARGETS[key] || TASK_BANNER_TARGETS.board).aspect);
+      }
+    });
+    if (!Object.keys(sourceViews).length) return;
+
+    const cropRect = computePaddedBannerUnionCropRect(
+      sourceViews,
+      srcW,
+      srcH,
+      BANNER_UNION_CROP_PAD_RATIO
+    );
+    if (!cropRect) return;
+
+    const dataUrl = renderBannerSourceRegionDataUrl(img, cropRect);
+    if (!dataUrl) return;
+    // Apply when pixel area shrinks enough — even if re-encoded JPEG bytes are
+    // similar/slightly larger than an already-compressed source.
+    const areaFrac = (cropRect.w * cropRect.h) / (srcW * srcH);
+    if (areaFrac > 1 - BANNER_UNION_CROP_MIN_SAVE_FRAC) return;
+
+    const remapped = {};
+    Object.keys(sourceViews).forEach((key) => {
+      remapped[key] = remapBannerViewAfterSourceCrop(sourceViews[key], cropRect, srcW, srcH);
+    });
+
+    const newAspect = cropRect.w / cropRect.h;
+    const fill = (key, fallbackAspect) => {
+      if (remapped[key]) return remapped[key];
+      if (incoming[key]) {
+        // Should not happen often; prefer remap path.
+        return remapBannerViewAfterSourceCrop(incoming[key], cropRect, srcW, srcH);
+      }
+      return defaultFitBannerView(fallbackAspect, newAspect);
+    };
+
+    next.bannerSourceImage = dataUrl;
+    next.bannerViews = {
+      home: fill("home", TASK_BANNER_TARGETS.home.aspect),
+      games: fill("games", TASK_BANNER_TARGETS.games.aspect),
+      board: fill("board", TASK_BANNER_TARGETS.board.aspect),
+    };
+  }
+
   function applyTaskBannersToSavePayload(next) {
     if (taskModal.bannerSource) {
       next.bannerSourceImage = taskModal.bannerSource;
@@ -5856,6 +6229,7 @@ function syncTaskCycleEndTimeUI() {
         games: ensureView("games", TASK_BANNER_TARGETS.games.aspect),
         board: ensureView("board", TASK_BANNER_TARGETS.board.aspect),
       };
+      maybeApplyBannerUnionCropToSavePayload(next, img);
       const overlayInput = bannerEl("overlayTextInput");
       const overlayText = overlayInput ? String(overlayInput.value || "").trim() : "";
       next.bannerOverlayText = overlayText || undefined;
@@ -6330,9 +6704,24 @@ function syncTaskCycleEndTimeUI() {
     const wrap = bannerEl("previewWrap");
     const cardHost = bannerEl("cardPreview");
     const clearBtn = bannerEl("clearBtn");
+    const keepFullWrap = bannerEl("keepFullWrap");
     const saveLibBtn = bannerEl("saveLibraryBtn");
     const has = !!taskModal.bannerSource;
-    if (clearBtn) clearBtn.hidden = !(has || taskBannerCrop.sourceImg);
+    const showClear = !!(has || taskBannerCrop.sourceImg);
+    if (clearBtn) clearBtn.hidden = !showClear;
+    if (keepFullWrap) {
+      // Only meaningful for embedded uploads (not My Images / stock).
+      const src = String(taskModal.bannerSource || "");
+      const embedded = isEmbeddedBannerSourceForUnionCrop(src, taskBannerCrop.sourceImg);
+      const wasHidden = keepFullWrap.hidden;
+      keepFullWrap.hidden = !(showClear && embedded);
+      const toggle = bannerEl("keepFullToggle");
+      if (toggle) {
+        // Default ON (keep full image) whenever the control becomes available again.
+        if (!keepFullWrap.hidden && wasHidden) toggle.checked = true;
+        if (keepFullWrap.hidden) toggle.checked = true;
+      }
+    }
     if (saveLibBtn) {
       const src = String(taskModal.bannerSource || "");
       const alreadyLibrary = typeof isUserImageRef === "function" && isUserImageRef(src);
@@ -6642,6 +7031,17 @@ function syncTaskCycleEndTimeUI() {
           save();
           fillSettingsMyImagesGallery();
         });
+        const replaceBtn = document.createElement("button");
+        replaceBtn.type = "button";
+        replaceBtn.className = "btn btn-ghost btn-sm";
+        replaceBtn.textContent = "Replace";
+        replaceBtn.title = "Swap the picture; tasks keep the same userimg reference";
+        replaceBtn.addEventListener("click", () => {
+          const fileInput = qs("settingsMyImagesFile");
+          if (!fileInput) return;
+          fileInput.dataset.replaceId = entry.id;
+          fileInput.click();
+        });
         const delBtn = document.createElement("button");
         delBtn.type = "button";
         delBtn.className = "btn btn-ghost btn-sm";
@@ -6653,6 +7053,7 @@ function syncTaskCycleEndTimeUI() {
           fillSettingsMyImagesGallery();
         });
         actions.appendChild(renameBtn);
+        actions.appendChild(replaceBtn);
         actions.appendChild(delBtn);
         card.appendChild(img);
         card.appendChild(fig);
@@ -7154,6 +7555,8 @@ function syncTaskCycleEndTimeUI() {
           taskModal.bannerSource = null;
           taskModal.bannerViews = emptyTaskBannerViews();
           taskModal.bannerPreviewUrls = { home: null, games: null, board: null };
+          const keepFullToggle = bannerEl("keepFullToggle");
+          if (keepFullToggle) keepFullToggle.checked = true;
           const overlayInput = bannerEl("overlayTextInput");
           if (overlayInput) overlayInput.value = "";
           const overlaySizeInput = bannerEl("overlayTextSizeInput");

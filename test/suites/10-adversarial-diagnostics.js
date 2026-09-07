@@ -242,7 +242,7 @@ module.exports = {
       })
     );
 
-    // ── Compact / save hazards ───────────────────────────────
+    // ── Legacy archive / save hazards ────────────────────────
     checks.push(
       check("Hazard: naive drop calendar without baselines undercounts after sync", () => {
         const state = sim.createFixture({ today: "2026-07-31" });
@@ -258,13 +258,18 @@ module.exports = {
     );
 
     checks.push(
-      check("Safe compact + save + load + sync keeps tallies", () => {
+      check("Legacy historyCompact baselines survive save/load + Sync", () => {
         const state = sim.createFixture({ today: "2026-07-31" });
         const game = sim.getGame(state);
         const key = sim.taskKey(game, game.weeklies[0]);
-        sim.markComplete(state, "weeklies", key, "2026-07-08", 12);
         sim.markComplete(state, "weeklies", key, "2026-07-22", 12);
-        sim.applyHistoryCompactSafe(state, "2026-07-14");
+        state.historyCompact = {
+          cutoffDateStr: "2026-07-14",
+          baselines: {
+            weekliesCompleted: { [key]: 1 },
+            weekliesAttempted: { [key]: 1 },
+          },
+        };
         const store = sim.createSaveStore();
         sim.saveState(store, state);
         const loaded = sim.loadState(store);

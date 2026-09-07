@@ -368,42 +368,21 @@ module.exports = {
     );
 
     checks.push(
-      check("Compact hazard: Sync after dropping old marks undercounts vs kept tallies", () => {
+      check("Legacy historyCompact baselines still count in Sync", () => {
         const state = sim.createFixture({ today: "2026-07-31" });
         const game = sim.getGame(state);
         const key = sim.taskKey(game, game.weeklies[0]);
-        sim.markComplete(state, "weeklies", key, "2026-07-08", 12);
         sim.markComplete(state, "weeklies", key, "2026-07-22", 12);
-        assert.equal(state.weekliesCompleted[key], 2, "two completes recorded in tallies");
-        // Naive compact: delete older calendar days but leave tallies at 2
-        sim.dropCalendarMarksOnOrBefore(state, "2026-07-14");
-        state.weekliesCompleted[key] = 2;
-        state.weekliesAttempted[key] = 2;
+        assert.equal(state.weekliesCompleted[key], 1, "one live cycle");
+        state.historyCompact = {
+          cutoffDateStr: "2026-07-14",
+          baselines: {
+            weekliesCompleted: { [key]: 1 },
+            weekliesAttempted: { [key]: 1 },
+          },
+        };
         const synced = sim.syncTalliesFromCalendar(state, "weeklies", key);
-        assert.equal(synced.completed, 1, "sync only sees remaining cycle");
-        assert.ok(synced.completed < 2, "documents why compact must not rely on Sync alone");
-      })
-    );
-
-    checks.push(
-      check("Compact safe: Sync keeps tallies after archive baselines", () => {
-        const state = sim.createFixture({ today: "2026-07-31" });
-        const game = sim.getGame(state);
-        const key = sim.taskKey(game, game.weeklies[0]);
-        sim.markComplete(state, "weeklies", key, "2026-07-08", 12);
-        sim.markComplete(state, "weeklies", key, "2026-07-22", 12);
-        assert.equal(state.weekliesCompleted[key], 2, "two completes before compact");
-        sim.applyHistoryCompactSafe(state, "2026-07-14");
-        assert.ok(!state.completionByDate["2026-07-08"], "old day removed");
-        assert.ok(state.completionByDate["2026-07-22"], "recent day kept");
-        assert.equal(state.weekliesCompleted[key], 2, "tallies unchanged after compact");
-        const synced = sim.syncTalliesFromCalendar(state, "weeklies", key);
-        assert.equal(synced.completed, 2, "Sync retains archived cycle via baselines");
-        assert.equal(
-          state.historyCompact.baselines.weekliesCompleted[key],
-          1,
-          "one cycle archived in baseline"
-        );
+        assert.equal(synced.completed, 2, "Sync adds legacy archived baseline");
       })
     );
 

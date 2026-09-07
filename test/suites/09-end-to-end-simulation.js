@@ -272,25 +272,24 @@ module.exports = {
     );
 
     checks.push(
-      check("Compact + Sync + Save: archived baselines survive reload", () => {
+      check("Legacy historyCompact baselines survive save/load + Sync", () => {
         const state = sim.createFixture({ today: "2026-07-31" });
         const game = sim.getGame(state);
         const wKey = sim.taskKey(game, game.weeklies[0]);
-        sim.markComplete(state, "weeklies", wKey, "2026-07-08", 12);
         sim.markComplete(state, "weeklies", wKey, "2026-07-22", 12);
-        sim.applyHistoryCompactSafe(state, "2026-07-14");
-
-        assert.ok(state.historyCompact && state.historyCompact.cutoffDateStr === "2026-07-14", "compact set");
-        assert.ok(!state.completionByDate["2026-07-08"], "old calendar dropped");
-        const synced = sim.syncTalliesFromCalendar(state, "weeklies", wKey);
-        assert.equal(synced.completed, 2, "sync keeps archived cycle");
-
+        state.historyCompact = {
+          cutoffDateStr: "2026-07-14",
+          baselines: {
+            weekliesCompleted: { [wKey]: 1 },
+            weekliesAttempted: { [wKey]: 1 },
+          },
+        };
         const store = sim.createSaveStore();
         sim.saveState(store, state);
         const loaded = sim.loadState(store);
-        assert.ok(loaded.historyCompact, "compact restored");
+        assert.ok(loaded.historyCompact, "legacy compact metadata restored");
         const again = sim.syncTalliesFromCalendar(loaded, "weeklies", wKey);
-        assert.equal(again.completed, 2, "reload + sync still keeps archive");
+        assert.equal(again.completed, 2, "reload + sync still keeps archive baseline");
       })
     );
 

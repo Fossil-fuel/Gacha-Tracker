@@ -47,6 +47,7 @@ const MODALS = [
   "savePresetModal",
   "deletePresetModal",
   "clearDataModal",
+  "indexedDbFullModal",
   "clearGameDataModal",
   "clearTimeTrendsModal",
   "timeTrendsDetailModal",
