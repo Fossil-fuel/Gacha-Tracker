@@ -46,21 +46,15 @@ function cloneGameWithoutImages(game) {
 function cloneUserImageLibraryForSave(library, omitData) {
   return (library || []).map((e) => {
     if (!e || typeof e !== "object") return e;
-    if (!omitData) {
-      return {
-        id: e.id,
-        kind: e.kind === "pfp" ? "pfp" : "banner",
-        label: e.label || "",
-        createdAt: e.createdAt || 0,
-        dataUrl: e.dataUrl || "",
-      };
-    }
-    return {
+    const meta = {
       id: e.id,
       kind: e.kind === "pfp" ? "pfp" : "banner",
       label: e.label || "",
+      category: String(e.category || "").trim().slice(0, 40),
       createdAt: e.createdAt || 0,
     };
+    if (!omitData) meta.dataUrl = e.dataUrl || "";
+    return meta;
   });
 }
 
@@ -76,6 +70,7 @@ function normalizeLoadedUserImageLibrary(raw) {
         id: id,
         kind: e.kind === "pfp" ? "pfp" : "banner",
         label: String(e.label || id).trim().slice(0, 80) || id,
+        category: String(e.category || "").trim().slice(0, 40),
         createdAt: Number(e.createdAt) || 0,
         dataUrl: dataUrl.indexOf("data:") === 0 ? dataUrl : "",
       };
@@ -102,7 +97,11 @@ function mergeLoadedUserImageLibrary(incomingRaw, existing) {
     if (e.dataUrl) return e;
     const prev = prevById.get(e.id);
     if (prev && typeof prev.dataUrl === "string" && prev.dataUrl.indexOf("data:") === 0) {
-      return Object.assign({}, e, { dataUrl: prev.dataUrl });
+      return Object.assign({}, e, {
+        dataUrl: prev.dataUrl,
+        category: e.category || String(prev.category || "").trim().slice(0, 40),
+        label: e.label || prev.label || e.id,
+      });
     }
     return e;
   });

@@ -1267,11 +1267,21 @@
               Upload banners and profile pictures you reuse often. Tasks and games store a short reference
               (<code>userimg:…</code>), so the file is kept once — same idea as Stock Assets.
               Use <strong>Replace</strong> to swap the picture while keeping that reference (banners stay linked).
+              Optional <strong>categories</strong> and sorting help organize the library; the picker shows how many times each image is used.
               <strong>Export data</strong> (JSON) includes these images.
             </p>
             <div class="my-images-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesUploadBannerBtn">Add banner</button>
               <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesUploadPfpBtn">Add profile picture</button>
+              <label class="my-images-sort-label" for="settingsMyImagesSort">
+                Sort
+                <select id="settingsMyImagesSort" class="my-images-sort-select" aria-label="Sort My Images">
+                  <option value="custom">Custom order</option>
+                  <option value="name">Name</option>
+                  <option value="used">Most used</option>
+                  <option value="newest">Newest</option>
+                </select>
+              </label>
               <input type="file" id="settingsMyImagesFile" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true" />
             </div>
             <div id="settingsMyImagesList" class="stock-assets-browse" aria-live="polite"></div>
@@ -1296,6 +1306,17 @@
       </div>
       <div class="modal-body">
         <p id="stockBannerPickerDesc" class="settings-hint">Pick one of your images or a bundled stock asset. You can still crop after applying.</p>
+        <div class="my-images-picker-toolbar" id="stockBannerPickerMyImagesToolbar" hidden>
+          <label class="my-images-sort-label" for="stockBannerPickerSort">
+            Sort My Images
+            <select id="stockBannerPickerSort" class="my-images-sort-select" aria-label="Sort My Images">
+              <option value="custom">Custom order</option>
+              <option value="name">Name</option>
+              <option value="used">Most used</option>
+              <option value="newest">Newest</option>
+            </select>
+          </label>
+        </div>
         <div id="stockBannerPickerGrid" class="stock-banner-picker-grid"></div>
       </div>
     </div>

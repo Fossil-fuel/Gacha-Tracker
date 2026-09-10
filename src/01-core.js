@@ -210,9 +210,29 @@
     return "uimg_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
   }
 
+  const USER_IMAGE_SORT_MODES = ["custom", "name", "used", "newest"];
+  const USER_IMAGE_CATEGORY_MAX = 40;
+
+  function normalizeUserImageCategory(raw) {
+    return String(raw || "")
+      .trim()
+      .slice(0, USER_IMAGE_CATEGORY_MAX);
+  }
+
+  function getUserImageLibrarySortMode() {
+    const mode = String(state.userImageLibrarySortMode || "custom").trim();
+    return USER_IMAGE_SORT_MODES.indexOf(mode) >= 0 ? mode : "custom";
+  }
+
+  function setUserImageLibrarySortMode(mode) {
+    const next = String(mode || "").trim();
+    state.userImageLibrarySortMode = USER_IMAGE_SORT_MODES.indexOf(next) >= 0 ? next : "custom";
+    return state.userImageLibrarySortMode;
+  }
+
   /**
    * Add an image to the personal library (stored once; tasks/games keep userimg:id refs).
-   * opts: { kind: "banner"|"pfp", label?, dataUrl }
+   * opts: { kind: "banner"|"pfp", label?, dataUrl, category? }
    */
   function addUserImage(opts) {
     const o = opts || {};
@@ -228,6 +248,7 @@
       id: generateUserImageId(),
       kind: kind,
       label: label.slice(0, 80),
+      category: normalizeUserImageCategory(o.category),
       createdAt: Date.now(),
       dataUrl: dataUrl,
     };
@@ -243,7 +264,121 @@
       if (label) entry.label = label.slice(0, 80);
     }
     if (patch.kind === "banner" || patch.kind === "pfp") entry.kind = patch.kind;
+    if (Object.prototype.hasOwnProperty.call(patch, "category")) {
+      entry.category = normalizeUserImageCategory(patch.category);
+    }
     return entry;
+  }
+
+  /**
+   * How many tasks/games currently reference each My Images id (userimg:…).
+   * Counts once per task / game icon — not per banner view crop.
+   */
+  function countUserImageUsages() {
+    const counts = Object.create(null);
+    function bump(ref) {
+      if (!isUserImageRef(ref)) return;
+      const id = getUserImageIdFromRef(ref);
+      if (!id) return;
+      counts[id] = (counts[id] || 0) + 1;
+    }
+    function scanTask(task) {
+      if (!task || typeof task !== "object") return;
+      const raw =
+        typeof getTaskBannerSourceRaw === "function"
+          ? getTaskBannerSourceRaw(task)
+          : task.bannerSourceImage || task.bannerImage || task.bannerHomeImage || task.bannerGamesImage || null;
+      bump(raw);
+    }
+    (state.games || []).forEach((g) => {
+      if (!g) return;
+      bump(g.iconImage);
+      (g.weeklies || []).forEach(scanTask);
+      (g.endgame || []).forEach(scanTask);
+    });
+    (state.extracurricularTasks || []).forEach(scanTask);
+    return counts;
+  }
+
+  function compareUserImagesForSort(a, b, mode, usageCounts, indexById) {
+    const counts = usageCounts || {};
+    if (mode === "name") {
+      const la = String((a && a.label) || (a && a.id) || "").toLowerCase();
+      const lb = String((b && b.label) || (b && b.id) || "").toLowerCase();
+      if (la < lb) return -1;
+      if (la > lb) return 1;
+    } else if (mode === "used") {
+      const ua = counts[a && a.id] || 0;
+      const ub = counts[b && b.id] || 0;
+      if (ub !== ua) return ub - ua;
+    } else if (mode === "newest") {
+      const ca = Number(a && a.createdAt) || 0;
+      const cb = Number(b && b.createdAt) || 0;
+      if (cb !== ca) return cb - ca;
+    } else {
+      const ia = indexById && a && a.id != null ? indexById.get(a.id) : 0;
+      const ib = indexById && b && b.id != null ? indexById.get(b.id) : 0;
+      return (ia == null ? 0 : ia) - (ib == null ? 0 : ib);
+    }
+    const ia = indexById && a && a.id != null ? indexById.get(a.id) : 0;
+    const ib = indexById && b && b.id != null ? indexById.get(b.id) : 0;
+    return (ia == null ? 0 : ia) - (ib == null ? 0 : ib);
+  }
+
+  /** Sorted copy of library entries for UI (does not mutate library unless mode is applied elsewhere). */
+  function getSortedUserImageEntries(entries, mode, usageCounts) {
+    const list = Array.isArray(entries) ? entries.slice() : [];
+    const indexById = new Map();
+    getUserImageLibrary().forEach((e, i) => {
+      if (e && e.id) indexById.set(e.id, i);
+    });
+    const sortMode = USER_IMAGE_SORT_MODES.indexOf(mode) >= 0 ? mode : getUserImageLibrarySortMode();
+    list.sort((a, b) => compareUserImagesForSort(a, b, sortMode, usageCounts, indexById));
+    return list;
+  }
+
+  /**
+   * Group entries by category for display. Named categories A–Z, then Uncategorized.
+   * Returns [{ category, label, entries }]
+   */
+  function groupUserImagesByCategory(entries, mode, usageCounts) {
+    const sorted = getSortedUserImageEntries(entries, mode, usageCounts);
+    const buckets = new Map();
+    sorted.forEach((e) => {
+      if (!e) return;
+      const cat = normalizeUserImageCategory(e.category);
+      if (!buckets.has(cat)) buckets.set(cat, []);
+      buckets.get(cat).push(e);
+    });
+    const named = [];
+    const uncategorized = [];
+    buckets.forEach((list, cat) => {
+      if (!cat) uncategorized.push({ category: "", label: "Uncategorized", entries: list });
+      else named.push({ category: cat, label: cat, entries: list });
+    });
+    named.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
+    return named.concat(uncategorized);
+  }
+
+  /** Move a library entry earlier (-1) or later (+1) among the same kind. Returns true if moved. */
+  function moveUserImageInLibrary(id, delta) {
+    const key = String(id || "").trim();
+    const list = getUserImageLibrary();
+    const from = list.findIndex((e) => e && e.id === key);
+    if (from < 0) return false;
+    const kind = list[from].kind;
+    const dir = (Number(delta) || 0) < 0 ? -1 : 1;
+    let to = from + dir;
+    while (to >= 0 && to < list.length) {
+      if (list[to] && list[to].kind === kind) break;
+      to += dir;
+    }
+    if (to < 0 || to >= list.length || !list[to] || list[to].kind !== kind) return false;
+    const tmp = list[from];
+    list[from] = list[to];
+    list[to] = tmp;
+    setUserImageLibrarySortMode("custom");
+    return true;
   }
 
   /**
@@ -272,21 +407,15 @@
   function cloneUserImageLibraryForSave(omitData) {
     return getUserImageLibrary().map((e) => {
       if (!e || typeof e !== "object") return e;
-      if (!omitData) {
-        return {
-          id: e.id,
-          kind: e.kind === "pfp" ? "pfp" : "banner",
-          label: e.label || "",
-          createdAt: e.createdAt || 0,
-          dataUrl: e.dataUrl || "",
-        };
-      }
-      return {
+      const meta = {
         id: e.id,
         kind: e.kind === "pfp" ? "pfp" : "banner",
         label: e.label || "",
+        category: normalizeUserImageCategory(e.category),
         createdAt: e.createdAt || 0,
       };
+      if (!omitData) meta.dataUrl = e.dataUrl || "";
+      return meta;
     });
   }
 
@@ -302,6 +431,7 @@
           id: id,
           kind: e.kind === "pfp" ? "pfp" : "banner",
           label: String(e.label || id).trim().slice(0, 80) || id,
+          category: normalizeUserImageCategory(e.category),
           createdAt: Number(e.createdAt) || 0,
           dataUrl: dataUrl.indexOf("data:") === 0 ? dataUrl : "",
         };
@@ -332,7 +462,11 @@
       if (e.dataUrl) return e;
       const prev = prevById.get(e.id);
       if (prev && typeof prev.dataUrl === "string" && prev.dataUrl.indexOf("data:") === 0) {
-        return Object.assign({}, e, { dataUrl: prev.dataUrl });
+        return Object.assign({}, e, {
+          dataUrl: prev.dataUrl,
+          category: e.category || normalizeUserImageCategory(prev.category),
+          label: e.label || prev.label || e.id,
+        });
       }
       return e;
     });
@@ -439,6 +573,7 @@
     historyYear: null,
     extracurricularTasks: [],
     userImageLibrary: [],
+    userImageLibrarySortMode: "custom", // "custom" | "name" | "used" | "newest"
     extracurricularCompleted: {},
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
     extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
@@ -919,6 +1054,9 @@
         if (Array.isArray(parsed.userImageLibrary)) {
           state.userImageLibrary = mergeLoadedUserImageLibrary(parsed.userImageLibrary, state.userImageLibrary);
         }
+        if (USER_IMAGE_SORT_MODES.indexOf(parsed.userImageLibrarySortMode) >= 0) {
+          state.userImageLibrarySortMode = parsed.userImageLibrarySortMode;
+        }
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
         if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
@@ -971,6 +1109,9 @@
     migrateSchemaIfNeeded();
     if (!state.extracurricularCompletedAt) state.extracurricularCompletedAt = {};
     if (!Array.isArray(state.userImageLibrary)) state.userImageLibrary = [];
+    if (USER_IMAGE_SORT_MODES.indexOf(state.userImageLibrarySortMode) < 0) {
+      state.userImageLibrarySortMode = "custom";
+    }
     if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
     const taskIds = new Set((state.extracurricularTasks || []).map((t) => t.id));
@@ -1102,6 +1243,7 @@
         ? (state.extracurricularTasks || []).map(cloneTaskWithoutImages)
         : state.extracurricularTasks,
       userImageLibrary: cloneUserImageLibraryForSave(omitImages),
+      userImageLibrarySortMode: getUserImageLibrarySortMode(),
       extracurricularCompleted: state.extracurricularCompleted,
       extracurricularCompletedAt: state.extracurricularCompletedAt,
       extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,

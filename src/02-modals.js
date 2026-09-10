@@ -5532,6 +5532,26 @@ function syncTaskCycleEndTimeUI() {
         }
       });
     }
+    const myImagesSort = qs("settingsMyImagesSort");
+    if (myImagesSort) {
+      myImagesSort.addEventListener("change", () => {
+        if (typeof setUserImageLibrarySortMode === "function") {
+          setUserImageLibrarySortMode(myImagesSort.value);
+          save();
+        }
+        fillSettingsMyImagesGallery();
+      });
+    }
+    const pickerSort = qs("stockBannerPickerSort");
+    if (pickerSort) {
+      pickerSort.addEventListener("change", () => {
+        if (typeof setUserImageLibrarySortMode === "function") {
+          setUserImageLibrarySortMode(pickerSort.value);
+          save();
+        }
+        fillStockBannerPickerGrid(qs("stockBannerPickerGrid"));
+      });
+    }
 
     const exportBtn = qs("settingsExportBtn");
     if (exportBtn) exportBtn.addEventListener("click", () => {
@@ -6888,7 +6908,12 @@ function syncTaskCycleEndTimeUI() {
     alert("Saved to My Images. This task now references the library copy.");
   }
 
-  function appendPickerSection(host, title, assets, onPick) {
+  function formatUserImageUseCount(n) {
+    const count = Math.max(0, Number(n) || 0);
+    return count === 1 ? "1 use" : count + " uses";
+  }
+
+  function appendPickerSection(host, title, assets, onPick, usageCounts) {
     if (!assets || !assets.length) return;
     const heading = document.createElement("h4");
     heading.className = "stock-banner-picker-heading";
@@ -6901,7 +6926,15 @@ function syncTaskCycleEndTimeUI() {
       btn.type = "button";
       btn.className = "stock-banner-picker-card";
       if (asset.id) btn.setAttribute("data-stock-id", asset.id);
-      btn.setAttribute("aria-label", "Use image " + (asset.label || asset.id || ""));
+      const useCount =
+        asset.user && usageCounts && asset.id ? usageCounts[asset.id] || 0 : null;
+      const useLabel = useCount != null ? formatUserImageUseCount(useCount) : "";
+      btn.setAttribute(
+        "aria-label",
+        "Use image " +
+          (asset.label || asset.id || "") +
+          (useLabel ? " (" + useLabel + ")" : "")
+      );
       const img = document.createElement("img");
       img.src = asset.previewUrl || resolveStockBannerUrl(asset.path || asset.ref || "");
       img.alt = "";
@@ -6910,11 +6943,24 @@ function syncTaskCycleEndTimeUI() {
       cap.className = "stock-banner-picker-label";
       cap.textContent = asset.label || asset.id || "Image";
       btn.appendChild(img);
+      if (useCount != null) {
+        const badge = document.createElement("span");
+        badge.className = "stock-banner-picker-use";
+        badge.textContent = useLabel;
+        btn.appendChild(badge);
+      }
       btn.appendChild(cap);
       btn.addEventListener("click", () => onPick(asset));
       row.appendChild(btn);
     });
     host.appendChild(row);
+  }
+
+  function syncMyImagesSortSelect(selectEl) {
+    if (!selectEl) return;
+    const mode =
+      typeof getUserImageLibrarySortMode === "function" ? getUserImageLibrarySortMode() : "custom";
+    selectEl.value = mode;
   }
 
   function fillStockBannerPickerGrid(host) {
@@ -6923,26 +6969,50 @@ function syncTaskCycleEndTimeUI() {
     const mode = (stockPickerContext && stockPickerContext.mode) || "banner";
     const wantBanner = mode === "banner" || mode === "all";
     const wantPfp = mode === "pfp" || mode === "all";
+    const sortMode =
+      typeof getUserImageLibrarySortMode === "function" ? getUserImageLibrarySortMode() : "custom";
+    const usageCounts =
+      typeof countUserImageUsages === "function" ? countUserImageUsages() : Object.create(null);
+
+    const toolbar = qs("stockBannerPickerMyImagesToolbar");
+    const sortSelect = qs("stockBannerPickerSort");
+    syncMyImagesSortSelect(sortSelect);
 
     const userEntries = typeof getUserImageLibrary === "function" ? getUserImageLibrary() : [];
-    const userAssets = userEntries
-      .filter((e) => e && e.dataUrl && ((wantBanner && e.kind !== "pfp") || (wantPfp && e.kind === "pfp") || mode === "all"))
-      .map((e) => ({
-        id: e.id,
-        label: e.label || e.id,
-        ref: makeUserImageRef(e.id),
-        path: makeUserImageRef(e.id),
-        previewUrl: e.dataUrl,
-        user: true,
-        kind: e.kind,
-      }));
+    const filtered = userEntries.filter(
+      (e) =>
+        e &&
+        e.dataUrl &&
+        ((wantBanner && e.kind !== "pfp") || (wantPfp && e.kind === "pfp") || mode === "all")
+    );
 
-    if (userAssets.length) {
-      appendPickerSection(host, "My Images", userAssets, applyPickerImageAsset);
+    if (toolbar) toolbar.hidden = !filtered.length;
+
+    if (filtered.length) {
+      const groups =
+        typeof groupUserImagesByCategory === "function"
+          ? groupUserImagesByCategory(filtered, sortMode, usageCounts)
+          : [{ category: "", label: "My Images", entries: filtered }];
+      const multiCat = groups.length > 1 || (groups[0] && groups[0].category);
+      groups.forEach((group) => {
+        const assets = (group.entries || []).map((e) => ({
+          id: e.id,
+          label: e.label || e.id,
+          ref: makeUserImageRef(e.id),
+          path: makeUserImageRef(e.id),
+          previewUrl: e.dataUrl,
+          user: true,
+          kind: e.kind,
+          category: e.category || "",
+        }));
+        const title = multiCat ? "My Images · " + group.label : "My Images";
+        appendPickerSection(host, title, assets, applyPickerImageAsset, usageCounts);
+      });
     } else {
       const hint = document.createElement("p");
       hint.className = "settings-hint";
-      hint.textContent = "No personal images yet — upload from Settings → My Images, or use Save to My Images after choosing a banner.";
+      hint.textContent =
+        "No personal images yet — upload from Settings → My Images, or use Save to My Images after choosing a banner.";
       host.appendChild(hint);
     }
 
@@ -6989,6 +7059,12 @@ function syncTaskCycleEndTimeUI() {
     const host = qs("settingsMyImagesList");
     if (!host) return;
     host.innerHTML = "";
+    const sortSelect = qs("settingsMyImagesSort");
+    syncMyImagesSortSelect(sortSelect);
+    const sortMode =
+      typeof getUserImageLibrarySortMode === "function" ? getUserImageLibrarySortMode() : "custom";
+    const usageCounts =
+      typeof countUserImageUsages === "function" ? countUserImageUsages() : Object.create(null);
     const list = typeof getUserImageLibrary === "function" ? getUserImageLibrary() : [];
     if (!list.length) {
       host.innerHTML = '<p class="settings-hint">No personal images yet. Add a banner or profile picture above.</p>';
@@ -6996,6 +7072,7 @@ function syncTaskCycleEndTimeUI() {
     }
     const banners = list.filter((e) => e && e.kind !== "pfp");
     const pfps = list.filter((e) => e && e.kind === "pfp");
+    const customOrder = sortMode === "custom";
 
     function renderBlock(title, entries, galleryClass) {
       if (!entries.length) return;
@@ -7004,65 +7081,152 @@ function syncTaskCycleEndTimeUI() {
       const heading = document.createElement("h5");
       heading.className = "stock-assets-section-heading";
       heading.textContent = title + " (" + entries.length + ")";
-      const grid = document.createElement("div");
-      grid.className = "stock-assets-gallery" + (galleryClass ? " " + galleryClass : "");
-      entries.forEach((entry) => {
-        const card = document.createElement("figure");
-        card.className = "stock-assets-card my-images-card";
-        const img = document.createElement("img");
-        img.src = entry.dataUrl || "";
-        img.alt = entry.label || entry.id;
-        img.loading = "lazy";
-        const fig = document.createElement("figcaption");
-        fig.textContent = entry.label || entry.id;
-        const ref = document.createElement("code");
-        ref.className = "stock-assets-path";
-        ref.textContent = makeUserImageRef(entry.id);
-        const actions = document.createElement("div");
-        actions.className = "my-images-card-actions";
-        const renameBtn = document.createElement("button");
-        renameBtn.type = "button";
-        renameBtn.className = "btn btn-ghost btn-sm";
-        renameBtn.textContent = "Rename";
-        renameBtn.addEventListener("click", () => {
-          const next = window.prompt("Rename image", entry.label || "");
-          if (next == null) return;
-          updateUserImageMeta(entry.id, { label: next });
-          save();
-          fillSettingsMyImagesGallery();
-        });
-        const replaceBtn = document.createElement("button");
-        replaceBtn.type = "button";
-        replaceBtn.className = "btn btn-ghost btn-sm";
-        replaceBtn.textContent = "Replace";
-        replaceBtn.title = "Swap the picture; tasks keep the same userimg reference";
-        replaceBtn.addEventListener("click", () => {
-          const fileInput = qs("settingsMyImagesFile");
-          if (!fileInput) return;
-          fileInput.dataset.replaceId = entry.id;
-          fileInput.click();
-        });
-        const delBtn = document.createElement("button");
-        delBtn.type = "button";
-        delBtn.className = "btn btn-ghost btn-sm";
-        delBtn.textContent = "Delete";
-        delBtn.addEventListener("click", () => {
-          if (!window.confirm("Remove “" + (entry.label || entry.id) + "” from My Images? Tasks still using it will lose the picture until you pick another.")) return;
-          removeUserImage(entry.id);
-          save();
-          fillSettingsMyImagesGallery();
-        });
-        actions.appendChild(renameBtn);
-        actions.appendChild(replaceBtn);
-        actions.appendChild(delBtn);
-        card.appendChild(img);
-        card.appendChild(fig);
-        card.appendChild(ref);
-        card.appendChild(actions);
-        grid.appendChild(card);
-      });
       block.appendChild(heading);
-      block.appendChild(grid);
+
+      const groups =
+        typeof groupUserImagesByCategory === "function"
+          ? groupUserImagesByCategory(entries, sortMode, usageCounts)
+          : [{ category: "", label: "", entries: entries }];
+      const showCatHeadings = groups.length > 1 || (groups[0] && groups[0].category);
+
+      groups.forEach((group) => {
+        if (showCatHeadings) {
+          const catHead = document.createElement("h6");
+          catHead.className = "my-images-category-heading";
+          catHead.textContent = group.label + " (" + group.entries.length + ")";
+          block.appendChild(catHead);
+        }
+        const grid = document.createElement("div");
+        grid.className = "stock-assets-gallery" + (galleryClass ? " " + galleryClass : "");
+        group.entries.forEach((entry) => {
+          const card = document.createElement("figure");
+          card.className = "stock-assets-card my-images-card";
+          const img = document.createElement("img");
+          img.src = entry.dataUrl || "";
+          img.alt = entry.label || entry.id;
+          img.loading = "lazy";
+          const fig = document.createElement("figcaption");
+          fig.textContent = entry.label || entry.id;
+          const meta = document.createElement("div");
+          meta.className = "my-images-card-meta";
+          const useEl = document.createElement("span");
+          useEl.className = "my-images-use-count";
+          useEl.textContent = formatUserImageUseCount(usageCounts[entry.id] || 0);
+          meta.appendChild(useEl);
+          if (entry.category) {
+            const catEl = document.createElement("span");
+            catEl.className = "my-images-card-category";
+            catEl.textContent = entry.category;
+            meta.appendChild(catEl);
+          }
+          const ref = document.createElement("code");
+          ref.className = "stock-assets-path";
+          ref.textContent = makeUserImageRef(entry.id);
+          const actions = document.createElement("div");
+          actions.className = "my-images-card-actions";
+          const renameBtn = document.createElement("button");
+          renameBtn.type = "button";
+          renameBtn.className = "btn btn-ghost btn-sm";
+          renameBtn.textContent = "Rename";
+          renameBtn.addEventListener("click", () => {
+            const next = window.prompt("Rename image", entry.label || "");
+            if (next == null) return;
+            updateUserImageMeta(entry.id, { label: next });
+            save();
+            fillSettingsMyImagesGallery();
+          });
+          const catBtn = document.createElement("button");
+          catBtn.type = "button";
+          catBtn.className = "btn btn-ghost btn-sm";
+          catBtn.textContent = "Category";
+          catBtn.title = "Optional category for grouping in Settings and the picker";
+          catBtn.addEventListener("click", () => {
+            const next = window.prompt(
+              "Category (leave blank to clear)",
+              entry.category || ""
+            );
+            if (next == null) return;
+            updateUserImageMeta(entry.id, { category: next });
+            save();
+            fillSettingsMyImagesGallery();
+          });
+          const replaceBtn = document.createElement("button");
+          replaceBtn.type = "button";
+          replaceBtn.className = "btn btn-ghost btn-sm";
+          replaceBtn.textContent = "Replace";
+          replaceBtn.title = "Swap the picture; tasks keep the same userimg reference";
+          replaceBtn.addEventListener("click", () => {
+            const fileInput = qs("settingsMyImagesFile");
+            if (!fileInput) return;
+            fileInput.dataset.replaceId = entry.id;
+            fileInput.click();
+          });
+          const delBtn = document.createElement("button");
+          delBtn.type = "button";
+          delBtn.className = "btn btn-ghost btn-sm";
+          delBtn.textContent = "Delete";
+          delBtn.addEventListener("click", () => {
+            const uses = usageCounts[entry.id] || 0;
+            const useNote =
+              uses > 0
+                ? " It is currently used " + formatUserImageUseCount(uses) + "."
+                : "";
+            if (
+              !window.confirm(
+                "Remove “" +
+                  (entry.label || entry.id) +
+                  "” from My Images?" +
+                  useNote +
+                  " Tasks still using it will lose the picture until you pick another."
+              )
+            ) {
+              return;
+            }
+            removeUserImage(entry.id);
+            save();
+            fillSettingsMyImagesGallery();
+          });
+          actions.appendChild(renameBtn);
+          actions.appendChild(catBtn);
+          actions.appendChild(replaceBtn);
+          actions.appendChild(delBtn);
+          if (customOrder) {
+            const upBtn = document.createElement("button");
+            upBtn.type = "button";
+            upBtn.className = "btn btn-ghost btn-sm";
+            upBtn.textContent = "↑";
+            upBtn.title = "Move earlier in custom order";
+            upBtn.setAttribute("aria-label", "Move earlier");
+            upBtn.addEventListener("click", () => {
+              if (typeof moveUserImageInLibrary === "function" && moveUserImageInLibrary(entry.id, -1)) {
+                save();
+                fillSettingsMyImagesGallery();
+              }
+            });
+            const downBtn = document.createElement("button");
+            downBtn.type = "button";
+            downBtn.className = "btn btn-ghost btn-sm";
+            downBtn.textContent = "↓";
+            downBtn.title = "Move later in custom order";
+            downBtn.setAttribute("aria-label", "Move later");
+            downBtn.addEventListener("click", () => {
+              if (typeof moveUserImageInLibrary === "function" && moveUserImageInLibrary(entry.id, 1)) {
+                save();
+                fillSettingsMyImagesGallery();
+              }
+            });
+            actions.appendChild(upBtn);
+            actions.appendChild(downBtn);
+          }
+          card.appendChild(img);
+          card.appendChild(fig);
+          card.appendChild(meta);
+          card.appendChild(ref);
+          card.appendChild(actions);
+          grid.appendChild(card);
+        });
+        block.appendChild(grid);
+      });
       host.appendChild(block);
     }
 
