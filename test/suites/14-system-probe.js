@@ -251,6 +251,44 @@ module.exports = {
       })
     );
 
+    checks.push(
+      check("FIND: Superstring-like Mon 15:00 — after reset, noon period must not keep prior cycle", () => {
+        // HI3 Superstring Dimension P1: weekly Mon 15:00, 2-day window.
+        // Bug: resolving "current cycle" via period date at noon after 15:00 reset
+        // still lands in last week's bounds → card looks already complete.
+        const task = {
+          weekStartDay: 1,
+          weekStartHour: 15,
+          dateStarted: "2026-03-10",
+          frequencyEvery: 1,
+          frequencyUnit: "week",
+          timeLimitEvery: 2,
+          timeLimitUnit: "day",
+        };
+        const afterReset = new Date(2026, 2, 16, 16, 0, 0); // Mon Mar 16 16:00
+        const membership = math.getCycleMembershipMoment(afterReset, 15, 0);
+        const boundsLive = math.getCycleBoundsForMoment(task, membership);
+        const boundsNoon = math.getCycleBoundsForMoment(task, new Date(2026, 2, 16, 12, 0, 0));
+        assert.ok(boundsLive, "after 15:00 membership has a cycle");
+        assert.ok(boundsNoon, "noon still resolves some cycle");
+        assert.ok(
+          boundsLive.cycleStart.getTime() > boundsNoon.cycleStart.getTime(),
+          "live membership after Mon 15:00 must be the new week, not noon's prior week"
+        );
+        const core = fs.readFileSync(path.join(__dirname, "..", "..", "src", "01-core.js"), "utf8");
+        assert.ok(
+          /function getEndgameCompletionDateInCurrentCycle[\s\S]{0,700}getCycleMembershipMoment/.test(core) &&
+            !/function getEndgameCompletionDateInCurrentCycle[\s\S]{0,500}getTaskPeriodDateStr/.test(core),
+          "endgame current-cycle complete must use membership moment, not period noon"
+        );
+        assert.ok(
+          /function getWeeklyCompletionDateInCurrentCycle[\s\S]{0,700}getCycleMembershipMoment/.test(core) &&
+            !/function getWeeklyCompletionDateInCurrentCycle[\s\S]{0,500}getTaskPeriodDateStr/.test(core),
+          "weekly current-cycle complete must use membership moment, not period noon"
+        );
+      })
+    );
+
     // ── E. Bleed + cleanup + trends + sync chain ─────────────
     checks.push(
       check("Invariant: legacy bleed → cleanup → sync → save/load stays incomplete for new cycle", () => {

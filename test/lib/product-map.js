@@ -41,6 +41,7 @@ const MODALS = [
   "extracurricularCompleteModal",
   "settingsModal",
   "stockBannerPickerModal",
+  "myImagesCategoriesModal",
   "manualResetModal",
   "manualCompletionModal",
   "colorWheelModal",

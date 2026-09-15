@@ -1266,13 +1266,13 @@
             <p class="settings-hint">
               Upload banners and profile pictures you reuse often. Tasks and games store a short reference
               (<code>userimg:…</code>), so the file is kept once — same idea as Stock Assets.
-              Use <strong>Replace</strong> to swap the picture while keeping that reference (banners stay linked).
-              Optional <strong>categories</strong> and sorting help organize the library; the picker shows how many times each image is used.
+              Drag images to reorder (Custom sort) or move them between categories. Use <strong>Edit</strong> on a card for rename / replace / delete.
               <strong>Export data</strong> (JSON) includes these images.
             </p>
             <div class="my-images-toolbar">
               <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesUploadBannerBtn">Add banner</button>
               <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesUploadPfpBtn">Add profile picture</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="settingsMyImagesEditCategoriesBtn">Edit Categories</button>
               <label class="my-images-sort-label" for="settingsMyImagesSort">
                 Sort
                 <select id="settingsMyImagesSort" class="my-images-sort-select" aria-label="Sort My Images">
@@ -1318,6 +1318,31 @@
           </label>
         </div>
         <div id="stockBannerPickerGrid" class="stock-banner-picker-grid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- My Images · Edit Categories -->
+  <div id="myImagesCategoriesModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="myImagesCategoriesModal"></div>
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="myImagesCategoriesModalTitle">
+      <div class="modal-header">
+        <h3 id="myImagesCategoriesModalTitle" class="modal-title">Edit Categories</h3>
+        <button type="button" class="icon-btn" id="myImagesCategoriesModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="settings-hint">Add, rename, delete, or reorder categories. Images keep their category assignment until you change it.</p>
+        <div id="myImagesCategoriesList" class="my-images-categories-list" aria-live="polite"></div>
+        <div class="form-row my-images-category-add-row">
+          <label for="myImagesCategoryAddInput">New category</label>
+          <div class="my-images-category-add-controls">
+            <input id="myImagesCategoryAddInput" type="text" maxlength="40" placeholder="e.g. WuWa" />
+            <button type="button" class="btn btn-ghost btn-sm" id="myImagesCategoryAddBtn">Add</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-add" id="myImagesCategoriesModalDone">Done</button>
       </div>
     </div>
   </div>

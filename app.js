@@ -353,6 +353,94 @@
     return state.userImageLibrarySortMode;
   }
 
+  function getUserImageCategories() {
+    if (!Array.isArray(state.userImageCategories)) state.userImageCategories = [];
+    return state.userImageCategories;
+  }
+
+  function normalizeUserImageCategoriesList(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seen = new Set();
+    raw.forEach((name) => {
+      const cat = normalizeUserImageCategory(name);
+      if (!cat) return;
+      const key = cat.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(cat);
+    });
+    return out;
+  }
+
+  /** Ensure categories used on images appear in the ordered category list. */
+  function syncUserImageCategoriesFromLibrary() {
+    const cats = getUserImageCategories();
+    const seen = new Set(cats.map((c) => c.toLowerCase()));
+    getUserImageLibrary().forEach((e) => {
+      const cat = normalizeUserImageCategory(e && e.category);
+      if (!cat) return;
+      const key = cat.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      cats.push(cat);
+    });
+    return cats;
+  }
+
+  function addUserImageCategory(name) {
+    const cat = normalizeUserImageCategory(name);
+    if (!cat) return null;
+    const cats = getUserImageCategories();
+    if (cats.some((c) => c.toLowerCase() === cat.toLowerCase())) return cat;
+    cats.push(cat);
+    return cat;
+  }
+
+  function renameUserImageCategory(oldName, newName) {
+    const from = normalizeUserImageCategory(oldName);
+    const to = normalizeUserImageCategory(newName);
+    if (!from || !to || from.toLowerCase() === to.toLowerCase()) return false;
+    const cats = getUserImageCategories();
+    if (cats.some((c) => c.toLowerCase() === to.toLowerCase())) return false;
+    const idx = cats.findIndex((c) => c.toLowerCase() === from.toLowerCase());
+    if (idx < 0) return false;
+    cats[idx] = to;
+    getUserImageLibrary().forEach((e) => {
+      if (e && normalizeUserImageCategory(e.category).toLowerCase() === from.toLowerCase()) {
+        e.category = to;
+      }
+    });
+    return true;
+  }
+
+  function removeUserImageCategory(name) {
+    const cat = normalizeUserImageCategory(name);
+    if (!cat) return false;
+    const cats = getUserImageCategories();
+    const idx = cats.findIndex((c) => c.toLowerCase() === cat.toLowerCase());
+    if (idx < 0) return false;
+    cats.splice(idx, 1);
+    getUserImageLibrary().forEach((e) => {
+      if (e && normalizeUserImageCategory(e.category).toLowerCase() === cat.toLowerCase()) {
+        e.category = "";
+      }
+    });
+    return true;
+  }
+
+  function moveUserImageCategory(name, delta) {
+    const cat = normalizeUserImageCategory(name);
+    const cats = getUserImageCategories();
+    const from = cats.findIndex((c) => c.toLowerCase() === cat.toLowerCase());
+    if (from < 0) return false;
+    const to = from + (Number(delta) || 0);
+    if (to < 0 || to >= cats.length) return false;
+    const [item] = cats.splice(from, 1);
+    cats.splice(to, 0, item);
+    return true;
+  }
+
   /**
    * Add an image to the personal library (stored once; tasks/games keep userimg:id refs).
    * opts: { kind: "banner"|"pfp", label?, dataUrl, category? }
@@ -367,11 +455,13 @@
       (kind === "pfp" ? "Profile picture" : "Banner") +
         " " +
         (getUserImageLibrary().filter((e) => e && e.kind === kind).length + 1);
+    const category = normalizeUserImageCategory(o.category);
+    if (category) addUserImageCategory(category);
     const entry = {
       id: generateUserImageId(),
       kind: kind,
       label: label.slice(0, 80),
-      category: normalizeUserImageCategory(o.category),
+      category: category,
       createdAt: Date.now(),
       dataUrl: dataUrl,
     };
@@ -388,22 +478,50 @@
     }
     if (patch.kind === "banner" || patch.kind === "pfp") entry.kind = patch.kind;
     if (Object.prototype.hasOwnProperty.call(patch, "category")) {
-      entry.category = normalizeUserImageCategory(patch.category);
+      const category = normalizeUserImageCategory(patch.category);
+      entry.category = category;
+      if (category) addUserImageCategory(category);
     }
     return entry;
   }
 
   /**
-   * How many tasks/games currently reference each My Images id (userimg:…).
+   * Canonical relative stock path for usage matching (aliases → current webp path).
+   * Returns "" for userimg / data / blob / http refs.
+   */
+  function canonicalizeStockImagePath(path) {
+    let raw = String(path || "").trim();
+    if (!raw) return "";
+    if (isUserImageRef(raw) || /^(data:|blob:|https?:|\/\/)/i.test(raw)) return "";
+    raw = raw.replace(/^\.\//, "");
+    try {
+      raw = decodeURIComponent(raw);
+    } catch (_) {}
+    const assetsIdx = raw.toLowerCase().indexOf("assets/");
+    if (assetsIdx > 0) raw = raw.slice(assetsIdx);
+    return STOCK_BANNER_PATH_ALIASES[raw] || raw;
+  }
+
+  /**
+   * How many tasks/games currently reference each image.
+   * Returns { byUserId: { id: n }, byStockPath: { "assets/…": n } }.
    * Counts once per task / game icon — not per banner view crop.
    */
-  function countUserImageUsages() {
-    const counts = Object.create(null);
+  function countImageUsages() {
+    const byUserId = Object.create(null);
+    const byStockPath = Object.create(null);
     function bump(ref) {
-      if (!isUserImageRef(ref)) return;
-      const id = getUserImageIdFromRef(ref);
-      if (!id) return;
-      counts[id] = (counts[id] || 0) + 1;
+      const raw = ref != null ? String(ref).trim() : "";
+      if (!raw) return;
+      if (isUserImageRef(raw)) {
+        const id = getUserImageIdFromRef(raw);
+        if (!id) return;
+        byUserId[id] = (byUserId[id] || 0) + 1;
+        return;
+      }
+      const path = canonicalizeStockImagePath(raw);
+      if (!path) return;
+      byStockPath[path] = (byStockPath[path] || 0) + 1;
     }
     function scanTask(task) {
       if (!task || typeof task !== "object") return;
@@ -420,7 +538,12 @@
       (g.endgame || []).forEach(scanTask);
     });
     (state.extracurricularTasks || []).forEach(scanTask);
-    return counts;
+    return { byUserId: byUserId, byStockPath: byStockPath };
+  }
+
+  /** My Images id → use count (subset of countImageUsages). */
+  function countUserImageUsages() {
+    return countImageUsages().byUserId;
   }
 
   function compareUserImagesForSort(a, b, mode, usageCounts, indexById) {
@@ -461,10 +584,13 @@
   }
 
   /**
-   * Group entries by category for display. Named categories A–Z, then Uncategorized.
+   * Group entries by category for display, following userImageCategories order.
+   * opts.includeEmpty: include defined categories with no images (drop targets).
    * Returns [{ category, label, entries }]
    */
-  function groupUserImagesByCategory(entries, mode, usageCounts) {
+  function groupUserImagesByCategory(entries, mode, usageCounts, opts) {
+    const options = opts || {};
+    syncUserImageCategoriesFromLibrary();
     const sorted = getSortedUserImageEntries(entries, mode, usageCounts);
     const buckets = new Map();
     sorted.forEach((e) => {
@@ -473,17 +599,75 @@
       if (!buckets.has(cat)) buckets.set(cat, []);
       buckets.get(cat).push(e);
     });
-    const named = [];
-    const uncategorized = [];
-    buckets.forEach((list, cat) => {
-      if (!cat) uncategorized.push({ category: "", label: "Uncategorized", entries: list });
-      else named.push({ category: cat, label: cat, entries: list });
+    const out = [];
+    getUserImageCategories().forEach((cat) => {
+      const list = buckets.get(cat) || [];
+      buckets.delete(cat);
+      if (list.length || options.includeEmpty) {
+        out.push({ category: cat, label: cat, entries: list });
+      }
     });
-    named.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
-    return named.concat(uncategorized);
+    // Orphan category names still on images but missing from ordered list
+    const orphans = [];
+    buckets.forEach((list, cat) => {
+      if (!cat) return;
+      orphans.push({ category: cat, label: cat, entries: list });
+    });
+    orphans.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
+    out.push.apply(out, orphans);
+    const uncategorized = buckets.get("") || [];
+    if (uncategorized.length || (options.includeEmpty && getUserImageCategories().length > 0)) {
+      out.push({ category: "", label: "Uncategorized", entries: uncategorized });
+    } else if (!out.length && uncategorized.length) {
+      out.push({ category: "", label: "Uncategorized", entries: uncategorized });
+    }
+    // No categories defined: one flat group without a category heading label
+    if (!getUserImageCategories().length && out.length === 1 && !out[0].category) {
+      out[0].label = "";
+    }
+    return out;
   }
 
-  /** Move a library entry earlier (-1) or later (+1) among the same kind. Returns true if moved. */
+  /**
+   * Place a library image for drag-and-drop: optional new category + insert before/after another id.
+   * opts: { category?, beforeId?, afterId? }
+   */
+  function placeUserImageInLibrary(id, opts) {
+    const key = String(id || "").trim();
+    const list = getUserImageLibrary();
+    const from = list.findIndex((e) => e && e.id === key);
+    if (from < 0) return false;
+    const o = opts || {};
+    const entry = list[from];
+    if (Object.prototype.hasOwnProperty.call(o, "category")) {
+      const category = normalizeUserImageCategory(o.category);
+      entry.category = category;
+      if (category) addUserImageCategory(category);
+    }
+    list.splice(from, 1);
+    let insertAt = list.length;
+    const beforeId = o.beforeId != null ? String(o.beforeId).trim() : "";
+    const afterId = o.afterId != null ? String(o.afterId).trim() : "";
+    if (beforeId) {
+      const bi = list.findIndex((e) => e && e.id === beforeId);
+      if (bi >= 0) insertAt = bi;
+    } else if (afterId) {
+      const ai = list.findIndex((e) => e && e.id === afterId);
+      if (ai >= 0) insertAt = ai + 1;
+    } else {
+      const cat = normalizeUserImageCategory(entry.category);
+      let last = -1;
+      list.forEach((e, i) => {
+        if (e && e.kind === entry.kind && normalizeUserImageCategory(e.category) === cat) last = i;
+      });
+      insertAt = last >= 0 ? last + 1 : list.length;
+    }
+    list.splice(insertAt, 0, entry);
+    setUserImageLibrarySortMode("custom");
+    return true;
+  }
+
+  /** @deprecated Prefer placeUserImageInLibrary for drag-and-drop. */
   function moveUserImageInLibrary(id, delta) {
     const key = String(id || "").trim();
     const list = getUserImageLibrary();
@@ -497,11 +681,7 @@
       to += dir;
     }
     if (to < 0 || to >= list.length || !list[to] || list[to].kind !== kind) return false;
-    const tmp = list[from];
-    list[from] = list[to];
-    list[to] = tmp;
-    setUserImageLibrarySortMode("custom");
-    return true;
+    return placeUserImageInLibrary(key, dir < 0 ? { beforeId: list[to].id } : { afterId: list[to].id });
   }
 
   /**
@@ -697,6 +877,7 @@
     extracurricularTasks: [],
     userImageLibrary: [],
     userImageLibrarySortMode: "custom", // "custom" | "name" | "used" | "newest"
+    userImageCategories: [], // ordered category names for My Images
     extracurricularCompleted: {},
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
     extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
@@ -1180,6 +1361,9 @@
         if (USER_IMAGE_SORT_MODES.indexOf(parsed.userImageLibrarySortMode) >= 0) {
           state.userImageLibrarySortMode = parsed.userImageLibrarySortMode;
         }
+        if (Array.isArray(parsed.userImageCategories)) {
+          state.userImageCategories = normalizeUserImageCategoriesList(parsed.userImageCategories);
+        }
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
         if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
@@ -1235,6 +1419,9 @@
     if (USER_IMAGE_SORT_MODES.indexOf(state.userImageLibrarySortMode) < 0) {
       state.userImageLibrarySortMode = "custom";
     }
+    if (!Array.isArray(state.userImageCategories)) state.userImageCategories = [];
+    else state.userImageCategories = normalizeUserImageCategoriesList(state.userImageCategories);
+    syncUserImageCategoriesFromLibrary();
     if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
     const taskIds = new Set((state.extracurricularTasks || []).map((t) => t.id));
@@ -1367,6 +1554,7 @@
         : state.extracurricularTasks,
       userImageLibrary: cloneUserImageLibraryForSave(omitImages),
       userImageLibrarySortMode: getUserImageLibrarySortMode(),
+      userImageCategories: getUserImageCategories().slice(),
       extracurricularCompleted: state.extracurricularCompleted,
       extracurricularCompletedAt: state.extracurricularCompletedAt,
       extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
@@ -8513,7 +8701,9 @@
   }
 
   /** Returns the dateStr where this weekly was completed in the current cycle, or null.
-   * Uses actual current time so the cycle's "last day" correctly extends to reset (e.g. 4am) instead of midnight. */
+   * Uses reset-aware membership moment (not period date at noon). Tasks that reset after
+   * noon (e.g. Superstring Dimension Mon 15:00) would otherwise still resolve last week's
+   * bounds after reset and look already complete. */
   function getWeeklyCompletionDateInCurrentCycle(key, todayStr) {
     const dot = key.indexOf(".");
     if (dot <= 0) return null;
@@ -8522,10 +8712,11 @@
     const game = getGame(gameId);
     const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const periodStr = getTaskPeriodDateStr("weeklies", task, game, getSimulatedNow());
-    const bounds =
-      resolveCycleBoundsForCompletionDate("weeklies", task, game, periodStr) ||
-      getWeeklyCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
+    const bounds = getWeeklyCycleBoundsForMoment(
+      task,
+      getCycleMembershipMoment(task, game),
+      game
+    );
     return findCompletionDateInBounds(key, "weeklies", bounds);
   }
 
@@ -8537,8 +8728,9 @@
   }
 
   /** Returns the dateStr where this endgame was completed in the current cycle, or null.
-   * Uses completionByDate only; endgameCompletionDates is never consulted here.
-   * Uses actual current time so the cycle's "last day" correctly extends to reset (e.g. 4am) instead of midnight. */
+   * Uses completionByDate / timestamps only; endgameCompletionDates is never consulted here.
+   * Uses reset-aware membership moment (not period date at noon) so afternoon resets
+   * (Superstring Dimension P1 Mon 15:00, etc.) open a fresh incomplete cycle. */
   function getEndgameCompletionDateInCurrentCycle(key, todayStr) {
     const dot = key.indexOf(".");
     if (dot <= 0) return null;
@@ -8547,10 +8739,11 @@
     const game = getGame(gameId);
     const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const periodStr = getTaskPeriodDateStr("endgame", task, game, getSimulatedNow());
-    const bounds =
-      resolveCycleBoundsForCompletionDate("endgame", task, game, periodStr) ||
-      getEndgameCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
+    const bounds = getEndgameCycleBoundsForMoment(
+      task,
+      getCycleMembershipMoment(task, game),
+      game
+    );
     return findCompletionDateInBounds(key, "endgame", bounds);
   }
 
@@ -15322,6 +15515,42 @@ function syncTaskCycleEndTimeUI() {
         fillSettingsMyImagesGallery();
       });
     }
+    const editCategoriesBtn = qs("settingsMyImagesEditCategoriesBtn");
+    if (editCategoriesBtn) {
+      editCategoriesBtn.addEventListener("click", () => openMyImagesCategoriesModal());
+    }
+    const categoriesClose = qs("myImagesCategoriesModalClose");
+    if (categoriesClose) categoriesClose.addEventListener("click", () => closeMyImagesCategoriesModal());
+    const categoriesDone = qs("myImagesCategoriesModalDone");
+    if (categoriesDone) categoriesDone.addEventListener("click", () => closeMyImagesCategoriesModal());
+    const categoryAddBtn = qs("myImagesCategoryAddBtn");
+    const categoryAddInput = qs("myImagesCategoryAddInput");
+    function addCategoryFromInput() {
+      const raw = categoryAddInput ? categoryAddInput.value : "";
+      if (typeof addUserImageCategory !== "function") return;
+      const added = addUserImageCategory(raw);
+      if (!added) {
+        alert("Enter a unique category name.");
+        return;
+      }
+      if (categoryAddInput) categoryAddInput.value = "";
+      save();
+      fillMyImagesCategoriesEditor();
+    }
+    if (categoryAddBtn) categoryAddBtn.addEventListener("click", addCategoryFromInput);
+    if (categoryAddInput) {
+      categoryAddInput.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          addCategoryFromInput();
+        }
+      });
+    }
+    document.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (t && t.closest && t.closest(".my-images-card-menu")) return;
+      closeMyImagesCardMenus();
+    });
     const pickerSort = qs("stockBannerPickerSort");
     if (pickerSort) {
       pickerSort.addEventListener("change", () => {
@@ -16693,7 +16922,23 @@ function syncTaskCycleEndTimeUI() {
     return count === 1 ? "1 use" : count + " uses";
   }
 
-  function appendPickerSection(host, title, assets, onPick, usageCounts) {
+  function getAssetUseCount(asset, usageMap) {
+    if (!asset || !usageMap) return null;
+    if (asset.user && asset.id) {
+      const byUser = usageMap.byUserId || usageMap;
+      return byUser[asset.id] || 0;
+    }
+    const path = asset.path || asset.ref || "";
+    if (!path || (typeof isUserImageRef === "function" && isUserImageRef(path))) return null;
+    const key =
+      typeof canonicalizeStockImagePath === "function"
+        ? canonicalizeStockImagePath(path) || path
+        : path;
+    const byStock = usageMap.byStockPath || usageMap;
+    return byStock[key] || 0;
+  }
+
+  function appendPickerSection(host, title, assets, onPick, usageMap) {
     if (!assets || !assets.length) return;
     const heading = document.createElement("h4");
     heading.className = "stock-banner-picker-heading";
@@ -16706,8 +16951,7 @@ function syncTaskCycleEndTimeUI() {
       btn.type = "button";
       btn.className = "stock-banner-picker-card";
       if (asset.id) btn.setAttribute("data-stock-id", asset.id);
-      const useCount =
-        asset.user && usageCounts && asset.id ? usageCounts[asset.id] || 0 : null;
+      const useCount = getAssetUseCount(asset, usageMap);
       const useLabel = useCount != null ? formatUserImageUseCount(useCount) : "";
       btn.setAttribute(
         "aria-label",
@@ -16751,8 +16995,11 @@ function syncTaskCycleEndTimeUI() {
     const wantPfp = mode === "pfp" || mode === "all";
     const sortMode =
       typeof getUserImageLibrarySortMode === "function" ? getUserImageLibrarySortMode() : "custom";
-    const usageCounts =
-      typeof countUserImageUsages === "function" ? countUserImageUsages() : Object.create(null);
+    const usageMap =
+      typeof countImageUsages === "function"
+        ? countImageUsages()
+        : { byUserId: Object.create(null), byStockPath: Object.create(null) };
+    const usageCounts = usageMap.byUserId || Object.create(null);
 
     const toolbar = qs("stockBannerPickerMyImagesToolbar");
     const sortSelect = qs("stockBannerPickerSort");
@@ -16786,7 +17033,7 @@ function syncTaskCycleEndTimeUI() {
           category: e.category || "",
         }));
         const title = multiCat ? "My Images · " + group.label : "My Images";
-        appendPickerSection(host, title, assets, applyPickerImageAsset, usageCounts);
+        appendPickerSection(host, title, assets, applyPickerImageAsset, usageMap);
       });
     } else {
       const hint = document.createElement("p");
@@ -16802,7 +17049,8 @@ function syncTaskCycleEndTimeUI() {
         host,
         "Stock banners",
         assets.map((a) => Object.assign({}, a, { path: a.path })),
-        applyPickerImageAsset
+        applyPickerImageAsset,
+        usageMap
       );
     }
     if (wantPfp) {
@@ -16811,12 +17059,13 @@ function syncTaskCycleEndTimeUI() {
         host,
         "Stock · Profile pictures",
         pfps.map((a) => Object.assign({}, a, { path: a.path })),
-        applyPickerImageAsset
+        applyPickerImageAsset,
+        usageMap
       );
     }
   }
 
-  function appendStockAssetCard(grid, asset, kindLabel) {
+  function appendStockAssetCard(grid, asset, kindLabel, usageMap) {
     const card = document.createElement("figure");
     card.className = "stock-assets-card";
     const img = document.createElement("img");
@@ -16826,25 +17075,206 @@ function syncTaskCycleEndTimeUI() {
     const fig = document.createElement("figcaption");
     const label = asset.label || asset.id || "Image";
     fig.textContent = kindLabel ? kindLabel + " · " + label : label;
+    const meta = document.createElement("div");
+    meta.className = "my-images-card-meta";
+    const useEl = document.createElement("span");
+    useEl.className = "my-images-use-count";
+    useEl.textContent = formatUserImageUseCount(getAssetUseCount(asset, usageMap) || 0);
+    meta.appendChild(useEl);
     const path = document.createElement("code");
     path.className = "stock-assets-path";
     path.textContent = asset.path;
     card.appendChild(img);
     card.appendChild(fig);
+    card.appendChild(meta);
     card.appendChild(path);
     grid.appendChild(card);
+  }
+
+  function fillMyImageCategorySelect(selectEl, selected) {
+    if (!selectEl) return;
+    if (typeof syncUserImageCategoriesFromLibrary === "function") syncUserImageCategoriesFromLibrary();
+    const cats =
+      typeof getUserImageCategories === "function" ? getUserImageCategories().slice() : [];
+    const current = selected != null ? String(selected) : "";
+    selectEl.innerHTML = "";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "Uncategorized";
+    selectEl.appendChild(none);
+    cats.forEach((cat) => {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = cat;
+      selectEl.appendChild(opt);
+    });
+    selectEl.value = current;
+    if (selectEl.value !== current && current) {
+      const opt = document.createElement("option");
+      opt.value = current;
+      opt.textContent = current;
+      selectEl.appendChild(opt);
+      selectEl.value = current;
+    }
+  }
+
+  function closeMyImagesCardMenus(except) {
+    document.querySelectorAll(".my-images-card-menu.is-open").forEach((menu) => {
+      if (except && menu === except) return;
+      menu.classList.remove("is-open");
+      const btn = menu.querySelector(".my-images-card-edit-btn");
+      if (btn) btn.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function openMyImagesCategoriesModal() {
+    const el = qs("myImagesCategoriesModal");
+    if (!el) return;
+    fillMyImagesCategoriesEditor();
+    el.classList.add("modal-stack-top");
+    el.hidden = false;
+    el.setAttribute("aria-hidden", "false");
+  }
+
+  function closeMyImagesCategoriesModal() {
+    const el = qs("myImagesCategoriesModal");
+    if (!el) return;
+    el.hidden = true;
+    el.setAttribute("aria-hidden", "true");
+    el.classList.remove("modal-stack-top");
+    fillSettingsMyImagesGallery();
+  }
+
+  function fillMyImagesCategoriesEditor() {
+    const host = qs("myImagesCategoriesList");
+    if (!host) return;
+    host.innerHTML = "";
+    if (typeof syncUserImageCategoriesFromLibrary === "function") syncUserImageCategoriesFromLibrary();
+    const cats =
+      typeof getUserImageCategories === "function" ? getUserImageCategories().slice() : [];
+    if (!cats.length) {
+      host.innerHTML = '<p class="settings-hint">No categories yet. Add one below.</p>';
+      return;
+    }
+    cats.forEach((cat, index) => {
+      const row = document.createElement("div");
+      row.className = "my-images-category-row";
+      row.draggable = true;
+      row.dataset.category = cat;
+      const name = document.createElement("span");
+      name.className = "my-images-category-row-name";
+      name.textContent = cat;
+      const actions = document.createElement("div");
+      actions.className = "my-images-category-row-actions";
+      const upBtn = document.createElement("button");
+      upBtn.type = "button";
+      upBtn.className = "btn btn-ghost btn-sm";
+      upBtn.textContent = "↑";
+      upBtn.title = "Move earlier";
+      upBtn.disabled = index === 0;
+      upBtn.addEventListener("click", () => {
+        if (typeof moveUserImageCategory === "function" && moveUserImageCategory(cat, -1)) {
+          save();
+          fillMyImagesCategoriesEditor();
+        }
+      });
+      const downBtn = document.createElement("button");
+      downBtn.type = "button";
+      downBtn.className = "btn btn-ghost btn-sm";
+      downBtn.textContent = "↓";
+      downBtn.title = "Move later";
+      downBtn.disabled = index === cats.length - 1;
+      downBtn.addEventListener("click", () => {
+        if (typeof moveUserImageCategory === "function" && moveUserImageCategory(cat, 1)) {
+          save();
+          fillMyImagesCategoriesEditor();
+        }
+      });
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.className = "btn btn-ghost btn-sm";
+      renameBtn.textContent = "Rename";
+      renameBtn.addEventListener("click", () => {
+        const next = window.prompt("Rename category", cat);
+        if (next == null) return;
+        if (typeof renameUserImageCategory === "function" && renameUserImageCategory(cat, next)) {
+          save();
+          fillMyImagesCategoriesEditor();
+        } else {
+          alert("Could not rename that category (empty or already exists).");
+        }
+      });
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn btn-ghost btn-sm";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", () => {
+        if (
+          !window.confirm(
+            "Delete category “" + cat + "”? Images in it become Uncategorized."
+          )
+        ) {
+          return;
+        }
+        if (typeof removeUserImageCategory === "function" && removeUserImageCategory(cat)) {
+          save();
+          fillMyImagesCategoriesEditor();
+        }
+      });
+      actions.appendChild(upBtn);
+      actions.appendChild(downBtn);
+      actions.appendChild(renameBtn);
+      actions.appendChild(delBtn);
+      row.appendChild(name);
+      row.appendChild(actions);
+      row.addEventListener("dragstart", (ev) => {
+        row.classList.add("is-dragging");
+        try {
+          ev.dataTransfer.setData("text/my-images-category", cat);
+          ev.dataTransfer.effectAllowed = "move";
+        } catch (_) {}
+      });
+      row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
+      row.addEventListener("dragover", (ev) => {
+        ev.preventDefault();
+        row.classList.add("is-drop-target");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"));
+      row.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        row.classList.remove("is-drop-target");
+        let dragged = "";
+        try {
+          dragged = ev.dataTransfer.getData("text/my-images-category") || "";
+        } catch (_) {}
+        if (!dragged || dragged === cat) return;
+        const list = typeof getUserImageCategories === "function" ? getUserImageCategories() : [];
+        const from = list.findIndex((c) => c === dragged);
+        const to = list.findIndex((c) => c === cat);
+        if (from < 0 || to < 0) return;
+        const [item] = list.splice(from, 1);
+        list.splice(to, 0, item);
+        save();
+        fillMyImagesCategoriesEditor();
+      });
+      host.appendChild(row);
+    });
   }
 
   function fillSettingsMyImagesGallery() {
     const host = qs("settingsMyImagesList");
     if (!host) return;
     host.innerHTML = "";
+    closeMyImagesCardMenus();
     const sortSelect = qs("settingsMyImagesSort");
     syncMyImagesSortSelect(sortSelect);
     const sortMode =
       typeof getUserImageLibrarySortMode === "function" ? getUserImageLibrarySortMode() : "custom";
     const usageCounts =
       typeof countUserImageUsages === "function" ? countUserImageUsages() : Object.create(null);
+    if (typeof syncUserImageCategoriesFromLibrary === "function") syncUserImageCategoriesFromLibrary();
+    const categories =
+      typeof getUserImageCategories === "function" ? getUserImageCategories().slice() : [];
     const list = typeof getUserImageLibrary === "function" ? getUserImageLibrary() : [];
     if (!list.length) {
       host.innerHTML = '<p class="settings-hint">No personal images yet. Add a banner or profile picture above.</p>';
@@ -16852,7 +17282,7 @@ function syncTaskCycleEndTimeUI() {
     }
     const banners = list.filter((e) => e && e.kind !== "pfp");
     const pfps = list.filter((e) => e && e.kind === "pfp");
-    const customOrder = sortMode === "custom";
+    const canDrag = true;
 
     function renderBlock(title, entries, galleryClass) {
       if (!entries.length) return;
@@ -16865,92 +17295,90 @@ function syncTaskCycleEndTimeUI() {
 
       const groups =
         typeof groupUserImagesByCategory === "function"
-          ? groupUserImagesByCategory(entries, sortMode, usageCounts)
+          ? groupUserImagesByCategory(entries, sortMode, usageCounts, {
+              includeEmpty: categories.length > 0,
+            })
           : [{ category: "", label: "", entries: entries }];
-      const showCatHeadings = groups.length > 1 || (groups[0] && groups[0].category);
+      const showCatHeadings = groups.length > 1 || (groups[0] && groups[0].category) || categories.length > 0;
 
       groups.forEach((group) => {
-        if (showCatHeadings) {
+        const section = document.createElement("div");
+        section.className = "my-images-category-section";
+        section.dataset.category = group.category || "";
+        if (showCatHeadings && group.label) {
           const catHead = document.createElement("h6");
           catHead.className = "my-images-category-heading";
           catHead.textContent = group.label + " (" + group.entries.length + ")";
-          block.appendChild(catHead);
+          section.appendChild(catHead);
         }
         const grid = document.createElement("div");
-        grid.className = "stock-assets-gallery" + (galleryClass ? " " + galleryClass : "");
+        grid.className =
+          "stock-assets-gallery my-images-drop-grid" + (galleryClass ? " " + galleryClass : "");
+        grid.dataset.category = group.category || "";
+        if (!group.entries.length) {
+          const empty = document.createElement("p");
+          empty.className = "my-images-drop-empty settings-hint";
+          empty.textContent = "Drop images here";
+          grid.appendChild(empty);
+        }
         group.entries.forEach((entry) => {
           const card = document.createElement("figure");
           card.className = "stock-assets-card my-images-card";
+          card.draggable = canDrag;
+          card.dataset.imageId = entry.id;
+          card.dataset.category = entry.category || "";
+
           const img = document.createElement("img");
           img.src = entry.dataUrl || "";
           img.alt = entry.label || entry.id;
           img.loading = "lazy";
+          img.draggable = false;
+
+          const titleRow = document.createElement("div");
+          titleRow.className = "my-images-card-title-row";
           const fig = document.createElement("figcaption");
           fig.textContent = entry.label || entry.id;
-          const meta = document.createElement("div");
-          meta.className = "my-images-card-meta";
-          const useEl = document.createElement("span");
-          useEl.className = "my-images-use-count";
-          useEl.textContent = formatUserImageUseCount(usageCounts[entry.id] || 0);
-          meta.appendChild(useEl);
-          if (entry.category) {
-            const catEl = document.createElement("span");
-            catEl.className = "my-images-card-category";
-            catEl.textContent = entry.category;
-            meta.appendChild(catEl);
+          const menuWrap = document.createElement("div");
+          menuWrap.className = "my-images-card-menu";
+          const editBtn = document.createElement("button");
+          editBtn.type = "button";
+          editBtn.className = "btn btn-ghost btn-sm my-images-card-edit-btn";
+          editBtn.textContent = "Edit";
+          editBtn.setAttribute("aria-expanded", "false");
+          editBtn.setAttribute("aria-haspopup", "true");
+          const menu = document.createElement("div");
+          menu.className = "my-images-card-menu-panel";
+          menu.setAttribute("role", "menu");
+          function addMenuItem(label, onClick) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "my-images-card-menu-item";
+            item.setAttribute("role", "menuitem");
+            item.textContent = label;
+            item.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              closeMyImagesCardMenus();
+              onClick();
+            });
+            menu.appendChild(item);
           }
-          const ref = document.createElement("code");
-          ref.className = "stock-assets-path";
-          ref.textContent = makeUserImageRef(entry.id);
-          const actions = document.createElement("div");
-          actions.className = "my-images-card-actions";
-          const renameBtn = document.createElement("button");
-          renameBtn.type = "button";
-          renameBtn.className = "btn btn-ghost btn-sm";
-          renameBtn.textContent = "Rename";
-          renameBtn.addEventListener("click", () => {
+          addMenuItem("Rename", () => {
             const next = window.prompt("Rename image", entry.label || "");
             if (next == null) return;
             updateUserImageMeta(entry.id, { label: next });
             save();
             fillSettingsMyImagesGallery();
           });
-          const catBtn = document.createElement("button");
-          catBtn.type = "button";
-          catBtn.className = "btn btn-ghost btn-sm";
-          catBtn.textContent = "Category";
-          catBtn.title = "Optional category for grouping in Settings and the picker";
-          catBtn.addEventListener("click", () => {
-            const next = window.prompt(
-              "Category (leave blank to clear)",
-              entry.category || ""
-            );
-            if (next == null) return;
-            updateUserImageMeta(entry.id, { category: next });
-            save();
-            fillSettingsMyImagesGallery();
-          });
-          const replaceBtn = document.createElement("button");
-          replaceBtn.type = "button";
-          replaceBtn.className = "btn btn-ghost btn-sm";
-          replaceBtn.textContent = "Replace";
-          replaceBtn.title = "Swap the picture; tasks keep the same userimg reference";
-          replaceBtn.addEventListener("click", () => {
+          addMenuItem("Replace", () => {
             const fileInput = qs("settingsMyImagesFile");
             if (!fileInput) return;
             fileInput.dataset.replaceId = entry.id;
             fileInput.click();
           });
-          const delBtn = document.createElement("button");
-          delBtn.type = "button";
-          delBtn.className = "btn btn-ghost btn-sm";
-          delBtn.textContent = "Delete";
-          delBtn.addEventListener("click", () => {
+          addMenuItem("Delete", () => {
             const uses = usageCounts[entry.id] || 0;
             const useNote =
-              uses > 0
-                ? " It is currently used " + formatUserImageUseCount(uses) + "."
-                : "";
+              uses > 0 ? " It is currently used " + formatUserImageUseCount(uses) + "." : "";
             if (
               !window.confirm(
                 "Remove “" +
@@ -16966,46 +17394,126 @@ function syncTaskCycleEndTimeUI() {
             save();
             fillSettingsMyImagesGallery();
           });
-          actions.appendChild(renameBtn);
-          actions.appendChild(catBtn);
-          actions.appendChild(replaceBtn);
-          actions.appendChild(delBtn);
-          if (customOrder) {
-            const upBtn = document.createElement("button");
-            upBtn.type = "button";
-            upBtn.className = "btn btn-ghost btn-sm";
-            upBtn.textContent = "↑";
-            upBtn.title = "Move earlier in custom order";
-            upBtn.setAttribute("aria-label", "Move earlier");
-            upBtn.addEventListener("click", () => {
-              if (typeof moveUserImageInLibrary === "function" && moveUserImageInLibrary(entry.id, -1)) {
-                save();
-                fillSettingsMyImagesGallery();
-              }
-            });
-            const downBtn = document.createElement("button");
-            downBtn.type = "button";
-            downBtn.className = "btn btn-ghost btn-sm";
-            downBtn.textContent = "↓";
-            downBtn.title = "Move later in custom order";
-            downBtn.setAttribute("aria-label", "Move later");
-            downBtn.addEventListener("click", () => {
-              if (typeof moveUserImageInLibrary === "function" && moveUserImageInLibrary(entry.id, 1)) {
-                save();
-                fillSettingsMyImagesGallery();
-              }
-            });
-            actions.appendChild(upBtn);
-            actions.appendChild(downBtn);
-          }
+          editBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            const open = !menuWrap.classList.contains("is-open");
+            closeMyImagesCardMenus(open ? menuWrap : null);
+            menuWrap.classList.toggle("is-open", open);
+            editBtn.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          menuWrap.appendChild(editBtn);
+          menuWrap.appendChild(menu);
+          titleRow.appendChild(fig);
+          titleRow.appendChild(menuWrap);
+
+          const meta = document.createElement("div");
+          meta.className = "my-images-card-meta";
+          const useEl = document.createElement("span");
+          useEl.className = "my-images-use-count";
+          useEl.textContent = formatUserImageUseCount(usageCounts[entry.id] || 0);
+          meta.appendChild(useEl);
+
+          const catLabel = document.createElement("label");
+          catLabel.className = "my-images-card-category-label";
+          catLabel.textContent = "Category";
+          const catSelect = document.createElement("select");
+          catSelect.className = "my-images-card-category-select";
+          catSelect.setAttribute("aria-label", "Category for " + (entry.label || entry.id));
+          fillMyImageCategorySelect(catSelect, entry.category || "");
+          catSelect.addEventListener("change", () => {
+            updateUserImageMeta(entry.id, { category: catSelect.value });
+            save();
+            fillSettingsMyImagesGallery();
+          });
+          catSelect.addEventListener("mousedown", (ev) => ev.stopPropagation());
+          catSelect.addEventListener("click", (ev) => ev.stopPropagation());
+          catLabel.appendChild(catSelect);
+
           card.appendChild(img);
-          card.appendChild(fig);
+          card.appendChild(titleRow);
           card.appendChild(meta);
-          card.appendChild(ref);
-          card.appendChild(actions);
+          card.appendChild(catLabel);
+
+          card.addEventListener("dragstart", (ev) => {
+            closeMyImagesCardMenus();
+            card.classList.add("is-dragging");
+            try {
+              ev.dataTransfer.setData("text/my-images-id", entry.id);
+              ev.dataTransfer.setData("text/plain", entry.id);
+              ev.dataTransfer.effectAllowed = "move";
+            } catch (_) {}
+          });
+          card.addEventListener("dragend", () => {
+            card.classList.remove("is-dragging");
+            host.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+          });
+          card.addEventListener("dragover", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            card.classList.add("is-drop-target");
+          });
+          card.addEventListener("dragleave", () => card.classList.remove("is-drop-target"));
+          card.addEventListener("drop", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            card.classList.remove("is-drop-target");
+            let draggedId = "";
+            try {
+              draggedId =
+                ev.dataTransfer.getData("text/my-images-id") ||
+                ev.dataTransfer.getData("text/plain") ||
+                "";
+            } catch (_) {}
+            draggedId = String(draggedId || "").trim();
+            if (!draggedId || draggedId === entry.id) return;
+            if (
+              typeof placeUserImageInLibrary === "function" &&
+              placeUserImageInLibrary(draggedId, {
+                category: group.category || "",
+                beforeId: entry.id,
+              })
+            ) {
+              if (sortSelect) sortSelect.value = "custom";
+              save();
+              fillSettingsMyImagesGallery();
+            }
+          });
+
           grid.appendChild(card);
         });
-        block.appendChild(grid);
+
+        grid.addEventListener("dragover", (ev) => {
+          ev.preventDefault();
+          grid.classList.add("is-drop-target");
+        });
+        grid.addEventListener("dragleave", (ev) => {
+          if (!grid.contains(ev.relatedTarget)) grid.classList.remove("is-drop-target");
+        });
+        grid.addEventListener("drop", (ev) => {
+          if (ev.target !== grid && !ev.target.classList.contains("my-images-drop-empty")) return;
+          ev.preventDefault();
+          grid.classList.remove("is-drop-target");
+          let draggedId = "";
+          try {
+            draggedId =
+              ev.dataTransfer.getData("text/my-images-id") ||
+              ev.dataTransfer.getData("text/plain") ||
+              "";
+          } catch (_) {}
+          draggedId = String(draggedId || "").trim();
+          if (!draggedId) return;
+          if (
+            typeof placeUserImageInLibrary === "function" &&
+            placeUserImageInLibrary(draggedId, { category: group.category || "" })
+          ) {
+            if (sortSelect) sortSelect.value = "custom";
+            save();
+            fillSettingsMyImagesGallery();
+          }
+        });
+
+        section.appendChild(grid);
+        block.appendChild(section);
       });
       host.appendChild(block);
     }
@@ -17023,6 +17531,10 @@ function syncTaskCycleEndTimeUI() {
     const host = qs("settingsStockAssetsList");
     if (!host) return;
     host.innerHTML = "";
+    const usageMap =
+      typeof countImageUsages === "function"
+        ? countImageUsages()
+        : { byUserId: Object.create(null), byStockPath: Object.create(null) };
     const banners = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
     const pfps = typeof getStockPfpAssets === "function" ? getStockPfpAssets() : [];
     if (!banners.length && !pfps.length) {
@@ -17038,7 +17550,7 @@ function syncTaskCycleEndTimeUI() {
       heading.textContent = "Banners";
       const grid = document.createElement("div");
       grid.className = "stock-assets-gallery";
-      banners.forEach((asset) => appendStockAssetCard(grid, asset, ""));
+      banners.forEach((asset) => appendStockAssetCard(grid, asset, "", usageMap));
       block.appendChild(heading);
       block.appendChild(grid);
       host.appendChild(block);
@@ -17060,7 +17572,7 @@ function syncTaskCycleEndTimeUI() {
       const grid = document.createElement("div");
       grid.className = "stock-assets-gallery stock-assets-gallery--pfp";
       grid.setAttribute("aria-labelledby", "settings-stock-pfps-heading");
-      pfps.forEach((asset) => appendStockAssetCard(grid, asset, "PFP"));
+      pfps.forEach((asset) => appendStockAssetCard(grid, asset, "PFP", usageMap));
       block.appendChild(heading);
       block.appendChild(grid);
       host.appendChild(block);
@@ -17583,6 +18095,15 @@ function syncTaskCycleEndTimeUI() {
         const t = e.target;
         if (t && t.getAttribute && t.getAttribute("data-close") === "stockBannerPickerModal") {
           closeStockBannerPicker();
+        }
+      });
+    }
+    const categoriesModal = qs("myImagesCategoriesModal");
+    if (categoriesModal) {
+      categoriesModal.addEventListener("click", (e) => {
+        const t = e.target;
+        if (t && t.getAttribute && t.getAttribute("data-close") === "myImagesCategoriesModal") {
+          closeMyImagesCategoriesModal();
         }
       });
     }

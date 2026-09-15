@@ -230,6 +230,94 @@
     return state.userImageLibrarySortMode;
   }
 
+  function getUserImageCategories() {
+    if (!Array.isArray(state.userImageCategories)) state.userImageCategories = [];
+    return state.userImageCategories;
+  }
+
+  function normalizeUserImageCategoriesList(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seen = new Set();
+    raw.forEach((name) => {
+      const cat = normalizeUserImageCategory(name);
+      if (!cat) return;
+      const key = cat.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(cat);
+    });
+    return out;
+  }
+
+  /** Ensure categories used on images appear in the ordered category list. */
+  function syncUserImageCategoriesFromLibrary() {
+    const cats = getUserImageCategories();
+    const seen = new Set(cats.map((c) => c.toLowerCase()));
+    getUserImageLibrary().forEach((e) => {
+      const cat = normalizeUserImageCategory(e && e.category);
+      if (!cat) return;
+      const key = cat.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      cats.push(cat);
+    });
+    return cats;
+  }
+
+  function addUserImageCategory(name) {
+    const cat = normalizeUserImageCategory(name);
+    if (!cat) return null;
+    const cats = getUserImageCategories();
+    if (cats.some((c) => c.toLowerCase() === cat.toLowerCase())) return cat;
+    cats.push(cat);
+    return cat;
+  }
+
+  function renameUserImageCategory(oldName, newName) {
+    const from = normalizeUserImageCategory(oldName);
+    const to = normalizeUserImageCategory(newName);
+    if (!from || !to || from.toLowerCase() === to.toLowerCase()) return false;
+    const cats = getUserImageCategories();
+    if (cats.some((c) => c.toLowerCase() === to.toLowerCase())) return false;
+    const idx = cats.findIndex((c) => c.toLowerCase() === from.toLowerCase());
+    if (idx < 0) return false;
+    cats[idx] = to;
+    getUserImageLibrary().forEach((e) => {
+      if (e && normalizeUserImageCategory(e.category).toLowerCase() === from.toLowerCase()) {
+        e.category = to;
+      }
+    });
+    return true;
+  }
+
+  function removeUserImageCategory(name) {
+    const cat = normalizeUserImageCategory(name);
+    if (!cat) return false;
+    const cats = getUserImageCategories();
+    const idx = cats.findIndex((c) => c.toLowerCase() === cat.toLowerCase());
+    if (idx < 0) return false;
+    cats.splice(idx, 1);
+    getUserImageLibrary().forEach((e) => {
+      if (e && normalizeUserImageCategory(e.category).toLowerCase() === cat.toLowerCase()) {
+        e.category = "";
+      }
+    });
+    return true;
+  }
+
+  function moveUserImageCategory(name, delta) {
+    const cat = normalizeUserImageCategory(name);
+    const cats = getUserImageCategories();
+    const from = cats.findIndex((c) => c.toLowerCase() === cat.toLowerCase());
+    if (from < 0) return false;
+    const to = from + (Number(delta) || 0);
+    if (to < 0 || to >= cats.length) return false;
+    const [item] = cats.splice(from, 1);
+    cats.splice(to, 0, item);
+    return true;
+  }
+
   /**
    * Add an image to the personal library (stored once; tasks/games keep userimg:id refs).
    * opts: { kind: "banner"|"pfp", label?, dataUrl, category? }
@@ -244,11 +332,13 @@
       (kind === "pfp" ? "Profile picture" : "Banner") +
         " " +
         (getUserImageLibrary().filter((e) => e && e.kind === kind).length + 1);
+    const category = normalizeUserImageCategory(o.category);
+    if (category) addUserImageCategory(category);
     const entry = {
       id: generateUserImageId(),
       kind: kind,
       label: label.slice(0, 80),
-      category: normalizeUserImageCategory(o.category),
+      category: category,
       createdAt: Date.now(),
       dataUrl: dataUrl,
     };
@@ -265,22 +355,50 @@
     }
     if (patch.kind === "banner" || patch.kind === "pfp") entry.kind = patch.kind;
     if (Object.prototype.hasOwnProperty.call(patch, "category")) {
-      entry.category = normalizeUserImageCategory(patch.category);
+      const category = normalizeUserImageCategory(patch.category);
+      entry.category = category;
+      if (category) addUserImageCategory(category);
     }
     return entry;
   }
 
   /**
-   * How many tasks/games currently reference each My Images id (userimg:…).
+   * Canonical relative stock path for usage matching (aliases → current webp path).
+   * Returns "" for userimg / data / blob / http refs.
+   */
+  function canonicalizeStockImagePath(path) {
+    let raw = String(path || "").trim();
+    if (!raw) return "";
+    if (isUserImageRef(raw) || /^(data:|blob:|https?:|\/\/)/i.test(raw)) return "";
+    raw = raw.replace(/^\.\//, "");
+    try {
+      raw = decodeURIComponent(raw);
+    } catch (_) {}
+    const assetsIdx = raw.toLowerCase().indexOf("assets/");
+    if (assetsIdx > 0) raw = raw.slice(assetsIdx);
+    return STOCK_BANNER_PATH_ALIASES[raw] || raw;
+  }
+
+  /**
+   * How many tasks/games currently reference each image.
+   * Returns { byUserId: { id: n }, byStockPath: { "assets/…": n } }.
    * Counts once per task / game icon — not per banner view crop.
    */
-  function countUserImageUsages() {
-    const counts = Object.create(null);
+  function countImageUsages() {
+    const byUserId = Object.create(null);
+    const byStockPath = Object.create(null);
     function bump(ref) {
-      if (!isUserImageRef(ref)) return;
-      const id = getUserImageIdFromRef(ref);
-      if (!id) return;
-      counts[id] = (counts[id] || 0) + 1;
+      const raw = ref != null ? String(ref).trim() : "";
+      if (!raw) return;
+      if (isUserImageRef(raw)) {
+        const id = getUserImageIdFromRef(raw);
+        if (!id) return;
+        byUserId[id] = (byUserId[id] || 0) + 1;
+        return;
+      }
+      const path = canonicalizeStockImagePath(raw);
+      if (!path) return;
+      byStockPath[path] = (byStockPath[path] || 0) + 1;
     }
     function scanTask(task) {
       if (!task || typeof task !== "object") return;
@@ -297,7 +415,12 @@
       (g.endgame || []).forEach(scanTask);
     });
     (state.extracurricularTasks || []).forEach(scanTask);
-    return counts;
+    return { byUserId: byUserId, byStockPath: byStockPath };
+  }
+
+  /** My Images id → use count (subset of countImageUsages). */
+  function countUserImageUsages() {
+    return countImageUsages().byUserId;
   }
 
   function compareUserImagesForSort(a, b, mode, usageCounts, indexById) {
@@ -338,10 +461,13 @@
   }
 
   /**
-   * Group entries by category for display. Named categories A–Z, then Uncategorized.
+   * Group entries by category for display, following userImageCategories order.
+   * opts.includeEmpty: include defined categories with no images (drop targets).
    * Returns [{ category, label, entries }]
    */
-  function groupUserImagesByCategory(entries, mode, usageCounts) {
+  function groupUserImagesByCategory(entries, mode, usageCounts, opts) {
+    const options = opts || {};
+    syncUserImageCategoriesFromLibrary();
     const sorted = getSortedUserImageEntries(entries, mode, usageCounts);
     const buckets = new Map();
     sorted.forEach((e) => {
@@ -350,17 +476,75 @@
       if (!buckets.has(cat)) buckets.set(cat, []);
       buckets.get(cat).push(e);
     });
-    const named = [];
-    const uncategorized = [];
-    buckets.forEach((list, cat) => {
-      if (!cat) uncategorized.push({ category: "", label: "Uncategorized", entries: list });
-      else named.push({ category: cat, label: cat, entries: list });
+    const out = [];
+    getUserImageCategories().forEach((cat) => {
+      const list = buckets.get(cat) || [];
+      buckets.delete(cat);
+      if (list.length || options.includeEmpty) {
+        out.push({ category: cat, label: cat, entries: list });
+      }
     });
-    named.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
-    return named.concat(uncategorized);
+    // Orphan category names still on images but missing from ordered list
+    const orphans = [];
+    buckets.forEach((list, cat) => {
+      if (!cat) return;
+      orphans.push({ category: cat, label: cat, entries: list });
+    });
+    orphans.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
+    out.push.apply(out, orphans);
+    const uncategorized = buckets.get("") || [];
+    if (uncategorized.length || (options.includeEmpty && getUserImageCategories().length > 0)) {
+      out.push({ category: "", label: "Uncategorized", entries: uncategorized });
+    } else if (!out.length && uncategorized.length) {
+      out.push({ category: "", label: "Uncategorized", entries: uncategorized });
+    }
+    // No categories defined: one flat group without a category heading label
+    if (!getUserImageCategories().length && out.length === 1 && !out[0].category) {
+      out[0].label = "";
+    }
+    return out;
   }
 
-  /** Move a library entry earlier (-1) or later (+1) among the same kind. Returns true if moved. */
+  /**
+   * Place a library image for drag-and-drop: optional new category + insert before/after another id.
+   * opts: { category?, beforeId?, afterId? }
+   */
+  function placeUserImageInLibrary(id, opts) {
+    const key = String(id || "").trim();
+    const list = getUserImageLibrary();
+    const from = list.findIndex((e) => e && e.id === key);
+    if (from < 0) return false;
+    const o = opts || {};
+    const entry = list[from];
+    if (Object.prototype.hasOwnProperty.call(o, "category")) {
+      const category = normalizeUserImageCategory(o.category);
+      entry.category = category;
+      if (category) addUserImageCategory(category);
+    }
+    list.splice(from, 1);
+    let insertAt = list.length;
+    const beforeId = o.beforeId != null ? String(o.beforeId).trim() : "";
+    const afterId = o.afterId != null ? String(o.afterId).trim() : "";
+    if (beforeId) {
+      const bi = list.findIndex((e) => e && e.id === beforeId);
+      if (bi >= 0) insertAt = bi;
+    } else if (afterId) {
+      const ai = list.findIndex((e) => e && e.id === afterId);
+      if (ai >= 0) insertAt = ai + 1;
+    } else {
+      const cat = normalizeUserImageCategory(entry.category);
+      let last = -1;
+      list.forEach((e, i) => {
+        if (e && e.kind === entry.kind && normalizeUserImageCategory(e.category) === cat) last = i;
+      });
+      insertAt = last >= 0 ? last + 1 : list.length;
+    }
+    list.splice(insertAt, 0, entry);
+    setUserImageLibrarySortMode("custom");
+    return true;
+  }
+
+  /** @deprecated Prefer placeUserImageInLibrary for drag-and-drop. */
   function moveUserImageInLibrary(id, delta) {
     const key = String(id || "").trim();
     const list = getUserImageLibrary();
@@ -374,11 +558,7 @@
       to += dir;
     }
     if (to < 0 || to >= list.length || !list[to] || list[to].kind !== kind) return false;
-    const tmp = list[from];
-    list[from] = list[to];
-    list[to] = tmp;
-    setUserImageLibrarySortMode("custom");
-    return true;
+    return placeUserImageInLibrary(key, dir < 0 ? { beforeId: list[to].id } : { afterId: list[to].id });
   }
 
   /**
@@ -574,6 +754,7 @@
     extracurricularTasks: [],
     userImageLibrary: [],
     userImageLibrarySortMode: "custom", // "custom" | "name" | "used" | "newest"
+    userImageCategories: [], // ordered category names for My Images
     extracurricularCompleted: {},
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
     extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
@@ -1057,6 +1238,9 @@
         if (USER_IMAGE_SORT_MODES.indexOf(parsed.userImageLibrarySortMode) >= 0) {
           state.userImageLibrarySortMode = parsed.userImageLibrarySortMode;
         }
+        if (Array.isArray(parsed.userImageCategories)) {
+          state.userImageCategories = normalizeUserImageCategoriesList(parsed.userImageCategories);
+        }
         if (parsed.extracurricularCompleted && typeof parsed.extracurricularCompleted === "object") state.extracurricularCompleted = parsed.extracurricularCompleted;
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
         if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
@@ -1112,6 +1296,9 @@
     if (USER_IMAGE_SORT_MODES.indexOf(state.userImageLibrarySortMode) < 0) {
       state.userImageLibrarySortMode = "custom";
     }
+    if (!Array.isArray(state.userImageCategories)) state.userImageCategories = [];
+    else state.userImageCategories = normalizeUserImageCategoriesList(state.userImageCategories);
+    syncUserImageCategoriesFromLibrary();
     if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
     const taskIds = new Set((state.extracurricularTasks || []).map((t) => t.id));
@@ -1244,6 +1431,7 @@
         : state.extracurricularTasks,
       userImageLibrary: cloneUserImageLibraryForSave(omitImages),
       userImageLibrarySortMode: getUserImageLibrarySortMode(),
+      userImageCategories: getUserImageCategories().slice(),
       extracurricularCompleted: state.extracurricularCompleted,
       extracurricularCompletedAt: state.extracurricularCompletedAt,
       extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
@@ -8390,7 +8578,9 @@
   }
 
   /** Returns the dateStr where this weekly was completed in the current cycle, or null.
-   * Uses actual current time so the cycle's "last day" correctly extends to reset (e.g. 4am) instead of midnight. */
+   * Uses reset-aware membership moment (not period date at noon). Tasks that reset after
+   * noon (e.g. Superstring Dimension Mon 15:00) would otherwise still resolve last week's
+   * bounds after reset and look already complete. */
   function getWeeklyCompletionDateInCurrentCycle(key, todayStr) {
     const dot = key.indexOf(".");
     if (dot <= 0) return null;
@@ -8399,10 +8589,11 @@
     const game = getGame(gameId);
     const task = (game && game.weeklies || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const periodStr = getTaskPeriodDateStr("weeklies", task, game, getSimulatedNow());
-    const bounds =
-      resolveCycleBoundsForCompletionDate("weeklies", task, game, periodStr) ||
-      getWeeklyCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
+    const bounds = getWeeklyCycleBoundsForMoment(
+      task,
+      getCycleMembershipMoment(task, game),
+      game
+    );
     return findCompletionDateInBounds(key, "weeklies", bounds);
   }
 
@@ -8414,8 +8605,9 @@
   }
 
   /** Returns the dateStr where this endgame was completed in the current cycle, or null.
-   * Uses completionByDate only; endgameCompletionDates is never consulted here.
-   * Uses actual current time so the cycle's "last day" correctly extends to reset (e.g. 4am) instead of midnight. */
+   * Uses completionByDate / timestamps only; endgameCompletionDates is never consulted here.
+   * Uses reset-aware membership moment (not period date at noon) so afternoon resets
+   * (Superstring Dimension P1 Mon 15:00, etc.) open a fresh incomplete cycle. */
   function getEndgameCompletionDateInCurrentCycle(key, todayStr) {
     const dot = key.indexOf(".");
     if (dot <= 0) return null;
@@ -8424,10 +8616,11 @@
     const game = getGame(gameId);
     const task = (game && game.endgame || []).find((t) => (t.id || t.label) === taskId);
     if (!task) return null;
-    const periodStr = getTaskPeriodDateStr("endgame", task, game, getSimulatedNow());
-    const bounds =
-      resolveCycleBoundsForCompletionDate("endgame", task, game, periodStr) ||
-      getEndgameCycleBoundsForMoment(task, getCycleMembershipMoment(task, game), game);
+    const bounds = getEndgameCycleBoundsForMoment(
+      task,
+      getCycleMembershipMoment(task, game),
+      game
+    );
     return findCompletionDateInBounds(key, "endgame", bounds);
   }
 

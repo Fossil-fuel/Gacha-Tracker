@@ -5542,6 +5542,42 @@ function syncTaskCycleEndTimeUI() {
         fillSettingsMyImagesGallery();
       });
     }
+    const editCategoriesBtn = qs("settingsMyImagesEditCategoriesBtn");
+    if (editCategoriesBtn) {
+      editCategoriesBtn.addEventListener("click", () => openMyImagesCategoriesModal());
+    }
+    const categoriesClose = qs("myImagesCategoriesModalClose");
+    if (categoriesClose) categoriesClose.addEventListener("click", () => closeMyImagesCategoriesModal());
+    const categoriesDone = qs("myImagesCategoriesModalDone");
+    if (categoriesDone) categoriesDone.addEventListener("click", () => closeMyImagesCategoriesModal());
+    const categoryAddBtn = qs("myImagesCategoryAddBtn");
+    const categoryAddInput = qs("myImagesCategoryAddInput");
+    function addCategoryFromInput() {
+      const raw = categoryAddInput ? categoryAddInput.value : "";
+      if (typeof addUserImageCategory !== "function") return;
+      const added = addUserImageCategory(raw);
+      if (!added) {
+        alert("Enter a unique category name.");
+        return;
+      }
+      if (categoryAddInput) categoryAddInput.value = "";
+      save();
+      fillMyImagesCategoriesEditor();
+    }
+    if (categoryAddBtn) categoryAddBtn.addEventListener("click", addCategoryFromInput);
+    if (categoryAddInput) {
+      categoryAddInput.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          addCategoryFromInput();
+        }
+      });
+    }
+    document.addEventListener("click", (ev) => {
+      const t = ev.target;
+      if (t && t.closest && t.closest(".my-images-card-menu")) return;
+      closeMyImagesCardMenus();
+    });
     const pickerSort = qs("stockBannerPickerSort");
     if (pickerSort) {
       pickerSort.addEventListener("change", () => {
@@ -6913,7 +6949,23 @@ function syncTaskCycleEndTimeUI() {
     return count === 1 ? "1 use" : count + " uses";
   }
 
-  function appendPickerSection(host, title, assets, onPick, usageCounts) {
+  function getAssetUseCount(asset, usageMap) {
+    if (!asset || !usageMap) return null;
+    if (asset.user && asset.id) {
+      const byUser = usageMap.byUserId || usageMap;
+      return byUser[asset.id] || 0;
+    }
+    const path = asset.path || asset.ref || "";
+    if (!path || (typeof isUserImageRef === "function" && isUserImageRef(path))) return null;
+    const key =
+      typeof canonicalizeStockImagePath === "function"
+        ? canonicalizeStockImagePath(path) || path
+        : path;
+    const byStock = usageMap.byStockPath || usageMap;
+    return byStock[key] || 0;
+  }
+
+  function appendPickerSection(host, title, assets, onPick, usageMap) {
     if (!assets || !assets.length) return;
     const heading = document.createElement("h4");
     heading.className = "stock-banner-picker-heading";
@@ -6926,8 +6978,7 @@ function syncTaskCycleEndTimeUI() {
       btn.type = "button";
       btn.className = "stock-banner-picker-card";
       if (asset.id) btn.setAttribute("data-stock-id", asset.id);
-      const useCount =
-        asset.user && usageCounts && asset.id ? usageCounts[asset.id] || 0 : null;
+      const useCount = getAssetUseCount(asset, usageMap);
       const useLabel = useCount != null ? formatUserImageUseCount(useCount) : "";
       btn.setAttribute(
         "aria-label",
@@ -6971,8 +7022,11 @@ function syncTaskCycleEndTimeUI() {
     const wantPfp = mode === "pfp" || mode === "all";
     const sortMode =
       typeof getUserImageLibrarySortMode === "function" ? getUserImageLibrarySortMode() : "custom";
-    const usageCounts =
-      typeof countUserImageUsages === "function" ? countUserImageUsages() : Object.create(null);
+    const usageMap =
+      typeof countImageUsages === "function"
+        ? countImageUsages()
+        : { byUserId: Object.create(null), byStockPath: Object.create(null) };
+    const usageCounts = usageMap.byUserId || Object.create(null);
 
     const toolbar = qs("stockBannerPickerMyImagesToolbar");
     const sortSelect = qs("stockBannerPickerSort");
@@ -7006,7 +7060,7 @@ function syncTaskCycleEndTimeUI() {
           category: e.category || "",
         }));
         const title = multiCat ? "My Images · " + group.label : "My Images";
-        appendPickerSection(host, title, assets, applyPickerImageAsset, usageCounts);
+        appendPickerSection(host, title, assets, applyPickerImageAsset, usageMap);
       });
     } else {
       const hint = document.createElement("p");
@@ -7022,7 +7076,8 @@ function syncTaskCycleEndTimeUI() {
         host,
         "Stock banners",
         assets.map((a) => Object.assign({}, a, { path: a.path })),
-        applyPickerImageAsset
+        applyPickerImageAsset,
+        usageMap
       );
     }
     if (wantPfp) {
@@ -7031,12 +7086,13 @@ function syncTaskCycleEndTimeUI() {
         host,
         "Stock · Profile pictures",
         pfps.map((a) => Object.assign({}, a, { path: a.path })),
-        applyPickerImageAsset
+        applyPickerImageAsset,
+        usageMap
       );
     }
   }
 
-  function appendStockAssetCard(grid, asset, kindLabel) {
+  function appendStockAssetCard(grid, asset, kindLabel, usageMap) {
     const card = document.createElement("figure");
     card.className = "stock-assets-card";
     const img = document.createElement("img");
@@ -7046,25 +7102,206 @@ function syncTaskCycleEndTimeUI() {
     const fig = document.createElement("figcaption");
     const label = asset.label || asset.id || "Image";
     fig.textContent = kindLabel ? kindLabel + " · " + label : label;
+    const meta = document.createElement("div");
+    meta.className = "my-images-card-meta";
+    const useEl = document.createElement("span");
+    useEl.className = "my-images-use-count";
+    useEl.textContent = formatUserImageUseCount(getAssetUseCount(asset, usageMap) || 0);
+    meta.appendChild(useEl);
     const path = document.createElement("code");
     path.className = "stock-assets-path";
     path.textContent = asset.path;
     card.appendChild(img);
     card.appendChild(fig);
+    card.appendChild(meta);
     card.appendChild(path);
     grid.appendChild(card);
+  }
+
+  function fillMyImageCategorySelect(selectEl, selected) {
+    if (!selectEl) return;
+    if (typeof syncUserImageCategoriesFromLibrary === "function") syncUserImageCategoriesFromLibrary();
+    const cats =
+      typeof getUserImageCategories === "function" ? getUserImageCategories().slice() : [];
+    const current = selected != null ? String(selected) : "";
+    selectEl.innerHTML = "";
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "Uncategorized";
+    selectEl.appendChild(none);
+    cats.forEach((cat) => {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = cat;
+      selectEl.appendChild(opt);
+    });
+    selectEl.value = current;
+    if (selectEl.value !== current && current) {
+      const opt = document.createElement("option");
+      opt.value = current;
+      opt.textContent = current;
+      selectEl.appendChild(opt);
+      selectEl.value = current;
+    }
+  }
+
+  function closeMyImagesCardMenus(except) {
+    document.querySelectorAll(".my-images-card-menu.is-open").forEach((menu) => {
+      if (except && menu === except) return;
+      menu.classList.remove("is-open");
+      const btn = menu.querySelector(".my-images-card-edit-btn");
+      if (btn) btn.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function openMyImagesCategoriesModal() {
+    const el = qs("myImagesCategoriesModal");
+    if (!el) return;
+    fillMyImagesCategoriesEditor();
+    el.classList.add("modal-stack-top");
+    el.hidden = false;
+    el.setAttribute("aria-hidden", "false");
+  }
+
+  function closeMyImagesCategoriesModal() {
+    const el = qs("myImagesCategoriesModal");
+    if (!el) return;
+    el.hidden = true;
+    el.setAttribute("aria-hidden", "true");
+    el.classList.remove("modal-stack-top");
+    fillSettingsMyImagesGallery();
+  }
+
+  function fillMyImagesCategoriesEditor() {
+    const host = qs("myImagesCategoriesList");
+    if (!host) return;
+    host.innerHTML = "";
+    if (typeof syncUserImageCategoriesFromLibrary === "function") syncUserImageCategoriesFromLibrary();
+    const cats =
+      typeof getUserImageCategories === "function" ? getUserImageCategories().slice() : [];
+    if (!cats.length) {
+      host.innerHTML = '<p class="settings-hint">No categories yet. Add one below.</p>';
+      return;
+    }
+    cats.forEach((cat, index) => {
+      const row = document.createElement("div");
+      row.className = "my-images-category-row";
+      row.draggable = true;
+      row.dataset.category = cat;
+      const name = document.createElement("span");
+      name.className = "my-images-category-row-name";
+      name.textContent = cat;
+      const actions = document.createElement("div");
+      actions.className = "my-images-category-row-actions";
+      const upBtn = document.createElement("button");
+      upBtn.type = "button";
+      upBtn.className = "btn btn-ghost btn-sm";
+      upBtn.textContent = "↑";
+      upBtn.title = "Move earlier";
+      upBtn.disabled = index === 0;
+      upBtn.addEventListener("click", () => {
+        if (typeof moveUserImageCategory === "function" && moveUserImageCategory(cat, -1)) {
+          save();
+          fillMyImagesCategoriesEditor();
+        }
+      });
+      const downBtn = document.createElement("button");
+      downBtn.type = "button";
+      downBtn.className = "btn btn-ghost btn-sm";
+      downBtn.textContent = "↓";
+      downBtn.title = "Move later";
+      downBtn.disabled = index === cats.length - 1;
+      downBtn.addEventListener("click", () => {
+        if (typeof moveUserImageCategory === "function" && moveUserImageCategory(cat, 1)) {
+          save();
+          fillMyImagesCategoriesEditor();
+        }
+      });
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.className = "btn btn-ghost btn-sm";
+      renameBtn.textContent = "Rename";
+      renameBtn.addEventListener("click", () => {
+        const next = window.prompt("Rename category", cat);
+        if (next == null) return;
+        if (typeof renameUserImageCategory === "function" && renameUserImageCategory(cat, next)) {
+          save();
+          fillMyImagesCategoriesEditor();
+        } else {
+          alert("Could not rename that category (empty or already exists).");
+        }
+      });
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn btn-ghost btn-sm";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", () => {
+        if (
+          !window.confirm(
+            "Delete category “" + cat + "”? Images in it become Uncategorized."
+          )
+        ) {
+          return;
+        }
+        if (typeof removeUserImageCategory === "function" && removeUserImageCategory(cat)) {
+          save();
+          fillMyImagesCategoriesEditor();
+        }
+      });
+      actions.appendChild(upBtn);
+      actions.appendChild(downBtn);
+      actions.appendChild(renameBtn);
+      actions.appendChild(delBtn);
+      row.appendChild(name);
+      row.appendChild(actions);
+      row.addEventListener("dragstart", (ev) => {
+        row.classList.add("is-dragging");
+        try {
+          ev.dataTransfer.setData("text/my-images-category", cat);
+          ev.dataTransfer.effectAllowed = "move";
+        } catch (_) {}
+      });
+      row.addEventListener("dragend", () => row.classList.remove("is-dragging"));
+      row.addEventListener("dragover", (ev) => {
+        ev.preventDefault();
+        row.classList.add("is-drop-target");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"));
+      row.addEventListener("drop", (ev) => {
+        ev.preventDefault();
+        row.classList.remove("is-drop-target");
+        let dragged = "";
+        try {
+          dragged = ev.dataTransfer.getData("text/my-images-category") || "";
+        } catch (_) {}
+        if (!dragged || dragged === cat) return;
+        const list = typeof getUserImageCategories === "function" ? getUserImageCategories() : [];
+        const from = list.findIndex((c) => c === dragged);
+        const to = list.findIndex((c) => c === cat);
+        if (from < 0 || to < 0) return;
+        const [item] = list.splice(from, 1);
+        list.splice(to, 0, item);
+        save();
+        fillMyImagesCategoriesEditor();
+      });
+      host.appendChild(row);
+    });
   }
 
   function fillSettingsMyImagesGallery() {
     const host = qs("settingsMyImagesList");
     if (!host) return;
     host.innerHTML = "";
+    closeMyImagesCardMenus();
     const sortSelect = qs("settingsMyImagesSort");
     syncMyImagesSortSelect(sortSelect);
     const sortMode =
       typeof getUserImageLibrarySortMode === "function" ? getUserImageLibrarySortMode() : "custom";
     const usageCounts =
       typeof countUserImageUsages === "function" ? countUserImageUsages() : Object.create(null);
+    if (typeof syncUserImageCategoriesFromLibrary === "function") syncUserImageCategoriesFromLibrary();
+    const categories =
+      typeof getUserImageCategories === "function" ? getUserImageCategories().slice() : [];
     const list = typeof getUserImageLibrary === "function" ? getUserImageLibrary() : [];
     if (!list.length) {
       host.innerHTML = '<p class="settings-hint">No personal images yet. Add a banner or profile picture above.</p>';
@@ -7072,7 +7309,7 @@ function syncTaskCycleEndTimeUI() {
     }
     const banners = list.filter((e) => e && e.kind !== "pfp");
     const pfps = list.filter((e) => e && e.kind === "pfp");
-    const customOrder = sortMode === "custom";
+    const canDrag = true;
 
     function renderBlock(title, entries, galleryClass) {
       if (!entries.length) return;
@@ -7085,92 +7322,90 @@ function syncTaskCycleEndTimeUI() {
 
       const groups =
         typeof groupUserImagesByCategory === "function"
-          ? groupUserImagesByCategory(entries, sortMode, usageCounts)
+          ? groupUserImagesByCategory(entries, sortMode, usageCounts, {
+              includeEmpty: categories.length > 0,
+            })
           : [{ category: "", label: "", entries: entries }];
-      const showCatHeadings = groups.length > 1 || (groups[0] && groups[0].category);
+      const showCatHeadings = groups.length > 1 || (groups[0] && groups[0].category) || categories.length > 0;
 
       groups.forEach((group) => {
-        if (showCatHeadings) {
+        const section = document.createElement("div");
+        section.className = "my-images-category-section";
+        section.dataset.category = group.category || "";
+        if (showCatHeadings && group.label) {
           const catHead = document.createElement("h6");
           catHead.className = "my-images-category-heading";
           catHead.textContent = group.label + " (" + group.entries.length + ")";
-          block.appendChild(catHead);
+          section.appendChild(catHead);
         }
         const grid = document.createElement("div");
-        grid.className = "stock-assets-gallery" + (galleryClass ? " " + galleryClass : "");
+        grid.className =
+          "stock-assets-gallery my-images-drop-grid" + (galleryClass ? " " + galleryClass : "");
+        grid.dataset.category = group.category || "";
+        if (!group.entries.length) {
+          const empty = document.createElement("p");
+          empty.className = "my-images-drop-empty settings-hint";
+          empty.textContent = "Drop images here";
+          grid.appendChild(empty);
+        }
         group.entries.forEach((entry) => {
           const card = document.createElement("figure");
           card.className = "stock-assets-card my-images-card";
+          card.draggable = canDrag;
+          card.dataset.imageId = entry.id;
+          card.dataset.category = entry.category || "";
+
           const img = document.createElement("img");
           img.src = entry.dataUrl || "";
           img.alt = entry.label || entry.id;
           img.loading = "lazy";
+          img.draggable = false;
+
+          const titleRow = document.createElement("div");
+          titleRow.className = "my-images-card-title-row";
           const fig = document.createElement("figcaption");
           fig.textContent = entry.label || entry.id;
-          const meta = document.createElement("div");
-          meta.className = "my-images-card-meta";
-          const useEl = document.createElement("span");
-          useEl.className = "my-images-use-count";
-          useEl.textContent = formatUserImageUseCount(usageCounts[entry.id] || 0);
-          meta.appendChild(useEl);
-          if (entry.category) {
-            const catEl = document.createElement("span");
-            catEl.className = "my-images-card-category";
-            catEl.textContent = entry.category;
-            meta.appendChild(catEl);
+          const menuWrap = document.createElement("div");
+          menuWrap.className = "my-images-card-menu";
+          const editBtn = document.createElement("button");
+          editBtn.type = "button";
+          editBtn.className = "btn btn-ghost btn-sm my-images-card-edit-btn";
+          editBtn.textContent = "Edit";
+          editBtn.setAttribute("aria-expanded", "false");
+          editBtn.setAttribute("aria-haspopup", "true");
+          const menu = document.createElement("div");
+          menu.className = "my-images-card-menu-panel";
+          menu.setAttribute("role", "menu");
+          function addMenuItem(label, onClick) {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "my-images-card-menu-item";
+            item.setAttribute("role", "menuitem");
+            item.textContent = label;
+            item.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              closeMyImagesCardMenus();
+              onClick();
+            });
+            menu.appendChild(item);
           }
-          const ref = document.createElement("code");
-          ref.className = "stock-assets-path";
-          ref.textContent = makeUserImageRef(entry.id);
-          const actions = document.createElement("div");
-          actions.className = "my-images-card-actions";
-          const renameBtn = document.createElement("button");
-          renameBtn.type = "button";
-          renameBtn.className = "btn btn-ghost btn-sm";
-          renameBtn.textContent = "Rename";
-          renameBtn.addEventListener("click", () => {
+          addMenuItem("Rename", () => {
             const next = window.prompt("Rename image", entry.label || "");
             if (next == null) return;
             updateUserImageMeta(entry.id, { label: next });
             save();
             fillSettingsMyImagesGallery();
           });
-          const catBtn = document.createElement("button");
-          catBtn.type = "button";
-          catBtn.className = "btn btn-ghost btn-sm";
-          catBtn.textContent = "Category";
-          catBtn.title = "Optional category for grouping in Settings and the picker";
-          catBtn.addEventListener("click", () => {
-            const next = window.prompt(
-              "Category (leave blank to clear)",
-              entry.category || ""
-            );
-            if (next == null) return;
-            updateUserImageMeta(entry.id, { category: next });
-            save();
-            fillSettingsMyImagesGallery();
-          });
-          const replaceBtn = document.createElement("button");
-          replaceBtn.type = "button";
-          replaceBtn.className = "btn btn-ghost btn-sm";
-          replaceBtn.textContent = "Replace";
-          replaceBtn.title = "Swap the picture; tasks keep the same userimg reference";
-          replaceBtn.addEventListener("click", () => {
+          addMenuItem("Replace", () => {
             const fileInput = qs("settingsMyImagesFile");
             if (!fileInput) return;
             fileInput.dataset.replaceId = entry.id;
             fileInput.click();
           });
-          const delBtn = document.createElement("button");
-          delBtn.type = "button";
-          delBtn.className = "btn btn-ghost btn-sm";
-          delBtn.textContent = "Delete";
-          delBtn.addEventListener("click", () => {
+          addMenuItem("Delete", () => {
             const uses = usageCounts[entry.id] || 0;
             const useNote =
-              uses > 0
-                ? " It is currently used " + formatUserImageUseCount(uses) + "."
-                : "";
+              uses > 0 ? " It is currently used " + formatUserImageUseCount(uses) + "." : "";
             if (
               !window.confirm(
                 "Remove “" +
@@ -7186,46 +7421,126 @@ function syncTaskCycleEndTimeUI() {
             save();
             fillSettingsMyImagesGallery();
           });
-          actions.appendChild(renameBtn);
-          actions.appendChild(catBtn);
-          actions.appendChild(replaceBtn);
-          actions.appendChild(delBtn);
-          if (customOrder) {
-            const upBtn = document.createElement("button");
-            upBtn.type = "button";
-            upBtn.className = "btn btn-ghost btn-sm";
-            upBtn.textContent = "↑";
-            upBtn.title = "Move earlier in custom order";
-            upBtn.setAttribute("aria-label", "Move earlier");
-            upBtn.addEventListener("click", () => {
-              if (typeof moveUserImageInLibrary === "function" && moveUserImageInLibrary(entry.id, -1)) {
-                save();
-                fillSettingsMyImagesGallery();
-              }
-            });
-            const downBtn = document.createElement("button");
-            downBtn.type = "button";
-            downBtn.className = "btn btn-ghost btn-sm";
-            downBtn.textContent = "↓";
-            downBtn.title = "Move later in custom order";
-            downBtn.setAttribute("aria-label", "Move later");
-            downBtn.addEventListener("click", () => {
-              if (typeof moveUserImageInLibrary === "function" && moveUserImageInLibrary(entry.id, 1)) {
-                save();
-                fillSettingsMyImagesGallery();
-              }
-            });
-            actions.appendChild(upBtn);
-            actions.appendChild(downBtn);
-          }
+          editBtn.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            const open = !menuWrap.classList.contains("is-open");
+            closeMyImagesCardMenus(open ? menuWrap : null);
+            menuWrap.classList.toggle("is-open", open);
+            editBtn.setAttribute("aria-expanded", open ? "true" : "false");
+          });
+          menuWrap.appendChild(editBtn);
+          menuWrap.appendChild(menu);
+          titleRow.appendChild(fig);
+          titleRow.appendChild(menuWrap);
+
+          const meta = document.createElement("div");
+          meta.className = "my-images-card-meta";
+          const useEl = document.createElement("span");
+          useEl.className = "my-images-use-count";
+          useEl.textContent = formatUserImageUseCount(usageCounts[entry.id] || 0);
+          meta.appendChild(useEl);
+
+          const catLabel = document.createElement("label");
+          catLabel.className = "my-images-card-category-label";
+          catLabel.textContent = "Category";
+          const catSelect = document.createElement("select");
+          catSelect.className = "my-images-card-category-select";
+          catSelect.setAttribute("aria-label", "Category for " + (entry.label || entry.id));
+          fillMyImageCategorySelect(catSelect, entry.category || "");
+          catSelect.addEventListener("change", () => {
+            updateUserImageMeta(entry.id, { category: catSelect.value });
+            save();
+            fillSettingsMyImagesGallery();
+          });
+          catSelect.addEventListener("mousedown", (ev) => ev.stopPropagation());
+          catSelect.addEventListener("click", (ev) => ev.stopPropagation());
+          catLabel.appendChild(catSelect);
+
           card.appendChild(img);
-          card.appendChild(fig);
+          card.appendChild(titleRow);
           card.appendChild(meta);
-          card.appendChild(ref);
-          card.appendChild(actions);
+          card.appendChild(catLabel);
+
+          card.addEventListener("dragstart", (ev) => {
+            closeMyImagesCardMenus();
+            card.classList.add("is-dragging");
+            try {
+              ev.dataTransfer.setData("text/my-images-id", entry.id);
+              ev.dataTransfer.setData("text/plain", entry.id);
+              ev.dataTransfer.effectAllowed = "move";
+            } catch (_) {}
+          });
+          card.addEventListener("dragend", () => {
+            card.classList.remove("is-dragging");
+            host.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+          });
+          card.addEventListener("dragover", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            card.classList.add("is-drop-target");
+          });
+          card.addEventListener("dragleave", () => card.classList.remove("is-drop-target"));
+          card.addEventListener("drop", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            card.classList.remove("is-drop-target");
+            let draggedId = "";
+            try {
+              draggedId =
+                ev.dataTransfer.getData("text/my-images-id") ||
+                ev.dataTransfer.getData("text/plain") ||
+                "";
+            } catch (_) {}
+            draggedId = String(draggedId || "").trim();
+            if (!draggedId || draggedId === entry.id) return;
+            if (
+              typeof placeUserImageInLibrary === "function" &&
+              placeUserImageInLibrary(draggedId, {
+                category: group.category || "",
+                beforeId: entry.id,
+              })
+            ) {
+              if (sortSelect) sortSelect.value = "custom";
+              save();
+              fillSettingsMyImagesGallery();
+            }
+          });
+
           grid.appendChild(card);
         });
-        block.appendChild(grid);
+
+        grid.addEventListener("dragover", (ev) => {
+          ev.preventDefault();
+          grid.classList.add("is-drop-target");
+        });
+        grid.addEventListener("dragleave", (ev) => {
+          if (!grid.contains(ev.relatedTarget)) grid.classList.remove("is-drop-target");
+        });
+        grid.addEventListener("drop", (ev) => {
+          if (ev.target !== grid && !ev.target.classList.contains("my-images-drop-empty")) return;
+          ev.preventDefault();
+          grid.classList.remove("is-drop-target");
+          let draggedId = "";
+          try {
+            draggedId =
+              ev.dataTransfer.getData("text/my-images-id") ||
+              ev.dataTransfer.getData("text/plain") ||
+              "";
+          } catch (_) {}
+          draggedId = String(draggedId || "").trim();
+          if (!draggedId) return;
+          if (
+            typeof placeUserImageInLibrary === "function" &&
+            placeUserImageInLibrary(draggedId, { category: group.category || "" })
+          ) {
+            if (sortSelect) sortSelect.value = "custom";
+            save();
+            fillSettingsMyImagesGallery();
+          }
+        });
+
+        section.appendChild(grid);
+        block.appendChild(section);
       });
       host.appendChild(block);
     }
@@ -7243,6 +7558,10 @@ function syncTaskCycleEndTimeUI() {
     const host = qs("settingsStockAssetsList");
     if (!host) return;
     host.innerHTML = "";
+    const usageMap =
+      typeof countImageUsages === "function"
+        ? countImageUsages()
+        : { byUserId: Object.create(null), byStockPath: Object.create(null) };
     const banners = typeof getStockBannerAssets === "function" ? getStockBannerAssets() : [];
     const pfps = typeof getStockPfpAssets === "function" ? getStockPfpAssets() : [];
     if (!banners.length && !pfps.length) {
@@ -7258,7 +7577,7 @@ function syncTaskCycleEndTimeUI() {
       heading.textContent = "Banners";
       const grid = document.createElement("div");
       grid.className = "stock-assets-gallery";
-      banners.forEach((asset) => appendStockAssetCard(grid, asset, ""));
+      banners.forEach((asset) => appendStockAssetCard(grid, asset, "", usageMap));
       block.appendChild(heading);
       block.appendChild(grid);
       host.appendChild(block);
@@ -7280,7 +7599,7 @@ function syncTaskCycleEndTimeUI() {
       const grid = document.createElement("div");
       grid.className = "stock-assets-gallery stock-assets-gallery--pfp";
       grid.setAttribute("aria-labelledby", "settings-stock-pfps-heading");
-      pfps.forEach((asset) => appendStockAssetCard(grid, asset, "PFP"));
+      pfps.forEach((asset) => appendStockAssetCard(grid, asset, "PFP", usageMap));
       block.appendChild(heading);
       block.appendChild(grid);
       host.appendChild(block);
@@ -7803,6 +8122,15 @@ function syncTaskCycleEndTimeUI() {
         const t = e.target;
         if (t && t.getAttribute && t.getAttribute("data-close") === "stockBannerPickerModal") {
           closeStockBannerPicker();
+        }
+      });
+    }
+    const categoriesModal = qs("myImagesCategoriesModal");
+    if (categoriesModal) {
+      categoriesModal.addEventListener("click", (e) => {
+        const t = e.target;
+        if (t && t.getAttribute && t.getAttribute("data-close") === "myImagesCategoriesModal") {
+          closeMyImagesCategoriesModal();
         }
       });
     }
