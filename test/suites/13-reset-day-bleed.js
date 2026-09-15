@@ -198,6 +198,74 @@ module.exports = {
     );
 
     checks.push(
+      check("Simulation: reset-instant stamp on shared day does not complete new Pure Fiction cycle", () => {
+        const afterSep14 = new Date(2026, 8, 15, 12, 0, 0);
+        const state = sim.createFixture({ today: "2026-09-15" });
+        const game = sim.getGame(state);
+        const pf = game.endgame.find((t) => t.id === "pure_fiction");
+        const key = sim.taskKey(game, pf);
+        const boundary = "2026-09-14";
+
+        // Prior cycle finished; legacy bleed + invented stamp at exactly next reset (user History shape).
+        sim.markCompleteWithLegacyBoundaryBleed(state, "endgame", key, "2026-08-20", 14);
+        const membership = math.getCycleMembershipMoment(afterSep14, 4, 0);
+        const bounds = math.getCycleBoundsForMoment(pf, membership);
+        assert.ok(bounds, "new cycle bounds");
+        const startHour = bounds.cycleStart.getHours();
+        if (!state.completionByDate[boundary]) {
+          state.completionByDate[boundary] = { dailies: [], weeklies: [], endgame: [] };
+        }
+        if (!(state.completionByDate[boundary].endgame || []).includes(key)) {
+          state.completionByDate[boundary].endgame.push(key);
+        }
+        state.completionTimestamps.push({
+          dateStr: boundary,
+          hour: startHour,
+          minute: 0,
+          gameId: game.id,
+          taskType: "endgame",
+          taskId: pf.id,
+          taskLabel: pf.label,
+        });
+
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", key, afterSep14),
+          false,
+          "exact reset-instant stamp must not count as new-cycle complete"
+        );
+
+        const beforeSyncLen = (state.completionTimestamps || []).length;
+        integrity.syncTimestampsFromCalendar(state);
+        assert.equal(
+          (state.completionTimestamps || []).length,
+          beforeSyncLen,
+          "bleed-only first day must not invent another finish stamp"
+        );
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", key, afterSep14),
+          false,
+          "still incomplete after calendar timestamp sync"
+        );
+
+        // Post-reset finish later the same day still counts.
+        state.completionTimestamps.push({
+          dateStr: boundary,
+          hour: startHour + 2,
+          minute: 0,
+          gameId: game.id,
+          taskType: "endgame",
+          taskId: pf.id,
+          taskLabel: pf.label,
+        });
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", key, afterSep14),
+          true,
+          "finish after reset on day 1 still counts"
+        );
+      })
+    );
+
+    checks.push(
       check("Pre-reset membership: Aug 3 3am still previous cycle", () => {
         assert.equal(
           math.getPeriodDateStrForReset(beforeResetAug3(), 4, 0),

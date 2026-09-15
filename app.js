@@ -4445,30 +4445,65 @@
     return best;
   }
 
-  /** Whether any completion timestamp falls inside [cycleStart, cycleEnd). */
-  function hasCompletionTimestampInBounds(key, type, bounds, gameId, taskId) {
-    if (!bounds) return false;
+  /** Adjacent full periods share the reset calendar day (owned only by the next cycle). */
+  function isAdjacentCycleBounds(bounds) {
+    return !!(
+      bounds &&
+      bounds.nextCycleStart instanceof Date &&
+      bounds.cycleEnd instanceof Date &&
+      bounds.nextCycleStart.getTime() === bounds.cycleEnd.getTime()
+    );
+  }
+
+  /**
+   * Parse a completion timestamp to local ms. Returns NaN when unusable.
+   */
+  function completionTimestampMs(t) {
+    if (!t || !isValidDateStr(t.dateStr)) return NaN;
+    const h = Number.isFinite(t.hour) ? t.hour : 12;
+    const m = Number.isFinite(t.minute) ? t.minute : 0;
+    return new Date(
+      t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
+    ).getTime();
+  }
+
+  /**
+   * Whether a timestamp proves this cycle was finished (not leftover at the shared reset instant).
+   * Half-open [cycleStart, cycleEnd). Exact cycleStart on the first-owned / shared day is ignored:
+   * that stamp is the prior cycle's boundary bleed (or Fill-missing inventing hour=reset).
+   * A real day-1 finish is after reset (ms > cycleStart) and still counts.
+   */
+  function timestampProvesCycleCompletion(t, bounds, firstOwned) {
+    if (!bounds || !t) return false;
     const startMs = bounds.cycleStart.getTime();
     const endMs = bounds.cycleEnd.getTime();
+    const ms = completionTimestampMs(t);
+    if (!Number.isFinite(ms) || ms < startMs || ms >= endMs) return false;
+    const adjacent = isAdjacentCycleBounds(bounds);
+    const startDateStr = getDateStr(bounds.cycleStart);
+    const onBoundaryDay =
+      (firstOwned && t.dateStr === firstOwned) || (adjacent && t.dateStr === startDateStr);
+    if (onBoundaryDay && ms <= startMs) return false;
+    return true;
+  }
+
+  /** Whether any completion timestamp proves this cycle was finished. */
+  function hasCompletionTimestampInBounds(key, type, bounds, gameId, taskId) {
+    if (!bounds) return false;
+    const dates = getCalendarDatesForBounds(bounds);
+    const firstOwned = dates[0] || null;
     for (const t of state.completionTimestamps || []) {
       if (t.taskType !== type || t.gameId !== gameId) continue;
       if (type !== "dailies" && t.taskId !== taskId) continue;
-      if (!isValidDateStr(t.dateStr)) continue;
-      const h = Number.isFinite(t.hour) ? t.hour : 12;
-      const m = Number.isFinite(t.minute) ? t.minute : 0;
-      const ms = new Date(
-        t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
-      ).getTime();
-      if (!Number.isFinite(ms)) continue;
-      if (ms >= startMs && ms < endMs) return true;
+      if (timestampProvesCycleCompletion(t, bounds, firstOwned)) return true;
     }
     return false;
   }
 
   /**
-   * Completion date inside a cycle. Timestamps in [cycleStart, cycleEnd) win.
+   * Completion date inside a cycle. Timestamps that prove this cycle win.
    * Bare calendar marks on the shared reset / first-owned day are ignored unless a
-   * timestamp proves this-cycle completion (leftover fill from the prior cycle).
+   * post-reset timestamp proves this-cycle completion (leftover fill from the prior cycle).
    */
   function findCompletionDateInBounds(key, type, bounds) {
     if (!bounds) return null;
@@ -4477,23 +4512,14 @@
     const dot = key.indexOf(".");
     const gameId = dot > 0 ? key.slice(0, dot) : key;
     const taskId = dot > 0 ? key.slice(dot + 1) : "";
-    const startMs = bounds.cycleStart.getTime();
-    const endMs = bounds.cycleEnd.getTime();
-    const adjacent = bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === endMs;
+    const adjacent = isAdjacentCycleBounds(bounds);
     const startDateStr = getDateStr(bounds.cycleStart);
     const firstOwned = dates[0];
 
     for (const t of state.completionTimestamps || []) {
       if (t.taskType !== type || t.gameId !== gameId) continue;
       if (type !== "dailies" && t.taskId !== taskId) continue;
-      if (!isValidDateStr(t.dateStr)) continue;
-      const h = Number.isFinite(t.hour) ? t.hour : 12;
-      const m = Number.isFinite(t.minute) ? t.minute : 0;
-      const ms = new Date(
-        t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
-      ).getTime();
-      if (!Number.isFinite(ms)) continue;
-      if (ms >= startMs && ms < endMs) return t.dateStr;
+      if (timestampProvesCycleCompletion(t, bounds, firstOwned)) return t.dateStr;
     }
 
     for (const ds of dates) {
@@ -6963,8 +6989,15 @@
     const bounds = getCycleBoundsForTaskType(type, task, new Date(refDateStr + "T12:00:00"), game);
     if (!bounds) return null;
     const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+    const adjacent = isAdjacentCycleBounds(bounds);
+    const startDateStr = getDateStr(bounds.cycleStart);
+    const firstOwned = dates[0];
     let earliest = null;
     for (const ds of dates) {
+      // Do not treat shared-reset bleed as the cycle's earliest finish (avoids inventing
+      // a reset-hour timestamp that makes the new cycle look Complete).
+      if (firstOwned && ds === firstOwned) continue;
+      if (adjacent && ds === startDateStr) continue;
       if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) {
         earliest = ds;
         break;
@@ -6976,6 +7009,8 @@
       // Prefer first mark on/after unlock if one exists
       for (const ds of dates) {
         if (ds < unlockDateStr) continue;
+        if (firstOwned && ds === firstOwned) continue;
+        if (adjacent && ds === startDateStr) continue;
         if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) return ds;
       }
     }
@@ -8399,8 +8434,8 @@
   }
 
   /**
-   * Remove leftover fill marks on the shared reset calendar day when the new cycle
-   * is not actually complete (weeklies and endgame with adjacent full periods).
+   * Remove leftover fill marks / reset-instant stamps on the shared reset calendar day
+   * when the new cycle is not actually complete (weeklies and endgame with adjacent full periods).
    */
   function cleanupCycleBoundaryBleedMarks() {
     let changed = false;
@@ -8413,12 +8448,12 @@
           const gameId = dot > 0 ? key.slice(0, dot) : key;
           const taskId = dot > 0 ? key.slice(dot + 1) : "";
           const bounds = getCycleBoundsForTaskType(type, task, now, game);
-          if (!bounds || !(bounds.nextCycleStart instanceof Date)) return;
-          if (bounds.nextCycleStart.getTime() !== bounds.cycleEnd.getTime()) return;
+          if (!bounds || !isAdjacentCycleBounds(bounds)) return;
           if (hasCompletionTimestampInBounds(key, type, bounds, gameId, taskId)) return;
           const dates = getCalendarDatesForBounds(bounds);
           const firstOwned = dates[0];
           const startDateStr = getDateStr(bounds.cycleStart);
+          const startMs = bounds.cycleStart.getTime();
           const toClean = new Set();
           if (
             firstOwned &&
@@ -8440,6 +8475,21 @@
             dayData[type].splice(idx, 1);
             changed = true;
           });
+          // Drop invented / bleed stamps parked exactly at the reset instant on the shared day.
+          if (Array.isArray(state.completionTimestamps)) {
+            for (let i = state.completionTimestamps.length - 1; i >= 0; i--) {
+              const t = state.completionTimestamps[i];
+              if (!t || t.taskType !== type || t.gameId !== gameId) continue;
+              if (type !== "dailies" && t.taskId !== taskId) continue;
+              const onBoundaryDay =
+                (firstOwned && t.dateStr === firstOwned) || t.dateStr === startDateStr;
+              if (!onBoundaryDay) continue;
+              const ms = completionTimestampMs(t);
+              if (!Number.isFinite(ms) || ms !== startMs) continue;
+              state.completionTimestamps.splice(i, 1);
+              changed = true;
+            }
+          }
         });
       });
     });

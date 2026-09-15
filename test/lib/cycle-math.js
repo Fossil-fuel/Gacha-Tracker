@@ -211,6 +211,23 @@ function findCalendarCompletionInBounds(marksByDate, key, bounds) {
   return null;
 }
 
+/** Timestamp proves cycle completion (mirrors app: ignore exact reset instant on shared day). */
+function timestampProvesCycleCompletion(t, bounds, firstOwned) {
+  if (!bounds || !t || t.dateStr == null) return false;
+  const startMs = bounds.cycleStart.getTime();
+  const endMs = bounds.cycleEnd.getTime();
+  const h = Number.isFinite(t.hour) ? t.hour : 12;
+  const m = Number.isFinite(t.minute) ? t.minute : 0;
+  const ms = new Date(t.dateStr + "T" + pad2(h) + ":" + pad2(m) + ":00").getTime();
+  if (!Number.isFinite(ms) || ms < startMs || ms >= endMs) return false;
+  const adjacent = bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === endMs;
+  const startDateStr = formatLocalDate(bounds.cycleStart);
+  const onBoundaryDay =
+    (firstOwned && t.dateStr === firstOwned) || (adjacent && t.dateStr === startDateStr);
+  if (onBoundaryDay && ms <= startMs) return false;
+  return true;
+}
+
 function cycleLooksCompleteAfterBleed(task, completeOnDateStr, now) {
   const key = "task";
   const finishBounds = getCycleBoundsForMoment(task, new Date(completeOnDateStr + "T12:00:00"));
@@ -253,13 +270,9 @@ function diagnoseSharedResetDay(task, marksByDate, timestamps, key, now) {
   const hasMarkOnStart = adjacent && (marksByDate[startDateStr] || []).includes(key);
   const startMs = bounds.cycleStart.getTime();
   const endMs = bounds.cycleEnd.getTime();
-  const hasInCycleTs = (timestamps || []).some((t) => {
-    if (!t || t.dateStr == null) return false;
-    const h = Number.isFinite(t.hour) ? t.hour : 12;
-    const m = Number.isFinite(t.minute) ? t.minute : 0;
-    const ms = new Date(t.dateStr + "T" + pad2(h) + ":" + pad2(m) + ":00").getTime();
-    return ms >= startMs && ms < endMs;
-  });
+  const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+  const firstOwned = dates[0];
+  const hasInCycleTs = (timestamps || []).some((t) => timestampProvesCycleCompletion(t, bounds, firstOwned));
   const currentComplete = findCalendarCompletionInBounds(marksByDate, key, bounds) != null || hasInCycleTs;
   // findCalendarCompletionInBounds already skips start day; combine with ts:
   const reallyComplete = hasInCycleTs
@@ -359,6 +372,7 @@ module.exports = {
   getCalendarDatesInCycleRange,
   getCycleBoundsForMoment,
   findCalendarCompletionInBounds,
+  timestampProvesCycleCompletion,
   cycleLooksCompleteAfterBleed,
   diagnoseSharedResetDay,
   cleanupSharedDayBleedMark,

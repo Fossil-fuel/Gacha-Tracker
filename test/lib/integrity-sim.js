@@ -544,7 +544,9 @@ function syncTimestampsFromCalendar(state, opts) {
           if (seen.has(cycleKey)) return;
           seen.add(cycleKey);
           let earliest = null;
-          for (const d of cycle) {
+          // Skip first owned day — shared reset bleed must not invent a new-cycle stamp.
+          for (let i = 1; i < cycle.length; i++) {
+            const d = cycle[i];
             if ((state.completionByDate[d] && state.completionByDate[d][type] || []).includes(key)) {
               earliest = d;
               break;

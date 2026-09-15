@@ -772,16 +772,9 @@ function isCompletedInCycleForDate(state, type, key, refDateStr) {
   if (!bounds) return false;
   const marks = marksByDateForKey(state, type, key);
   const stamps = timestampsForKey(state, type, key);
-  const startMs = bounds.cycleStart.getTime();
-  const endMs = bounds.cycleEnd.getTime();
-  const hasTs = stamps.some((t) => {
-    const h = Number.isFinite(t.hour) ? t.hour : 12;
-    const m = Number.isFinite(t.minute) ? t.minute : 0;
-    const ms = new Date(
-      t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
-    ).getTime();
-    return ms >= startMs && ms < endMs;
-  });
+  const owned = math.getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+  const firstOwned = owned[0];
+  const hasTs = stamps.some((t) => math.timestampProvesCycleCompletion(t, bounds, firstOwned));
   if (hasTs) return true;
   return math.findCalendarCompletionInBounds(marks, key, bounds) != null;
 }
@@ -815,16 +808,9 @@ function isCompletedInCurrentCycle(state, type, key, now) {
   const marks = marksByDateForKey(state, type, key);
   const stamps = timestampsForKey(state, type, key);
   if (!bounds) return false;
-  const startMs = bounds.cycleStart.getTime();
-  const endMs = bounds.cycleEnd.getTime();
-  const hasTs = stamps.some((t) => {
-    const h = Number.isFinite(t.hour) ? t.hour : 12;
-    const m = Number.isFinite(t.minute) ? t.minute : 0;
-    const ms = new Date(
-      t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
-    ).getTime();
-    return ms >= startMs && ms < endMs;
-  });
+  const owned = math.getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+  const firstOwned = owned[0];
+  const hasTs = stamps.some((t) => math.timestampProvesCycleCompletion(t, bounds, firstOwned));
   if (hasTs) return true;
   return math.findCalendarCompletionInBounds(marks, key, bounds) != null;
 }
