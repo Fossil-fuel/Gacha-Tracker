@@ -4384,13 +4384,40 @@
   }
 
   /**
+   * Instant used to decide which weekly/endgame cycle owns a calendar date.
+   * Noon is before afternoon resets (e.g. Superstring Mon 15:00), so using
+   * dateStr + "T12:00:00" wrongly keeps the prior cycle after reset — completes
+   * clamp onto last week's days and the new cycle never shows Complete.
+   * Use that calendar day's reset clock instead.
+   */
+  function getCycleMomentForCalendarDate(task, game, dateStr) {
+    if (!isValidDateStr(dateStr)) return getCycleMembershipMoment(task, game);
+    const y = parseInt(dateStr.slice(0, 4), 10);
+    const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    const noonGuess = new Date(dateStr + "T12:00:00");
+    const clock = getTaskResetClock(task, game, noonGuess);
+    return createDateInTimezone(
+      y,
+      mo,
+      d,
+      clock.hour,
+      clock.minute,
+      clock.tz,
+      clock.offsetRef
+    );
+  }
+
+  /**
    * Cycle used for "complete now" / current-cycle status.
    * Closed archive windows still win when the date falls inside one; otherwise the live
    * manual window is used even after it has expired (board stays actionable until Start).
    */
   function resolveCycleBoundsForCompletionDate(type, task, game, dateStr) {
     if (!task || (type !== "weeklies" && type !== "endgame")) return null;
-    const moment = isValidDateStr(dateStr) ? new Date(dateStr + "T12:00:00") : getSimulatedNow();
+    const moment = isValidDateStr(dateStr)
+      ? getCycleMomentForCalendarDate(task, game, dateStr)
+      : getCycleMembershipMoment(task, game);
     let bounds =
       type === "weeklies"
         ? getWeeklyCycleBoundsForMoment(task, moment, game)
@@ -6456,7 +6483,7 @@
       // Manual-reset stays actionable after the live window ends until the next Start.
       const lastBounds = getLastCycleBounds(task, game);
       if (lastBounds && !isManualResetTask(task)) {
-        const moment = new Date(dateStr + "T12:00:00");
+        const moment = getCycleMomentForCalendarDate(task, game, dateStr);
         const cycleBounds =
           type === "weeklies"
             ? getWeeklyCycleBoundsForMoment(task, moment, game)

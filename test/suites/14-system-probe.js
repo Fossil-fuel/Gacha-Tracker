@@ -256,6 +256,8 @@ module.exports = {
         // HI3 Superstring Dimension P1: weekly Mon 15:00, 2-day window.
         // Bug: resolving "current cycle" via period date at noon after 15:00 reset
         // still lands in last week's bounds → card looks already complete.
+        // Write path had the same noon bug: completes clamped onto last week so
+        // Mark complete + earned appeared to do nothing on the new cycle.
         const task = {
           weekStartDay: 1,
           weekStartHour: 15,
@@ -285,6 +287,122 @@ module.exports = {
           /function getWeeklyCompletionDateInCurrentCycle[\s\S]{0,700}getCycleMembershipMoment/.test(core) &&
             !/function getWeeklyCompletionDateInCurrentCycle[\s\S]{0,500}getTaskPeriodDateStr/.test(core),
           "weekly current-cycle complete must use membership moment, not period noon"
+        );
+        assert.ok(
+          core.includes("function getCycleMomentForCalendarDate") &&
+            /function resolveCycleBoundsForCompletionDate[\s\S]{0,400}getCycleMomentForCalendarDate/.test(core),
+          "complete/write path must resolve cycle via calendar-day reset clock, not noon"
+        );
+      })
+    );
+
+    checks.push(
+      check("Invariant: multiple reset clocks stay isolated per task key", () => {
+        // Same game, three clocks: Mon 4am weekly, Mon 15:00 Superstring-like endgame, manual Umbral.
+        // Completing one must not flip the others' current-cycle status or tallies.
+        const state = sim.createFixture({ today: "2026-03-16" });
+        const game = sim.getGame(state);
+        const weekly = game.weeklies[0];
+        weekly.weekStartHour = 4;
+        weekly.weekStartDay = 1;
+        weekly.dateStarted = "2026-03-02";
+        const superstring = {
+          id: "superstring_iso",
+          label: "Superstring Iso",
+          weekStartDay: 1,
+          weekStartHour: 15,
+          dateStarted: "2026-03-02",
+          frequencyEvery: 1,
+          frequencyUnit: "week",
+          timeLimitEvery: 2,
+          timeLimitUnit: "day",
+          currency: 520,
+        };
+        const umbral = {
+          id: "umbral_iso",
+          label: "Umbral Iso",
+          weekStartDay: 1,
+          weekStartHour: 4,
+          dateStarted: "2026-03-01",
+          frequencyEvery: 1,
+          frequencyUnit: "week",
+          timeLimitEvery: 1,
+          timeLimitUnit: "week",
+          currency: 1200,
+          manualReset: true,
+          manualDueTbd: false,
+          manualDueDateStr: "2026-03-20",
+          manualAwaitingRestart: true,
+        };
+        game.endgame.push(superstring, umbral);
+        const wKey = sim.taskKey(game, weekly);
+        const sKey = sim.taskKey(game, superstring);
+        const uKey = sim.taskKey(game, umbral);
+
+        // Prior Superstring week finished Tue Mar 10; weekly finished Fri Mar 13.
+        sim.markComplete(state, "endgame", sKey, "2026-03-10", 18, 0);
+        sim.markComplete(state, "weeklies", wKey, "2026-03-13", 12, 0);
+        state.endgameCompleted[sKey] = 1;
+        state.weekliesCompleted[wKey] = 1;
+        state.endgameAttempted[sKey] = 1;
+        state.weekliesAttempted[wKey] = 1;
+
+        const afterSuperstringReset = new Date(2026, 2, 16, 16, 0, 0); // Mon 16:00
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", sKey, afterSuperstringReset),
+          false,
+          "Superstring new week after 15:00 must be incomplete"
+        );
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "weeklies", wKey, afterSuperstringReset),
+          false,
+          "4am weekly new week must be incomplete (independent of 15:00 clock)"
+        );
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", uKey, afterSuperstringReset),
+          false,
+          "manual awaiting-restart stays incomplete"
+        );
+
+        // Complete Superstring in the new window on Tue (mid-cycle) so sim fill
+        // membership is unambiguous; Mon 15:00 noon trap is covered by the FIND above.
+        sim.markComplete(state, "endgame", sKey, "2026-03-17", 12, 0);
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", sKey, afterSuperstringReset),
+          true,
+          "Superstring complete in new window"
+        );
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "weeklies", wKey, afterSuperstringReset),
+          false,
+          "weekly must stay incomplete when only Superstring was marked"
+        );
+        assert.equal(
+          Number(state.weekliesCompleted[wKey]) || 0,
+          1,
+          "weekly tally unchanged by Superstring complete"
+        );
+        assert.equal(
+          !!umbral.manualAwaitingRestart,
+          true,
+          "manual awaiting-restart flag untouched"
+        );
+
+        const noonBefore15 = new Date(2026, 2, 16, 12, 0, 0);
+        const sMem15 = math.getCycleMembershipMoment(afterSuperstringReset, 15, 0);
+        const sMem4 = math.getCycleMembershipMoment(afterSuperstringReset, 4, 0);
+        const sBounds15 = math.getCycleBoundsForMoment(superstring, sMem15);
+        const wBounds4 = math.getCycleBoundsForMoment(weekly, sMem4);
+        assert.ok(sBounds15 && wBounds4, "both clocks resolve bounds");
+        assert.ok(
+          sBounds15.cycleStart.getTime() !== math.getCycleBoundsForMoment(superstring, noonBefore15).cycleStart.getTime(),
+          "15:00 Superstring membership differs from noon (prior week)"
+        );
+        // Weekly 4am already in new week at noon Monday — different from Superstring noon prior-week trap.
+        assert.ok(
+          wBounds4.cycleStart.getTime() ===
+            math.getCycleBoundsForMoment(weekly, math.getCycleMembershipMoment(noonBefore15, 4, 0)).cycleStart.getTime(),
+          "4am weekly noon Monday already matches post-reset week"
         );
       })
     );
