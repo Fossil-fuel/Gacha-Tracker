@@ -266,6 +266,67 @@ module.exports = {
     );
 
     checks.push(
+      check("Simulation: forward calendar pollution without finish stamp stays incomplete + cleans", () => {
+        const afterSep14 = new Date(2026, 8, 15, 12, 0, 0);
+        const state = sim.createFixture({ today: "2026-09-15" });
+        const game = sim.getGame(state);
+        const pf = game.endgame.find((t) => t.id === "pure_fiction");
+        const key = sim.taskKey(game, pf);
+
+        // Prior cycle legitimately done.
+        sim.markComplete(state, "endgame", key, "2026-08-20", 14);
+
+        // Pollute current + future days (user save shape: hundreds of days, no proving stamp).
+        ["2026-09-14", "2026-09-15", "2026-09-16", "2026-10-27", "2026-12-07"].forEach((ds) => {
+          if (!state.completionByDate[ds]) state.completionByDate[ds] = { dailies: [], weeklies: [], endgame: [] };
+          if (!state.completionByDate[ds].endgame.includes(key)) state.completionByDate[ds].endgame.push(key);
+        });
+        state.completionTimestamps.push({
+          dateStr: "2026-12-07",
+          hour: 4,
+          minute: 0,
+          gameId: game.id,
+          taskType: "endgame",
+          taskId: pf.id,
+          taskLabel: pf.label,
+        });
+
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", key, afterSep14),
+          false,
+          "polluted calendar alone must not complete current cycle"
+        );
+
+        sim.cleanupCycleBoundaryBleedMarks(state, afterSep14);
+        assert.equal(
+          ((state.completionByDate["2026-09-15"] || {}).endgame || []).includes(key),
+          false,
+          "cleanup removes current-cycle pollution marks"
+        );
+        assert.equal(
+          ((state.completionByDate["2026-12-07"] || {}).endgame || []).includes(key),
+          false,
+          "cleanup removes future-cycle pollution marks"
+        );
+        assert.equal(
+          (state.completionTimestamps || []).some((t) => t.taskId === pf.id && t.dateStr === "2026-12-07"),
+          false,
+          "cleanup removes future invented stamps"
+        );
+        assert.equal(
+          (state.completionTimestamps || []).some((t) => t.taskId === pf.id && t.dateStr === "2026-08-20"),
+          true,
+          "prior-cycle finish stamp preserved"
+        );
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "endgame", key, afterSep14),
+          false,
+          "still incomplete after cleanup"
+        );
+      })
+    );
+
+    checks.push(
       check("Pre-reset membership: Aug 3 3am still previous cycle", () => {
         assert.equal(
           math.getPeriodDateStrForReset(beforeResetAug3(), 4, 0),

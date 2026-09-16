@@ -341,20 +341,18 @@
     container.appendChild(headerRow);
 
     const tasksRaw = viewMode === "history" ? getArchivedExtracurricularTasks() : getActiveExtracurricularTasks();
-    const now = getSimulatedNow();
-    // Active board: due-date / completion sort. History: leave in saved order (no re-sort).
-    const tasks = viewMode === "history"
-      ? tasksRaw
-      : sortBoardTaskEntries(tasksRaw.map((task, taskOrder) => {
-          const rem = getExtracurricularTimeRemainingMs(task, now);
-          return {
-            task,
-            completed: !!state.extracurricularCompleted[task.id],
-            dueMs: rem == null ? Number.POSITIVE_INFINITY : (now.getTime() + rem),
-            gameOrder: 0,
-            taskOrder,
-          };
-        })).map((entry) => entry.task);
+    // Start date, oldest first. Missing dates stay at the end; ties keep saved order.
+    const tasks = tasksRaw
+      .map((task, taskOrder) => ({ task, taskOrder }))
+      .sort((a, b) => {
+        const as = a.task.startDate || "";
+        const bs = b.task.startDate || "";
+        if (as && bs && as !== bs) return as < bs ? -1 : 1;
+        if (as && !bs) return -1;
+        if (!as && bs) return 1;
+        return a.taskOrder - b.taskOrder;
+      })
+      .map((entry) => entry.task);
 
     if (tasks.length === 0) {
       const empty = document.createElement("p");
@@ -368,6 +366,7 @@
 
     const list = document.createElement("div");
     list.className = "task-grid task-grid-knot";
+    list.dataset.masonryOrder = "source";
     tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task, "div")));
     container.appendChild(list);
     scheduleTaskMasonry(list);

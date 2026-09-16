@@ -4379,8 +4379,10 @@
 
   /**
    * Completion date inside a cycle. Timestamps that prove this cycle win.
-   * Bare calendar marks on the shared reset / first-owned day are ignored unless a
-   * post-reset timestamp proves this-cycle completion (leftover fill from the prior cycle).
+   * Bare calendar marks on the shared reset / first-owned day are ignored (legacy bleed).
+   * For the *live* adjacent cycle only, calendar-only fill cannot prove completion — otherwise
+   * forward-polluted days keep the board Complete with no finish. Past cycles still allow
+   * calendar proof so History rows without stamps stay visible.
    */
   function findCompletionDateInBounds(key, type, bounds) {
     if (!bounds) return null;
@@ -4392,6 +4394,8 @@
     const adjacent = isAdjacentCycleBounds(bounds);
     const startDateStr = getDateStr(bounds.cycleStart);
     const firstOwned = dates[0];
+    const nowMs = getSimulatedNow().getTime();
+    const isLiveCycle = nowMs >= bounds.cycleStart.getTime() && nowMs < bounds.cycleEnd.getTime();
 
     for (const t of state.completionTimestamps || []) {
       if (t.taskType !== type || t.gameId !== gameId) continue;
@@ -4399,8 +4403,10 @@
       if (timestampProvesCycleCompletion(t, bounds, firstOwned)) return t.dateStr;
     }
 
+    // Live adjacent cycle: calendar-only marks are bleed/pollution, not a real finish.
+    if (adjacent && isLiveCycle) return null;
+
     for (const ds of dates) {
-      // First owned day = shared reset boundary; calendar-only marks there are legacy bleed.
       if (firstOwned && ds === firstOwned) continue;
       if (adjacent && ds === startDateStr) continue;
       if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) return ds;
@@ -8311,8 +8317,10 @@
   }
 
   /**
-   * Remove leftover fill marks / reset-instant stamps on the shared reset calendar day
-   * when the new cycle is not actually complete (weeklies and endgame with adjacent full periods).
+   * Remove leftover fill marks / reset-instant stamps when the new cycle is not actually
+   * complete (weeklies and endgame with adjacent full periods).
+   * If there is no post-reset proving timestamp, also strip current+future calendar fill and
+   * stamps from the shared day onward (fixes multi-cycle pollution that still looked Complete).
    */
   function cleanupCycleBoundaryBleedMarks() {
     let changed = false;
@@ -8326,25 +8334,35 @@
           const taskId = dot > 0 ? key.slice(dot + 1) : "";
           const bounds = getCycleBoundsForTaskType(type, task, now, game);
           if (!bounds || !isAdjacentCycleBounds(bounds)) return;
-          if (hasCompletionTimestampInBounds(key, type, bounds, gameId, taskId)) return;
           const dates = getCalendarDatesForBounds(bounds);
           const firstOwned = dates[0];
           const startDateStr = getDateStr(bounds.cycleStart);
           const startMs = bounds.cycleStart.getTime();
-          const toClean = new Set();
-          if (
-            firstOwned &&
-            (state.completionByDate[firstOwned] && state.completionByDate[firstOwned][type] || []).includes(key)
-          ) {
-            toClean.add(firstOwned);
+          if (!firstOwned) return;
+
+          if (hasCompletionTimestampInBounds(key, type, bounds, gameId, taskId)) {
+            // Real finish this cycle: only scrub exact reset-instant bleed stamps on the shared day.
+            if (Array.isArray(state.completionTimestamps)) {
+              for (let i = state.completionTimestamps.length - 1; i >= 0; i--) {
+                const t = state.completionTimestamps[i];
+                if (!t || t.taskType !== type || t.gameId !== gameId) continue;
+                if (type !== "dailies" && t.taskId !== taskId) continue;
+                const onBoundaryDay =
+                  (firstOwned && t.dateStr === firstOwned) || t.dateStr === startDateStr;
+                if (!onBoundaryDay) continue;
+                const ms = completionTimestampMs(t);
+                if (!Number.isFinite(ms) || ms !== startMs) continue;
+                state.completionTimestamps.splice(i, 1);
+                changed = true;
+              }
+            }
+            return;
           }
-          if (
-            startDateStr !== firstOwned &&
-            (state.completionByDate[startDateStr] && state.completionByDate[startDateStr][type] || []).includes(key)
-          ) {
-            toClean.add(startDateStr);
-          }
-          toClean.forEach((ds) => {
+
+          // No proving finish this cycle: drop shared-day bleed AND forward pollution
+          // (calendar/stamps from this cycle start into future cycles).
+          Object.keys(state.completionByDate || {}).forEach((ds) => {
+            if (!isValidDateStr(ds) || ds < firstOwned) return;
             const dayData = state.completionByDate[ds];
             if (!dayData || !dayData[type]) return;
             const idx = dayData[type].indexOf(key);
@@ -8352,17 +8370,12 @@
             dayData[type].splice(idx, 1);
             changed = true;
           });
-          // Drop invented / bleed stamps parked exactly at the reset instant on the shared day.
           if (Array.isArray(state.completionTimestamps)) {
             for (let i = state.completionTimestamps.length - 1; i >= 0; i--) {
               const t = state.completionTimestamps[i];
               if (!t || t.taskType !== type || t.gameId !== gameId) continue;
               if (type !== "dailies" && t.taskId !== taskId) continue;
-              const onBoundaryDay =
-                (firstOwned && t.dateStr === firstOwned) || t.dateStr === startDateStr;
-              if (!onBoundaryDay) continue;
-              const ms = completionTimestampMs(t);
-              if (!Number.isFinite(ms) || ms !== startMs) continue;
+              if (!isValidDateStr(t.dateStr) || t.dateStr < firstOwned) continue;
               state.completionTimestamps.splice(i, 1);
               changed = true;
             }

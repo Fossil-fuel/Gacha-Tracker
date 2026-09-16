@@ -776,6 +776,11 @@ function isCompletedInCycleForDate(state, type, key, refDateStr) {
   const firstOwned = owned[0];
   const hasTs = stamps.some((t) => math.timestampProvesCycleCompletion(t, bounds, firstOwned));
   if (hasTs) return true;
+  const adjacent =
+    bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === bounds.cycleEnd.getTime();
+  const nowMs = Date.now();
+  const isLiveCycle = nowMs >= bounds.cycleStart.getTime() && nowMs < bounds.cycleEnd.getTime();
+  if (adjacent && isLiveCycle) return false;
   return math.findCalendarCompletionInBounds(marks, key, bounds) != null;
 }
 
@@ -812,6 +817,11 @@ function isCompletedInCurrentCycle(state, type, key, now) {
   const firstOwned = owned[0];
   const hasTs = stamps.some((t) => math.timestampProvesCycleCompletion(t, bounds, firstOwned));
   if (hasTs) return true;
+  const adjacent =
+    bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === bounds.cycleEnd.getTime();
+  const nowMs = now.getTime();
+  const isLiveCycle = nowMs >= bounds.cycleStart.getTime() && nowMs < bounds.cycleEnd.getTime();
+  if (adjacent && isLiveCycle) return false;
   return math.findCalendarCompletionInBounds(marks, key, bounds) != null;
 }
 
@@ -828,21 +838,43 @@ function diagnoseTaskResetDay(state, type, key, now) {
   );
 }
 
-/** Strip shared-day bleed marks for all weeklies/endgame (mirror cleanupCycleBoundaryBleedMarks). */
+/** Strip shared-day bleed + forward pollution when the new cycle has no proving finish. */
 function cleanupCycleBoundaryBleedMarks(state, now) {
   let changed = false;
   const game = getGame(state);
   ["weeklies", "endgame"].forEach((type) => {
     (game[type] || []).forEach((task) => {
       const key = taskKey(game, task);
-      const diag = diagnoseTaskResetDay(state, type, key, now);
-      if (!diag.hadBleedMark) return;
-      const day = state.completionByDate[diag.startDateStr];
-      if (!day || !day[type]) return;
-      const idx = day[type].indexOf(key);
-      if (idx < 0) return;
-      day[type].splice(idx, 1);
-      changed = true;
+      const hour = Number.isFinite(task.weekStartHour) ? task.weekStartHour : 4;
+      const membership = math.getCycleMembershipMoment(now, hour, 0);
+      const bounds = math.getCycleBoundsForMoment(task, membership);
+      if (!bounds) return;
+      const adjacent =
+        bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === bounds.cycleEnd.getTime();
+      if (!adjacent) return;
+      const owned = math.getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
+      const firstOwned = owned[0];
+      if (!firstOwned) return;
+      const stamps = timestampsForKey(state, type, key);
+      const proven = stamps.some((t) => math.timestampProvesCycleCompletion(t, bounds, firstOwned));
+      if (proven) return;
+      Object.keys(state.completionByDate || {}).forEach((ds) => {
+        if (ds < firstOwned) return;
+        const day = state.completionByDate[ds];
+        if (!day || !day[type]) return;
+        const idx = day[type].indexOf(key);
+        if (idx < 0) return;
+        day[type].splice(idx, 1);
+        changed = true;
+      });
+      for (let i = (state.completionTimestamps || []).length - 1; i >= 0; i--) {
+        const t = state.completionTimestamps[i];
+        if (!t || t.taskType !== type) continue;
+        if (t.gameId !== game.id || t.taskId !== (task.id || task.label)) continue;
+        if (!t.dateStr || t.dateStr < firstOwned) continue;
+        state.completionTimestamps.splice(i, 1);
+        changed = true;
+      }
     });
   });
   return changed;

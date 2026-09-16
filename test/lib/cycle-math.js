@@ -273,11 +273,11 @@ function diagnoseSharedResetDay(task, marksByDate, timestamps, key, now) {
   const dates = getCalendarDatesInCycleRange(bounds.cycleStart, bounds.cycleEnd, bounds.nextCycleStart);
   const firstOwned = dates[0];
   const hasInCycleTs = (timestamps || []).some((t) => timestampProvesCycleCompletion(t, bounds, firstOwned));
-  const currentComplete = findCalendarCompletionInBounds(marksByDate, key, bounds) != null || hasInCycleTs;
-  // findCalendarCompletionInBounds already skips start day; combine with ts:
-  const reallyComplete = hasInCycleTs
-    ? true
-    : findCalendarCompletionInBounds(marksByDate, key, bounds) != null;
+  const calendarComplete = findCalendarCompletionInBounds(marksByDate, key, bounds) != null;
+  const nowMs = now.getTime();
+  const isLiveCycle = nowMs >= bounds.cycleStart.getTime() && nowMs < bounds.cycleEnd.getTime();
+  const reallyComplete = hasInCycleTs || (!(adjacent && isLiveCycle) && calendarComplete);
+  const currentComplete = reallyComplete;
 
   if (adjacent && hasMarkOnStart && !hasInCycleTs) {
     issues.push({
