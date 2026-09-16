@@ -19613,23 +19613,14 @@ function syncTaskCycleEndTimeUI() {
       columns.push(col);
       heights.push(0);
     }
-    const preserveOrder = root.dataset.masonryOrder === "source";
-    if (preserveOrder) {
-      const perCol = Math.ceil(items.length / colCount);
-      items.forEach((item, idx) => {
-        const col = Math.min(colCount - 1, Math.floor(idx / perCol));
-        columns[col].appendChild(item);
-      });
-    } else {
-      items.forEach((item) => {
-        let best = 0;
-        for (let i = 1; i < colCount; i++) {
-          if (heights[i] < heights[best]) best = i;
-        }
-        columns[best].appendChild(item);
-        heights[best] += (item.getBoundingClientRect().height || 140) + gap;
-      });
-    }
+    items.forEach((item) => {
+      let best = 0;
+      for (let i = 1; i < colCount; i++) {
+        if (heights[i] < heights[best]) best = i;
+      }
+      columns[best].appendChild(item);
+      heights[best] += (item.getBoundingClientRect().height || 140) + gap;
+    });
   }
 
   let taskMasonryResizeObserver = null;
@@ -23260,11 +23251,9 @@ function syncTaskCycleEndTimeUI() {
     }
 
     const list = document.createElement("div");
-    list.className = "task-grid task-grid-knot";
-    list.dataset.masonryOrder = "source";
+    list.className = "task-grid task-grid-knot task-grid-rows";
     tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task, "div")));
     container.appendChild(list);
-    scheduleTaskMasonry(list);
   }
 
   function updateExtracurricularTimeRemainingDisplay() {

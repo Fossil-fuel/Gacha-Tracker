@@ -365,11 +365,9 @@
     }
 
     const list = document.createElement("div");
-    list.className = "task-grid task-grid-knot";
-    list.dataset.masonryOrder = "source";
+    list.className = "task-grid task-grid-knot task-grid-rows";
     tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task, "div")));
     container.appendChild(list);
-    scheduleTaskMasonry(list);
   }
 
   function updateExtracurricularTimeRemainingDisplay() {
