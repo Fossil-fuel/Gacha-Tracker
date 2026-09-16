@@ -301,6 +301,54 @@
     return li;
   }
 
+  function getExtracurricularGridColumns() {
+    return state.extracurricularGridColumns === 5 ? 5 : 4;
+  }
+
+  function getExtracurricularDateOrder() {
+    return state.extracurricularDateOrder === "newest" ? "newest" : "oldest";
+  }
+
+  /** Start date order. Missing dates stay last; ties keep saved order. */
+  function sortExtracurricularByStartDate(tasks, order) {
+    const newest = order === "newest";
+    return tasks
+      .map((task, taskOrder) => ({ task, taskOrder }))
+      .sort((a, b) => {
+        const as = a.task.startDate || "";
+        const bs = b.task.startDate || "";
+        if (as && bs && as !== bs) return as < bs ? (newest ? 1 : -1) : newest ? -1 : 1;
+        if (as && !bs) return -1;
+        if (!as && bs) return 1;
+        return a.taskOrder - b.taskOrder;
+      })
+      .map((entry) => entry.task);
+  }
+
+  function appendExtracurricularViewToggle(parent, label, current, options, onChange) {
+    const group = document.createElement("div");
+    group.className = "extracurricular-view-control";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", label);
+    const caption = document.createElement("span");
+    caption.className = "extracurricular-view-control-label";
+    caption.textContent = label;
+    group.appendChild(caption);
+    options.forEach((opt) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-ghost btn-sm" + (opt.value === current ? " is-selected" : "");
+      btn.textContent = opt.label;
+      btn.setAttribute("aria-pressed", opt.value === current ? "true" : "false");
+      btn.addEventListener("click", () => {
+        if (opt.value === current) return;
+        onChange(opt.value);
+      });
+      group.appendChild(btn);
+    });
+    parent.appendChild(group);
+  }
+
   function renderExtracurricular() {
     const container = document.getElementById("extracurricularContent");
     if (!container) return;
@@ -338,21 +386,41 @@
       });
       headerRow.appendChild(tasksBtn);
     }
+    const controls = document.createElement("div");
+    controls.className = "extracurricular-view-controls";
+    appendExtracurricularViewToggle(
+      controls,
+      "Columns",
+      getExtracurricularGridColumns(),
+      [
+        { value: 4, label: "4" },
+        { value: 5, label: "5" },
+      ],
+      (value) => {
+        state.extracurricularGridColumns = value;
+        save();
+        renderActiveTab();
+      }
+    );
+    appendExtracurricularViewToggle(
+      controls,
+      "Start date",
+      getExtracurricularDateOrder(),
+      [
+        { value: "oldest", label: "Oldest" },
+        { value: "newest", label: "Newest" },
+      ],
+      (value) => {
+        state.extracurricularDateOrder = value;
+        save();
+        renderActiveTab();
+      }
+    );
+    headerRow.appendChild(controls);
     container.appendChild(headerRow);
 
     const tasksRaw = viewMode === "history" ? getArchivedExtracurricularTasks() : getActiveExtracurricularTasks();
-    // Start date, oldest first. Missing dates stay at the end; ties keep saved order.
-    const tasks = tasksRaw
-      .map((task, taskOrder) => ({ task, taskOrder }))
-      .sort((a, b) => {
-        const as = a.task.startDate || "";
-        const bs = b.task.startDate || "";
-        if (as && bs && as !== bs) return as < bs ? -1 : 1;
-        if (as && !bs) return -1;
-        if (!as && bs) return 1;
-        return a.taskOrder - b.taskOrder;
-      })
-      .map((entry) => entry.task);
+    const tasks = sortExtracurricularByStartDate(tasksRaw, getExtracurricularDateOrder());
 
     if (tasks.length === 0) {
       const empty = document.createElement("p");
@@ -365,7 +433,7 @@
     }
 
     const list = document.createElement("div");
-    list.className = "task-grid task-grid-knot task-grid-rows";
+    list.className = "task-grid task-grid-knot task-grid-rows task-grid-cols-" + getExtracurricularGridColumns();
     tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task, "div")));
     container.appendChild(list);
   }

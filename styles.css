@@ -851,10 +851,44 @@ body {
 /* Extracurricular: start-date order reads left to right, then the next row. */
 .task-grid.task-grid-rows {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
   column-count: unset;
   columns: unset;
+}
+
+.task-grid.task-grid-rows.task-grid-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.task-grid.task-grid-rows.task-grid-cols-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.extracurricular-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.extracurricular-view-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.extracurricular-view-control-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-right: 0.15rem;
+}
+
+.extracurricular-view-control .btn.is-selected {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 .task-grid.task-grid-rows .task-item {
@@ -1340,11 +1374,21 @@ body {
   .task-grid:not(.task-grid-masonry-js):not(.task-grid-rows) {
     column-count: 2;
   }
+
+  .task-grid.task-grid-rows.task-grid-cols-4,
+  .task-grid.task-grid-rows.task-grid-cols-5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 600px) {
   .task-grid:not(.task-grid-masonry-js):not(.task-grid-rows) {
     column-count: 1;
+  }
+
+  .task-grid.task-grid-rows.task-grid-cols-4,
+  .task-grid.task-grid-rows.task-grid-cols-5 {
+    grid-template-columns: 1fr;
   }
 }
 

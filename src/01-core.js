@@ -760,6 +760,8 @@
     extracurricularCompletedAt: {}, // { taskId: "ISO date string" } - when marked complete, for 24h visibility then archive
     extracurricularCurrencyEarned: {}, // { taskId: number } - currency earned when task marked complete (Data tab)
     extracurricularViewMode: "tasks", // "tasks" | "history" - history shows archived (completed >24h ago)
+    extracurricularGridColumns: 4, // 4 | 5
+    extracurricularDateOrder: "oldest", // "oldest" | "newest" start date
     themeMode: "preset",
     themePreset: "purple",
     themeCustom: null,
@@ -1246,6 +1248,12 @@
         if (parsed.extracurricularCompletedAt && typeof parsed.extracurricularCompletedAt === "object") state.extracurricularCompletedAt = parsed.extracurricularCompletedAt;
         if (parsed.extracurricularCurrencyEarned && typeof parsed.extracurricularCurrencyEarned === "object") state.extracurricularCurrencyEarned = parsed.extracurricularCurrencyEarned;
         if (parsed.extracurricularViewMode === "tasks" || parsed.extracurricularViewMode === "history") state.extracurricularViewMode = parsed.extracurricularViewMode;
+        if (parsed.extracurricularGridColumns === 4 || parsed.extracurricularGridColumns === 5) {
+          state.extracurricularGridColumns = parsed.extracurricularGridColumns;
+        }
+        if (parsed.extracurricularDateOrder === "oldest" || parsed.extracurricularDateOrder === "newest") {
+          state.extracurricularDateOrder = parsed.extracurricularDateOrder;
+        }
         if (parsed.themeMode === "custom" || parsed.themeMode === "preset") state.themeMode = parsed.themeMode;
         if (parsed.themePreset && typeof parsed.themePreset === "string") state.themePreset = parsed.themePreset;
         if (parsed.themeCustom && typeof parsed.themeCustom === "object") state.themeCustom = parsed.themeCustom;
@@ -1302,6 +1310,12 @@
     syncUserImageCategoriesFromLibrary();
     if (!state.extracurricularCurrencyEarned) state.extracurricularCurrencyEarned = {};
     if (!state.extracurricularViewMode) state.extracurricularViewMode = "tasks";
+    if (state.extracurricularGridColumns !== 4 && state.extracurricularGridColumns !== 5) {
+      state.extracurricularGridColumns = 4;
+    }
+    if (state.extracurricularDateOrder !== "oldest" && state.extracurricularDateOrder !== "newest") {
+      state.extracurricularDateOrder = "oldest";
+    }
     const taskIds = new Set((state.extracurricularTasks || []).map((t) => t.id));
     Object.keys(state.extracurricularCompletedAt || {}).forEach((id) => {
       if (!taskIds.has(id)) delete state.extracurricularCompletedAt[id];
@@ -1437,6 +1451,8 @@
       extracurricularCompletedAt: state.extracurricularCompletedAt,
       extracurricularCurrencyEarned: state.extracurricularCurrencyEarned,
       extracurricularViewMode: state.extracurricularViewMode,
+      extracurricularGridColumns: state.extracurricularGridColumns === 5 ? 5 : 4,
+      extracurricularDateOrder: state.extracurricularDateOrder === "newest" ? "newest" : "oldest",
       themeMode: state.themeMode,
       themePreset: state.themePreset,
       themeCustom: state.themeCustom,
