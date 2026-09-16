@@ -255,7 +255,8 @@
     const cats = getUserImageCategories();
     const seen = new Set(cats.map((c) => c.toLowerCase()));
     getUserImageLibrary().forEach((e) => {
-      const cat = normalizeUserImageCategory(e && e.category);
+      if (!e || e.kind === "pfp") return;
+      const cat = normalizeUserImageCategory(e.category);
       if (!cat) return;
       const key = cat.toLowerCase();
       if (seen.has(key)) return;

@@ -7043,11 +7043,12 @@ function syncTaskCycleEndTimeUI() {
     if (toolbar) toolbar.hidden = !filtered.length;
 
     if (filtered.length) {
+      const groupByCategory = wantBanner;
       const groups =
-        typeof groupUserImagesByCategory === "function"
+        groupByCategory && typeof groupUserImagesByCategory === "function"
           ? groupUserImagesByCategory(filtered, sortMode, usageCounts)
           : [{ category: "", label: "My Images", entries: filtered }];
-      const multiCat = groups.length > 1 || (groups[0] && groups[0].category);
+      const multiCat = groupByCategory && (groups.length > 1 || (groups[0] && groups[0].category));
       groups.forEach((group) => {
         const assets = (group.entries || []).map((e) => ({
           id: e.id,
@@ -7311,8 +7312,10 @@ function syncTaskCycleEndTimeUI() {
     const pfps = list.filter((e) => e && e.kind === "pfp");
     const canDrag = true;
 
-    function renderBlock(title, entries, galleryClass) {
+    function renderBlock(title, entries, galleryClass, opts) {
       if (!entries.length) return;
+      const options = opts || {};
+      const categorize = options.categorize !== false;
       const block = document.createElement("div");
       block.className = "stock-assets-block";
       const heading = document.createElement("h5");
@@ -7321,12 +7324,21 @@ function syncTaskCycleEndTimeUI() {
       block.appendChild(heading);
 
       const groups =
-        typeof groupUserImagesByCategory === "function"
+        categorize && typeof groupUserImagesByCategory === "function"
           ? groupUserImagesByCategory(entries, sortMode, usageCounts, {
               includeEmpty: categories.length > 0,
             })
-          : [{ category: "", label: "", entries: entries }];
-      const showCatHeadings = groups.length > 1 || (groups[0] && groups[0].category) || categories.length > 0;
+          : [{
+              category: "",
+              label: "",
+              entries:
+                typeof getSortedUserImageEntries === "function"
+                  ? getSortedUserImageEntries(entries, sortMode, usageCounts)
+                  : entries,
+            }];
+      const showCatHeadings =
+        categorize &&
+        (groups.length > 1 || (groups[0] && groups[0].category) || categories.length > 0);
 
       groups.forEach((group) => {
         const section = document.createElement("div");
@@ -7459,7 +7471,7 @@ function syncTaskCycleEndTimeUI() {
           card.appendChild(img);
           card.appendChild(titleRow);
           card.appendChild(meta);
-          card.appendChild(catLabel);
+          if (categorize) card.appendChild(catLabel);
 
           card.addEventListener("dragstart", (ev) => {
             closeMyImagesCardMenus();
@@ -7495,10 +7507,12 @@ function syncTaskCycleEndTimeUI() {
             if (!draggedId || draggedId === entry.id) return;
             if (
               typeof placeUserImageInLibrary === "function" &&
-              placeUserImageInLibrary(draggedId, {
-                category: group.category || "",
-                beforeId: entry.id,
-              })
+              placeUserImageInLibrary(
+                draggedId,
+                categorize
+                  ? { category: group.category || "", beforeId: entry.id }
+                  : { beforeId: entry.id }
+              )
             ) {
               if (sortSelect) sortSelect.value = "custom";
               save();
@@ -7531,7 +7545,10 @@ function syncTaskCycleEndTimeUI() {
           if (!draggedId) return;
           if (
             typeof placeUserImageInLibrary === "function" &&
-            placeUserImageInLibrary(draggedId, { category: group.category || "" })
+            placeUserImageInLibrary(
+              draggedId,
+              categorize ? { category: group.category || "" } : {}
+            )
           ) {
             if (sortSelect) sortSelect.value = "custom";
             save();
@@ -7545,13 +7562,13 @@ function syncTaskCycleEndTimeUI() {
       host.appendChild(block);
     }
 
-    renderBlock("Banners", banners, "");
+    renderBlock("Banners", banners, "", { categorize: true });
     if (banners.length && pfps.length) {
       const divider = document.createElement("hr");
       divider.className = "stock-assets-divider";
       host.appendChild(divider);
     }
-    renderBlock("Profile pictures", pfps, "stock-assets-gallery--pfp");
+    renderBlock("Profile pictures", pfps, "stock-assets-gallery--pfp", { categorize: false });
   }
 
   function fillSettingsStockAssetsGallery() {
