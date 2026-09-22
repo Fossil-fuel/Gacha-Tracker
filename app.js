@@ -19624,9 +19624,16 @@ function syncTaskCycleEndTimeUI() {
     const width = root.getBoundingClientRect().width || root.clientWidth || 0;
     if (width < 40) return;
     const maxColsRaw = Number(root.dataset.masonryMax);
-    const maxCols = Number.isFinite(maxColsRaw) && maxColsRaw > 0 ? Math.min(4, Math.floor(maxColsRaw)) : 4;
+    const maxCols = Number.isFinite(maxColsRaw) && maxColsRaw > 0 ? Math.min(6, Math.floor(maxColsRaw)) : 4;
     let colCount = Math.floor((width + gap) / (minCol + gap));
     colCount = Math.max(1, Math.min(maxCols, colCount));
+    const preferredRaw = Number(root.dataset.masonryPreferred);
+    if (Number.isFinite(preferredRaw) && preferredRaw > 0) {
+      const preferred = Math.min(maxCols, Math.floor(preferredRaw));
+      if (preferred >= 1 && width >= preferred * minCol + (preferred - 1) * gap) {
+        colCount = preferred;
+      }
+    }
     const prevCols = Number(root.dataset.masonryCols || 0);
     const alreadyPacked = !!root.querySelector(":scope > .task-masonry-col");
     if (!force && alreadyPacked && prevCols === colCount) return;
@@ -19647,14 +19654,22 @@ function syncTaskCycleEndTimeUI() {
       columns.push(col);
       heights.push(0);
     }
-    items.forEach((item) => {
-      let best = 0;
-      for (let i = 1; i < colCount; i++) {
-        if (heights[i] < heights[best]) best = i;
-      }
-      columns[best].appendChild(item);
-      heights[best] += (item.getBoundingClientRect().height || 140) + gap;
-    });
+    const preserveOrder = root.dataset.masonryOrder === "source";
+    if (preserveOrder) {
+      // Left to right across the top, then wrap: item 0 → col 0, item 1 → col 1, …
+      items.forEach((item, idx) => {
+        columns[idx % colCount].appendChild(item);
+      });
+    } else {
+      items.forEach((item) => {
+        let best = 0;
+        for (let i = 1; i < colCount; i++) {
+          if (heights[i] < heights[best]) best = i;
+        }
+        columns[best].appendChild(item);
+        heights[best] += (item.getBoundingClientRect().height || 140) + gap;
+      });
+    }
   }
 
   let taskMasonryResizeObserver = null;
@@ -23353,9 +23368,15 @@ function syncTaskCycleEndTimeUI() {
     }
 
     const list = document.createElement("div");
-    list.className = "task-grid task-grid-knot task-grid-rows task-grid-cols-" + getExtracurricularGridColumns();
+    const cols = getExtracurricularGridColumns();
+    list.className = "task-grid task-grid-knot";
+    list.dataset.masonryOrder = "source";
+    list.dataset.masonryMax = String(cols);
+    list.dataset.masonryPreferred = String(cols);
+    list.dataset.masonryMin = "160";
     tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task, "div")));
     container.appendChild(list);
+    scheduleTaskMasonry(list);
   }
 
   function updateExtracurricularTimeRemainingDisplay() {

@@ -433,9 +433,15 @@
     }
 
     const list = document.createElement("div");
-    list.className = "task-grid task-grid-knot task-grid-rows task-grid-cols-" + getExtracurricularGridColumns();
+    const cols = getExtracurricularGridColumns();
+    list.className = "task-grid task-grid-knot";
+    list.dataset.masonryOrder = "source";
+    list.dataset.masonryMax = String(cols);
+    list.dataset.masonryPreferred = String(cols);
+    list.dataset.masonryMin = "160";
     tasks.forEach((task) => list.appendChild(buildExtracurricularTaskItem(task, "div")));
     container.appendChild(list);
+    scheduleTaskMasonry(list);
   }
 
   function updateExtracurricularTimeRemainingDisplay() {
