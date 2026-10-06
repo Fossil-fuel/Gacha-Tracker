@@ -134,7 +134,7 @@
   /**
    * Games card action rows:
    * Row 1: Completion History | Add Attempt (weeklies/endgame)
-   * Row 2: Sync with Calendar | Edit current (manual-reset only)
+   * Row 2: Sync with Calendar | Edit current (manual-reset, and scheduled endgame)
    */
   function appendGamesTaskActionButtons(main, selected, t, taskType, key) {
     const historyRow = document.createElement("div");
@@ -175,12 +175,14 @@
     bindSyncButton(syncBtn, () => syncTaskWithCalendar(selected, taskType, key));
     syncRow.appendChild(syncBtn);
 
-    if (t && t.manualReset) {
+    if (t && (t.manualReset || taskType === "endgame")) {
       const editCurrentBtn = document.createElement("button");
       editCurrentBtn.type = "button";
       editCurrentBtn.className = "btn btn-ghost";
       editCurrentBtn.textContent = "Edit current";
-      editCurrentBtn.title = "Edit the current manual-reset window without starting a new cycle";
+      editCurrentBtn.title = t.manualReset
+        ? "Edit the current manual-reset window without starting a new cycle"
+        : "Edit the current cycle window without starting a new one";
       editCurrentBtn.addEventListener("click", () => {
         if (typeof openManualResetModal === "function") {
           openManualResetModal({

@@ -1291,12 +1291,10 @@
     appendDayOfWeekChart("dailies", "Dailies completed by day of week");
     appendDayOfWeekChart("weeklies", "Weeklies completed by day of week");
     appendDayOfWeekChart("endgame", "Endgame completed by day of week");
-    appendDayOfWeekChart("extracurricular", "Extracurricular completed by day of week");
 
     const endgameOnly = timestamps.filter((t) => t.taskType === "endgame");
     const allEndgameTasks = [];
     games.forEach((game) => {
-      if (!showAll && !selected[game.id]) return;
       (game.endgame || []).forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
         allEndgameTasks.push({ key, gameId: game.id, taskId: task.id || task.label, gameName: game.name, taskLabel: task.label || task.id });
@@ -1416,7 +1414,7 @@
     if (gamesWithEndgame.length === 0) {
       const empty = document.createElement("p");
       empty.className = "timestamps-endgame-picker-empty";
-      empty.textContent = "No endgame tasks in the current game selection.";
+      empty.textContent = "No endgame tasks.";
       endgamePicker.appendChild(empty);
     } else {
       const pickerControls = document.createElement("div");

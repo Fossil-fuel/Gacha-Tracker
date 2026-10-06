@@ -68,7 +68,7 @@ module.exports = {
       assert.ok(core.includes("function setExtracurricularCompletionMoment"), "completed moment writer");
       assert.ok(attendance.includes("listExtracurricularTimestampsForTimeTrends"), "attendance merges extracurricular stamps");
       assert.ok(attendance.includes('extracurricular: Array(24).fill(0)'), "hour stack includes extracurricular");
-      assert.ok(attendance.includes('appendDayOfWeekChart("extracurricular"'), "DOW chart for extracurricular");
+      assert.ok(!attendance.includes('appendDayOfWeekChart("extracurricular"'), "no extracurricular day-of-week chart");
       assert.ok(extra.includes("extracurricular-completed-row"), "board card Completed editors");
       assert.ok(extra.includes("Dates/Currency live in dedicated rows below"), "no duplicated Dates/Currency snippet");
     });

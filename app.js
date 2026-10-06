@@ -2600,6 +2600,7 @@
   function getEndgameTimeRemainingMs(task, now, game) {
     if (task && task.manualReset) return getManualResetRemainingMs(task, now);
     const n = now || new Date();
+    if (isScheduledEndgameCycleDueTbd(task, n, game)) return null;
     if (isTaskCycleEnded(task, n, game)) return 0;
     const bounds = getEndgameCycleBoundsForMoment(task, n, game);
     if (!bounds) return 0;
@@ -2610,6 +2611,7 @@
 
   function getEndgameTimeRemainingText(task, now, game) {
     if (task && task.manualReset) return getManualResetRemainingText(task, now);
+    if (isScheduledEndgameCycleDueTbd(task, now, game)) return "TBD";
     if (isTaskCycleEnded(task, now, game)) return "Ended";
     return formatRemainingMs(getEndgameTimeRemainingMs(task, now, game));
   }
@@ -4355,6 +4357,124 @@
     };
   }
 
+  function getTaskMomentOnDateAtTime(task, game, dateStr, hour, minute) {
+    if (!isValidDateStr(dateStr)) return null;
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const tz = getTimezoneForTaskDst(task, baseTz);
+    const y = parseInt(dateStr.slice(0, 4), 10);
+    const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    const h = Math.max(0, Math.min(23, Number(hour) || 0));
+    const min = Math.max(0, Math.min(59, Number(minute) || 0));
+    const offsetRef = getOffsetRefDateForTask(task, tz);
+    return createDateInTimezone(y, mo, d, h, min, tz, offsetRef);
+  }
+
+  /** One-off live-cycle edit for scheduled endgame. Later cycles resume from the new due time. */
+  function normalizeScheduledCycleEdit(task) {
+    const edit = task && task.scheduledCycleEdit;
+    if (!edit || typeof edit !== "object" || !isValidDateStr(edit.startDateStr)) return null;
+    const dueTbd = !!edit.dueTbd || !isValidDateStr(edit.dueDateStr);
+    return {
+      startDateStr: edit.startDateStr,
+      startHour: Number.isFinite(edit.startHour) ? edit.startHour : 4,
+      startMinute: Number.isFinite(edit.startMinute) ? edit.startMinute : 0,
+      dueTbd: dueTbd,
+      dueDateStr: dueTbd ? null : edit.dueDateStr,
+      dueHour: Number.isFinite(edit.dueHour) ? edit.dueHour : 4,
+      dueMinute: Number.isFinite(edit.dueMinute) ? edit.dueMinute : 0,
+    };
+  }
+
+  function getScheduledCycleEditInstants(task, game) {
+    const edit = normalizeScheduledCycleEdit(task);
+    if (!edit) return null;
+    const start = getTaskMomentOnDateAtTime(task, game, edit.startDateStr, edit.startHour, edit.startMinute);
+    if (!start) return null;
+    if (edit.dueTbd) return { edit: edit, start: start, end: null };
+    const end = getTaskMomentOnDateAtTime(task, game, edit.dueDateStr, edit.dueHour, edit.dueMinute);
+    if (!end || !(end.getTime() > start.getTime())) return null;
+    return { edit: edit, start: start, end: end };
+  }
+
+  function isScheduledEndgameCycleDueTbd(task, now, game) {
+    const inst = getScheduledCycleEditInstants(task, game);
+    if (!inst || !inst.edit.dueTbd) return false;
+    const n = now || getSimulatedNow();
+    return n.getTime() >= inst.start.getTime();
+  }
+
+  /**
+   * Save Edit current for a scheduled endgame task.
+   * Does not convert the task to Manual Reset and does not open a new cycle.
+   */
+  function setScheduledEndgameCycleEdit(game, task, fields) {
+    if (!game || !task || isManualResetTask(task)) return { ok: false, reason: "Task not found" };
+    const o = fields || {};
+    if (!isValidDateStr(o.startDateStr)) return { ok: false, reason: "Start date required" };
+    const startHour = Number.isFinite(o.startHour) ? o.startHour : 4;
+    const startMinute = Number.isFinite(o.startMinute) ? o.startMinute : 0;
+    const dueTbd = !!o.dueTbd;
+    const start = getTaskMomentOnDateAtTime(task, game, o.startDateStr, startHour, startMinute);
+    if (!start) return { ok: false, reason: "Start date required" };
+    if (!dueTbd) {
+      if (!isValidDateStr(o.dueDateStr)) return { ok: false, reason: "Due date required" };
+      const end = getTaskMomentOnDateAtTime(task, game, o.dueDateStr, o.dueHour, o.dueMinute);
+      if (!end || !(end.getTime() > start.getTime())) {
+        return { ok: false, reason: "Due time must be after the start." };
+      }
+    }
+    task.scheduledCycleEdit = {
+      startDateStr: o.startDateStr,
+      startHour: startHour,
+      startMinute: startMinute,
+      dueTbd: dueTbd,
+      dueDateStr: dueTbd ? null : o.dueDateStr,
+      dueHour: dueTbd ? undefined : o.dueHour,
+      dueMinute: dueTbd ? undefined : o.dueMinute,
+    };
+    const key = game.id + "." + (task.id || task.label);
+    const nowBounds = getEndgameCycleBoundsForMoment(task, getSimulatedNow(), game);
+    if (nowBounds) {
+      if (!state.lastProcessedResets) state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
+      if (!state.lastProcessedResets.endgame) state.lastProcessedResets.endgame = {};
+      state.lastProcessedResets.endgame[key] = nowBounds.nextCycleStart.getTime();
+    }
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    return { ok: true };
+  }
+
+  function getScheduledEndgameBoundsForMoment(task, moment, game) {
+    const inst = getScheduledCycleEditInstants(task, game);
+    if (!inst) return null;
+    const d = moment instanceof Date ? moment : new Date();
+    const dateMs = d.getTime();
+    const startMs = inst.start.getTime();
+    const intervalMs = getIntervalMs(task.frequencyEvery, (task && task.frequencyUnit === "day") ? "day" : "week");
+    if (dateMs >= startMs && (inst.edit.dueTbd || dateMs < inst.end.getTime())) {
+      const cycleEnd = inst.edit.dueTbd
+        ? new Date(startMs + getManualResetPlaceholderMs("endgame"))
+        : inst.end;
+      return {
+        cycleStart: inst.start,
+        cycleEnd: cycleEnd,
+        nextCycleStart: new Date(cycleEnd.getTime()),
+      };
+    }
+    if (!inst.edit.dueTbd && dateMs >= inst.end.getTime()) {
+      const endMs = inst.end.getTime();
+      const k = Math.floor((dateMs - endMs) / intervalMs);
+      const cycleStartMs = endMs + k * intervalMs;
+      const cycleStart = new Date(cycleStartMs);
+      return {
+        cycleStart: cycleStart,
+        cycleEnd: getCycleEndDate(cycleStart, task, game),
+        nextCycleStart: new Date(cycleStartMs + intervalMs),
+      };
+    }
+    return null;
+  }
+
   function getEndgameCycleBoundsForMoment(task, moment, game) {
     if (isManualResetTask(task)) {
       // Same as weeklies: closed past windows must resolve so calendar paint / fill /
@@ -4366,6 +4486,8 @@
       }
       return null;
     }
+    const edited = getScheduledEndgameBoundsForMoment(task, moment, game);
+    if (edited) return edited;
     const d = moment instanceof Date ? moment : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const intervalMs = getIntervalMs(task.frequencyEvery, (task && task.frequencyUnit === "day") ? "day" : "week");
@@ -4375,11 +4497,24 @@
     const k = Math.floor((dateMs - anchorMs) / intervalMs);
     const cycleStartMs = anchorMs + k * intervalMs;
     const cycleStart = new Date(cycleStartMs);
-    return {
-      cycleStart,
+    const natural = {
+      cycleStart: cycleStart,
       cycleEnd: getCycleEndDate(cycleStart, task, game),
       nextCycleStart: new Date(cycleStartMs + intervalMs),
     };
+    const inst = getScheduledCycleEditInstants(task, game);
+    if (
+      inst &&
+      natural.cycleStart.getTime() < inst.start.getTime() &&
+      natural.cycleEnd.getTime() > inst.start.getTime()
+    ) {
+      return {
+        cycleStart: natural.cycleStart,
+        cycleEnd: inst.start,
+        nextCycleStart: inst.start,
+      };
+    }
+    return natural;
   }
 
   function getRemainingDatesInCycleFrom(bounds, fromDateStr) {
@@ -8633,21 +8768,35 @@
         }
         const nowMs = now.getTime();
         const lastBounds = getLastCycleBounds(task, game);
-        while (cycleStartMs <= nowMs) {
+        const useEditedGrid = !!normalizeScheduledCycleEdit(task);
+        let advanceGuard = 0;
+        while (cycleStartMs <= nowMs && advanceGuard < 500) {
+          advanceGuard++;
           if (lastBounds && cycleStartMs > lastBounds.startMs) break;
+          let cycleStart = new Date(cycleStartMs);
+          let cycleEnd = getCycleEndDate(cycleStart, task, game);
+          let nextCycleStart = new Date(cycleStartMs + intervalMs);
+          if (useEditedGrid) {
+            const bounds = getEndgameCycleBoundsForMoment(task, new Date(cycleStartMs + 1), game);
+            if (!bounds) break;
+            if (lastBounds && bounds.cycleStart.getTime() > lastBounds.startMs) break;
+            if (bounds.cycleStart.getTime() > nowMs) break;
+            cycleStart = bounds.cycleStart;
+            cycleEnd = bounds.cycleEnd;
+            nextCycleStart = bounds.nextCycleStart;
+          }
           didChange = true;
           const attemptIdx = getAttemptedAmount(state.endgameAttempted, key);
           state.endgameAttempted[key] = attemptIdx + 1;
           snapshotEndgamePotentialAt(game.id, task.id || task.label, attemptIdx, getEndgamePotential(task));
-          const cycleStart = new Date(cycleStartMs);
-          const cycleEnd = getCycleEndDate(cycleStart, task, game);
           if (cycleEnd.getTime() <= nowMs) {
-            const nextCycleStart = new Date(cycleStartMs + intervalMs);
             if (isPeriodCompletedFromCalendar(key, "endgame", cycleStart, cycleEnd, nextCycleStart)) {
               state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
             }
           }
-          cycleStartMs += intervalMs;
+          const nextMs = nextCycleStart.getTime();
+          if (!(nextMs > cycleStart.getTime())) break;
+          cycleStartMs = useEditedGrid ? nextMs : cycleStartMs + intervalMs;
         }
         ensureEndgameEarnedArrayLength(game.id, task.id || task.label, getCompletedAmount(state.endgameCompleted, key));
         ensureEndgamePotentialArrayLength(game.id, task.id || task.label, getAttemptedAmount(state.endgameAttempted, key));
@@ -8908,6 +9057,13 @@
     if (isManualResetTask(task)) {
       return getEndgameAnchorDate(task, game);
     }
+    if (task && task.scheduledCycleEdit && game && (game.endgame || []).indexOf(task) >= 0) {
+      const moment = isValidDateStr(dateStr)
+        ? getCycleMomentForCalendarDate(task, game, dateStr)
+        : getSimulatedNow();
+      const bounds = getEndgameCycleBoundsForMoment(task, moment, game);
+      if (bounds) return bounds.cycleStart;
+    }
     const d = isValidDateStr(dateStr) ? new Date(dateStr + "T12:00:00") : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const { intervalMs } = getCycleParams(task);
@@ -9086,14 +9242,27 @@
       let cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
       const nowMs = now.getTime();
       const lastBounds = getLastCycleBounds(task, game);
-      while (cycleStartMs <= nowMs) {
+      const useEditedGrid = !!normalizeScheduledCycleEdit(task);
+      let tallyGuard = 0;
+      while (cycleStartMs <= nowMs && tallyGuard < 500) {
+        tallyGuard++;
         if (lastBounds && cycleStartMs > lastBounds.startMs) break;
-        const cycleStart = new Date(cycleStartMs);
-        const cycleEnd = getCycleEndDate(cycleStart, task, game);
-        const nextCycleStart = new Date(cycleStartMs + intervalMs);
+        let cycleStart = new Date(cycleStartMs);
+        let cycleEnd = getCycleEndDate(cycleStart, task, game);
+        let nextCycleStart = new Date(cycleStartMs + intervalMs);
+        if (useEditedGrid) {
+          const bounds = getEndgameCycleBoundsForMoment(task, new Date(cycleStartMs + 1), game);
+          if (!bounds) break;
+          if (lastBounds && bounds.cycleStart.getTime() > lastBounds.startMs) break;
+          cycleStart = bounds.cycleStart;
+          cycleEnd = bounds.cycleEnd;
+          nextCycleStart = bounds.nextCycleStart;
+        }
         const completed = isPeriodCompletedFromCalendar(key, "endgame", cycleStart, cycleEnd, nextCycleStart) ? 1 : 0;
         result.push({ periodStart: cycleStart, periodEnd: cycleEnd, nextCycleStart, completed });
-        cycleStartMs += intervalMs;
+        const nextMs = nextCycleStart.getTime();
+        if (!(nextMs > cycleStart.getTime())) break;
+        cycleStartMs = useEditedGrid ? nextMs : cycleStartMs + intervalMs;
       }
     }
     tallyCacheSet(cacheKey, result);
@@ -12928,7 +13097,8 @@ function syncTaskCycleEndTimeUI() {
     gameId: null,
     taskType: null,
     taskId: null,
-    reason: "reset", // "create" | "reset" | "expiry"
+    reason: "reset", // "create" | "reset" | "expiry" | "edit"
+    scheduledEndgameEdit: false,
   };
 
   function setManualResetModalOpen(open) {
@@ -13035,13 +13205,15 @@ function syncTaskCycleEndTimeUI() {
     if (!game) return;
     const list = o.taskType === "endgame" ? (game.endgame || []) : (game.weeklies || []);
     const task = list.find((t) => (t.id || t.label) === o.taskId);
-    if (!task || !task.manualReset) return;
+    const scheduledEndgameEdit = o.reason === "edit" && o.taskType === "endgame" && task && !task.manualReset;
+    if (!task || (!task.manualReset && !scheduledEndgameEdit)) return;
     if (manualResetModalState.open) return;
 
     manualResetModalState.gameId = o.gameId;
     manualResetModalState.taskType = o.taskType === "endgame" ? "endgame" : "weeklies";
     manualResetModalState.taskId = o.taskId;
     manualResetModalState.reason = o.reason || "reset";
+    manualResetModalState.scheduledEndgameEdit = !!scheduledEndgameEdit;
 
     const title = qs("manualResetModalTitle");
     const desc = qs("manualResetModalDesc");
@@ -13062,6 +13234,8 @@ function syncTaskCycleEndTimeUI() {
     if (desc) {
       if (manualResetModalState.reason === "expiry") {
         desc.textContent = ("\"" + label + "\" is past due. Set the next start and due time, or leave due TBD if you do not know yet.");
+      } else if (isEdit && scheduledEndgameEdit) {
+        desc.textContent = ("Edit the current cycle for \"" + label + "\". Later cycles continue from the new due time. This does not start a new cycle.");
       } else if (isEdit) {
         desc.textContent = ("Edit the current window for \"" + label + "\". This does not archive the cycle or start a new one.");
       } else {
@@ -13071,21 +13245,51 @@ function syncTaskCycleEndTimeUI() {
     const confirmBtnLabel = qs("manualResetModalConfirm");
     if (confirmBtnLabel) confirmBtnLabel.textContent = isEdit ? "Save" : "Start";
 
+    let scheduledStart = null;
+    let scheduledDue = null;
+    if (scheduledEndgameEdit && typeof getEndgameCycleBoundsForMoment === "function") {
+      const bounds = getEndgameCycleBoundsForMoment(task, now, game);
+      const baseTz = typeof getResetTimezoneForGame === "function" ? getResetTimezoneForGame(game) : getRecordingTimezone();
+      const tz = typeof getTimezoneForTaskDst === "function" ? getTimezoneForTaskDst(task, baseTz) : baseTz;
+      const toFields = (date) => {
+        const parts = getDatePartsInTimezone(date, tz);
+        const p = (n) => String(n).padStart(2, "0");
+        return {
+          dateStr: parts.year + "-" + p(parts.month + 1) + "-" + p(parts.day),
+          hour: parts.hour % 24,
+          minute: parts.minute,
+        };
+      };
+      if (bounds) {
+        scheduledStart = toFields(bounds.cycleStart);
+        scheduledDue = toFields(bounds.cycleEnd);
+      }
+    }
+    const edited = scheduledEndgameEdit && typeof normalizeScheduledCycleEdit === "function"
+      ? normalizeScheduledCycleEdit(task)
+      : null;
+
     if (startInput) {
-      startInput.value = isEdit && isValidDateStr(task.dateStarted) ? task.dateStarted : getDateStr(now);
+      if (scheduledStart) startInput.value = scheduledStart.dateStr;
+      else startInput.value = isEdit && isValidDateStr(task.dateStarted) ? task.dateStarted : getDateStr(now);
     }
     if (startTime) {
-      if (isEdit && Number.isFinite(task.weekStartHour)) {
+      if (scheduledStart) {
+        startTime.value = timeToStr(scheduledStart.hour, scheduledStart.minute);
+      } else if (isEdit && Number.isFinite(task.weekStartHour)) {
         startTime.value = timeToStr(task.weekStartHour, Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0);
       } else {
         startTime.value = timeToStr(now.getHours(), now.getMinutes());
       }
     }
 
-    const hasDue = !task.manualDueTbd && isValidDateStr(task.manualDueDateStr);
-    if (tbdToggle) tbdToggle.checked = isEdit ? !!task.manualDueTbd : false;
+    const hasDue = scheduledEndgameEdit
+      ? !(edited && edited.dueTbd) && !!(scheduledDue && scheduledDue.dateStr)
+      : !task.manualDueTbd && isValidDateStr(task.manualDueDateStr);
+    if (tbdToggle) tbdToggle.checked = scheduledEndgameEdit ? !!(edited && edited.dueTbd) : (isEdit ? !!task.manualDueTbd : false);
     if (dueInput) {
-      dueInput.value = hasDue ? task.manualDueDateStr : getDateStr(now);
+      if (scheduledEndgameEdit && scheduledDue && !(edited && edited.dueTbd)) dueInput.value = scheduledDue.dateStr;
+      else dueInput.value = hasDue ? task.manualDueDateStr : getDateStr(now);
     }
     if (dueTime) {
       // Seed Due time from Cycle end time default (Edit Task); per-window manualDue* overrides when set.
@@ -13096,8 +13300,12 @@ function syncTaskCycleEndTimeUI() {
               hour: Number.isFinite(task.weekStartHour) ? task.weekStartHour : 4,
               minute: Number.isFinite(task.weekStartMinute) ? task.weekStartMinute : 0,
             };
-      const dueH = Number.isFinite(task.manualDueHour) ? task.manualDueHour : defaults.hour;
-      const dueM = Number.isFinite(task.manualDueMinute) ? task.manualDueMinute : defaults.minute;
+      const dueH = scheduledDue
+        ? scheduledDue.hour
+        : (Number.isFinite(task.manualDueHour) ? task.manualDueHour : defaults.hour);
+      const dueM = scheduledDue
+        ? scheduledDue.minute
+        : (Number.isFinite(task.manualDueMinute) ? task.manualDueMinute : defaults.minute);
       dueTime.value = timeToStr(dueH, dueM);
     }
     syncManualResetDueInputs();
@@ -13111,6 +13319,7 @@ function syncTaskCycleEndTimeUI() {
     manualResetModalState.taskType = null;
     manualResetModalState.taskId = null;
     manualResetModalState.reason = "reset";
+    manualResetModalState.scheduledEndgameEdit = false;
   }
 
   function confirmManualResetModal() {
@@ -13144,7 +13353,21 @@ function syncTaskCycleEndTimeUI() {
       startWeekday = new Date(startDateStr + "T12:00:00").getDay();
     }
 
-    if (manualResetModalState.reason === "edit") {
+    if (manualResetModalState.reason === "edit" && manualResetModalState.scheduledEndgameEdit) {
+      const result = setScheduledEndgameCycleEdit(game, task, {
+        startDateStr: startDateStr,
+        startHour: startParts.hour,
+        startMinute: startParts.minute,
+        dueTbd: tbd,
+        dueDateStr: dueDateStr,
+        dueHour: dueParts.hour,
+        dueMinute: dueParts.minute,
+      });
+      if (!result || !result.ok) {
+        alert((result && result.reason) || "Could not save this cycle.");
+        return;
+      }
+    } else if (manualResetModalState.reason === "edit") {
       task.dateStarted = startDateStr;
       task.weekStartHour = startParts.hour;
       task.weekStartMinute = startParts.minute;
@@ -22067,12 +22290,10 @@ function syncTaskCycleEndTimeUI() {
     appendDayOfWeekChart("dailies", "Dailies completed by day of week");
     appendDayOfWeekChart("weeklies", "Weeklies completed by day of week");
     appendDayOfWeekChart("endgame", "Endgame completed by day of week");
-    appendDayOfWeekChart("extracurricular", "Extracurricular completed by day of week");
 
     const endgameOnly = timestamps.filter((t) => t.taskType === "endgame");
     const allEndgameTasks = [];
     games.forEach((game) => {
-      if (!showAll && !selected[game.id]) return;
       (game.endgame || []).forEach((task) => {
         const key = game.id + "." + (task.id || task.label);
         allEndgameTasks.push({ key, gameId: game.id, taskId: task.id || task.label, gameName: game.name, taskLabel: task.label || task.id });
@@ -22192,7 +22413,7 @@ function syncTaskCycleEndTimeUI() {
     if (gamesWithEndgame.length === 0) {
       const empty = document.createElement("p");
       empty.className = "timestamps-endgame-picker-empty";
-      empty.textContent = "No endgame tasks in the current game selection.";
+      empty.textContent = "No endgame tasks.";
       endgamePicker.appendChild(empty);
     } else {
       const pickerControls = document.createElement("div");
@@ -24699,7 +24920,7 @@ function syncTaskCycleEndTimeUI() {
   /**
    * Games card action rows:
    * Row 1: Completion History | Add Attempt (weeklies/endgame)
-   * Row 2: Sync with Calendar | Edit current (manual-reset only)
+   * Row 2: Sync with Calendar | Edit current (manual-reset, and scheduled endgame)
    */
   function appendGamesTaskActionButtons(main, selected, t, taskType, key) {
     const historyRow = document.createElement("div");
@@ -24740,12 +24961,14 @@ function syncTaskCycleEndTimeUI() {
     bindSyncButton(syncBtn, () => syncTaskWithCalendar(selected, taskType, key));
     syncRow.appendChild(syncBtn);
 
-    if (t && t.manualReset) {
+    if (t && (t.manualReset || taskType === "endgame")) {
       const editCurrentBtn = document.createElement("button");
       editCurrentBtn.type = "button";
       editCurrentBtn.className = "btn btn-ghost";
       editCurrentBtn.textContent = "Edit current";
-      editCurrentBtn.title = "Edit the current manual-reset window without starting a new cycle";
+      editCurrentBtn.title = t.manualReset
+        ? "Edit the current manual-reset window without starting a new cycle"
+        : "Edit the current cycle window without starting a new one";
       editCurrentBtn.addEventListener("click", () => {
         if (typeof openManualResetModal === "function") {
           openManualResetModal({

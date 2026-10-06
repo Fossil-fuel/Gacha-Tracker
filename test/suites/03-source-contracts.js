@@ -44,6 +44,8 @@ module.exports = {
       "function getCycleMembershipMoment",
       "function getTaskPeriodDateStr",
       "function getCycleEndDate",
+      "function setScheduledEndgameCycleEdit",
+      "function getScheduledEndgameBoundsForMoment",
       "function getCalendarDatesInCycleRange",
       "function findCompletionDateInBounds",
       "function cleanupCycleBoundaryBleedMarks",
@@ -157,7 +159,6 @@ module.exports = {
       "data-history-shell",
       "createDocumentFragment",
       "listExtracurricularTimestampsForTimeTrends",
-      'appendDayOfWeekChart("extracurricular"',
     ].forEach((needle) => {
       assert.ok(attendance.includes(needle), "08-page-attendance.js must contain " + needle);
     });

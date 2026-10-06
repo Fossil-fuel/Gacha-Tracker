@@ -2477,6 +2477,7 @@
   function getEndgameTimeRemainingMs(task, now, game) {
     if (task && task.manualReset) return getManualResetRemainingMs(task, now);
     const n = now || new Date();
+    if (isScheduledEndgameCycleDueTbd(task, n, game)) return null;
     if (isTaskCycleEnded(task, n, game)) return 0;
     const bounds = getEndgameCycleBoundsForMoment(task, n, game);
     if (!bounds) return 0;
@@ -2487,6 +2488,7 @@
 
   function getEndgameTimeRemainingText(task, now, game) {
     if (task && task.manualReset) return getManualResetRemainingText(task, now);
+    if (isScheduledEndgameCycleDueTbd(task, now, game)) return "TBD";
     if (isTaskCycleEnded(task, now, game)) return "Ended";
     return formatRemainingMs(getEndgameTimeRemainingMs(task, now, game));
   }
@@ -4232,6 +4234,124 @@
     };
   }
 
+  function getTaskMomentOnDateAtTime(task, game, dateStr, hour, minute) {
+    if (!isValidDateStr(dateStr)) return null;
+    const baseTz = game ? getResetTimezoneForGame(game) : getRecordingTimezone();
+    const tz = getTimezoneForTaskDst(task, baseTz);
+    const y = parseInt(dateStr.slice(0, 4), 10);
+    const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(dateStr.slice(8, 10), 10);
+    const h = Math.max(0, Math.min(23, Number(hour) || 0));
+    const min = Math.max(0, Math.min(59, Number(minute) || 0));
+    const offsetRef = getOffsetRefDateForTask(task, tz);
+    return createDateInTimezone(y, mo, d, h, min, tz, offsetRef);
+  }
+
+  /** One-off live-cycle edit for scheduled endgame. Later cycles resume from the new due time. */
+  function normalizeScheduledCycleEdit(task) {
+    const edit = task && task.scheduledCycleEdit;
+    if (!edit || typeof edit !== "object" || !isValidDateStr(edit.startDateStr)) return null;
+    const dueTbd = !!edit.dueTbd || !isValidDateStr(edit.dueDateStr);
+    return {
+      startDateStr: edit.startDateStr,
+      startHour: Number.isFinite(edit.startHour) ? edit.startHour : 4,
+      startMinute: Number.isFinite(edit.startMinute) ? edit.startMinute : 0,
+      dueTbd: dueTbd,
+      dueDateStr: dueTbd ? null : edit.dueDateStr,
+      dueHour: Number.isFinite(edit.dueHour) ? edit.dueHour : 4,
+      dueMinute: Number.isFinite(edit.dueMinute) ? edit.dueMinute : 0,
+    };
+  }
+
+  function getScheduledCycleEditInstants(task, game) {
+    const edit = normalizeScheduledCycleEdit(task);
+    if (!edit) return null;
+    const start = getTaskMomentOnDateAtTime(task, game, edit.startDateStr, edit.startHour, edit.startMinute);
+    if (!start) return null;
+    if (edit.dueTbd) return { edit: edit, start: start, end: null };
+    const end = getTaskMomentOnDateAtTime(task, game, edit.dueDateStr, edit.dueHour, edit.dueMinute);
+    if (!end || !(end.getTime() > start.getTime())) return null;
+    return { edit: edit, start: start, end: end };
+  }
+
+  function isScheduledEndgameCycleDueTbd(task, now, game) {
+    const inst = getScheduledCycleEditInstants(task, game);
+    if (!inst || !inst.edit.dueTbd) return false;
+    const n = now || getSimulatedNow();
+    return n.getTime() >= inst.start.getTime();
+  }
+
+  /**
+   * Save Edit current for a scheduled endgame task.
+   * Does not convert the task to Manual Reset and does not open a new cycle.
+   */
+  function setScheduledEndgameCycleEdit(game, task, fields) {
+    if (!game || !task || isManualResetTask(task)) return { ok: false, reason: "Task not found" };
+    const o = fields || {};
+    if (!isValidDateStr(o.startDateStr)) return { ok: false, reason: "Start date required" };
+    const startHour = Number.isFinite(o.startHour) ? o.startHour : 4;
+    const startMinute = Number.isFinite(o.startMinute) ? o.startMinute : 0;
+    const dueTbd = !!o.dueTbd;
+    const start = getTaskMomentOnDateAtTime(task, game, o.startDateStr, startHour, startMinute);
+    if (!start) return { ok: false, reason: "Start date required" };
+    if (!dueTbd) {
+      if (!isValidDateStr(o.dueDateStr)) return { ok: false, reason: "Due date required" };
+      const end = getTaskMomentOnDateAtTime(task, game, o.dueDateStr, o.dueHour, o.dueMinute);
+      if (!end || !(end.getTime() > start.getTime())) {
+        return { ok: false, reason: "Due time must be after the start." };
+      }
+    }
+    task.scheduledCycleEdit = {
+      startDateStr: o.startDateStr,
+      startHour: startHour,
+      startMinute: startMinute,
+      dueTbd: dueTbd,
+      dueDateStr: dueTbd ? null : o.dueDateStr,
+      dueHour: dueTbd ? undefined : o.dueHour,
+      dueMinute: dueTbd ? undefined : o.dueMinute,
+    };
+    const key = game.id + "." + (task.id || task.label);
+    const nowBounds = getEndgameCycleBoundsForMoment(task, getSimulatedNow(), game);
+    if (nowBounds) {
+      if (!state.lastProcessedResets) state.lastProcessedResets = { dailies: {}, weeklies: {}, endgame: {} };
+      if (!state.lastProcessedResets.endgame) state.lastProcessedResets.endgame = {};
+      state.lastProcessedResets.endgame[key] = nowBounds.nextCycleStart.getTime();
+    }
+    if (typeof bumpDataVersion === "function") bumpDataVersion();
+    return { ok: true };
+  }
+
+  function getScheduledEndgameBoundsForMoment(task, moment, game) {
+    const inst = getScheduledCycleEditInstants(task, game);
+    if (!inst) return null;
+    const d = moment instanceof Date ? moment : new Date();
+    const dateMs = d.getTime();
+    const startMs = inst.start.getTime();
+    const intervalMs = getIntervalMs(task.frequencyEvery, (task && task.frequencyUnit === "day") ? "day" : "week");
+    if (dateMs >= startMs && (inst.edit.dueTbd || dateMs < inst.end.getTime())) {
+      const cycleEnd = inst.edit.dueTbd
+        ? new Date(startMs + getManualResetPlaceholderMs("endgame"))
+        : inst.end;
+      return {
+        cycleStart: inst.start,
+        cycleEnd: cycleEnd,
+        nextCycleStart: new Date(cycleEnd.getTime()),
+      };
+    }
+    if (!inst.edit.dueTbd && dateMs >= inst.end.getTime()) {
+      const endMs = inst.end.getTime();
+      const k = Math.floor((dateMs - endMs) / intervalMs);
+      const cycleStartMs = endMs + k * intervalMs;
+      const cycleStart = new Date(cycleStartMs);
+      return {
+        cycleStart: cycleStart,
+        cycleEnd: getCycleEndDate(cycleStart, task, game),
+        nextCycleStart: new Date(cycleStartMs + intervalMs),
+      };
+    }
+    return null;
+  }
+
   function getEndgameCycleBoundsForMoment(task, moment, game) {
     if (isManualResetTask(task)) {
       // Same as weeklies: closed past windows must resolve so calendar paint / fill /
@@ -4243,6 +4363,8 @@
       }
       return null;
     }
+    const edited = getScheduledEndgameBoundsForMoment(task, moment, game);
+    if (edited) return edited;
     const d = moment instanceof Date ? moment : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const intervalMs = getIntervalMs(task.frequencyEvery, (task && task.frequencyUnit === "day") ? "day" : "week");
@@ -4252,11 +4374,24 @@
     const k = Math.floor((dateMs - anchorMs) / intervalMs);
     const cycleStartMs = anchorMs + k * intervalMs;
     const cycleStart = new Date(cycleStartMs);
-    return {
-      cycleStart,
+    const natural = {
+      cycleStart: cycleStart,
       cycleEnd: getCycleEndDate(cycleStart, task, game),
       nextCycleStart: new Date(cycleStartMs + intervalMs),
     };
+    const inst = getScheduledCycleEditInstants(task, game);
+    if (
+      inst &&
+      natural.cycleStart.getTime() < inst.start.getTime() &&
+      natural.cycleEnd.getTime() > inst.start.getTime()
+    ) {
+      return {
+        cycleStart: natural.cycleStart,
+        cycleEnd: inst.start,
+        nextCycleStart: inst.start,
+      };
+    }
+    return natural;
   }
 
   function getRemainingDatesInCycleFrom(bounds, fromDateStr) {
@@ -8510,21 +8645,35 @@
         }
         const nowMs = now.getTime();
         const lastBounds = getLastCycleBounds(task, game);
-        while (cycleStartMs <= nowMs) {
+        const useEditedGrid = !!normalizeScheduledCycleEdit(task);
+        let advanceGuard = 0;
+        while (cycleStartMs <= nowMs && advanceGuard < 500) {
+          advanceGuard++;
           if (lastBounds && cycleStartMs > lastBounds.startMs) break;
+          let cycleStart = new Date(cycleStartMs);
+          let cycleEnd = getCycleEndDate(cycleStart, task, game);
+          let nextCycleStart = new Date(cycleStartMs + intervalMs);
+          if (useEditedGrid) {
+            const bounds = getEndgameCycleBoundsForMoment(task, new Date(cycleStartMs + 1), game);
+            if (!bounds) break;
+            if (lastBounds && bounds.cycleStart.getTime() > lastBounds.startMs) break;
+            if (bounds.cycleStart.getTime() > nowMs) break;
+            cycleStart = bounds.cycleStart;
+            cycleEnd = bounds.cycleEnd;
+            nextCycleStart = bounds.nextCycleStart;
+          }
           didChange = true;
           const attemptIdx = getAttemptedAmount(state.endgameAttempted, key);
           state.endgameAttempted[key] = attemptIdx + 1;
           snapshotEndgamePotentialAt(game.id, task.id || task.label, attemptIdx, getEndgamePotential(task));
-          const cycleStart = new Date(cycleStartMs);
-          const cycleEnd = getCycleEndDate(cycleStart, task, game);
           if (cycleEnd.getTime() <= nowMs) {
-            const nextCycleStart = new Date(cycleStartMs + intervalMs);
             if (isPeriodCompletedFromCalendar(key, "endgame", cycleStart, cycleEnd, nextCycleStart)) {
               state.endgameCompleted[key] = getCompletedAmount(state.endgameCompleted, key) + 1;
             }
           }
-          cycleStartMs += intervalMs;
+          const nextMs = nextCycleStart.getTime();
+          if (!(nextMs > cycleStart.getTime())) break;
+          cycleStartMs = useEditedGrid ? nextMs : cycleStartMs + intervalMs;
         }
         ensureEndgameEarnedArrayLength(game.id, task.id || task.label, getCompletedAmount(state.endgameCompleted, key));
         ensureEndgamePotentialArrayLength(game.id, task.id || task.label, getAttemptedAmount(state.endgameAttempted, key));
@@ -8785,6 +8934,13 @@
     if (isManualResetTask(task)) {
       return getEndgameAnchorDate(task, game);
     }
+    if (task && task.scheduledCycleEdit && game && (game.endgame || []).indexOf(task) >= 0) {
+      const moment = isValidDateStr(dateStr)
+        ? getCycleMomentForCalendarDate(task, game, dateStr)
+        : getSimulatedNow();
+      const bounds = getEndgameCycleBoundsForMoment(task, moment, game);
+      if (bounds) return bounds.cycleStart;
+    }
     const d = isValidDateStr(dateStr) ? new Date(dateStr + "T12:00:00") : new Date();
     const anchor = getEndgameAnchorDate(task, game);
     const { intervalMs } = getCycleParams(task);
@@ -8963,14 +9119,27 @@
       let cycleStartMs = getCycleStartForDate(task, earliestStr, game).getTime();
       const nowMs = now.getTime();
       const lastBounds = getLastCycleBounds(task, game);
-      while (cycleStartMs <= nowMs) {
+      const useEditedGrid = !!normalizeScheduledCycleEdit(task);
+      let tallyGuard = 0;
+      while (cycleStartMs <= nowMs && tallyGuard < 500) {
+        tallyGuard++;
         if (lastBounds && cycleStartMs > lastBounds.startMs) break;
-        const cycleStart = new Date(cycleStartMs);
-        const cycleEnd = getCycleEndDate(cycleStart, task, game);
-        const nextCycleStart = new Date(cycleStartMs + intervalMs);
+        let cycleStart = new Date(cycleStartMs);
+        let cycleEnd = getCycleEndDate(cycleStart, task, game);
+        let nextCycleStart = new Date(cycleStartMs + intervalMs);
+        if (useEditedGrid) {
+          const bounds = getEndgameCycleBoundsForMoment(task, new Date(cycleStartMs + 1), game);
+          if (!bounds) break;
+          if (lastBounds && bounds.cycleStart.getTime() > lastBounds.startMs) break;
+          cycleStart = bounds.cycleStart;
+          cycleEnd = bounds.cycleEnd;
+          nextCycleStart = bounds.nextCycleStart;
+        }
         const completed = isPeriodCompletedFromCalendar(key, "endgame", cycleStart, cycleEnd, nextCycleStart) ? 1 : 0;
         result.push({ periodStart: cycleStart, periodEnd: cycleEnd, nextCycleStart, completed });
-        cycleStartMs += intervalMs;
+        const nextMs = nextCycleStart.getTime();
+        if (!(nextMs > cycleStart.getTime())) break;
+        cycleStartMs = useEditedGrid ? nextMs : cycleStartMs + intervalMs;
       }
     }
     tallyCacheSet(cacheKey, result);
