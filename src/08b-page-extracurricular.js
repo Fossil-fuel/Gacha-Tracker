@@ -374,6 +374,15 @@
         renderActiveTab();
       });
       headerRow.appendChild(historyBtn);
+      const scanBtn = document.createElement("button");
+      scanBtn.type = "button";
+      scanBtn.className = "btn btn-ghost";
+      scanBtn.textContent = "Scan updates";
+      scanBtn.title = "Look up new story and event tasks for one game";
+      scanBtn.addEventListener("click", () => {
+        if (typeof openExtraScanGamePicker === "function") openExtraScanGamePicker();
+      });
+      headerRow.appendChild(scanBtn);
     } else {
       const tasksBtn = document.createElement("button");
       tasksBtn.type = "button";
@@ -418,6 +427,7 @@
     );
     headerRow.appendChild(controls);
     container.appendChild(headerRow);
+    if (typeof renderExtraScanReminders === "function") renderExtraScanReminders(container);
 
     const tasksRaw = viewMode === "history" ? getArchivedExtracurricularTasks() : getActiveExtracurricularTasks();
     const tasks = sortExtracurricularByStartDate(tasksRaw, getExtracurricularDateOrder());
@@ -510,7 +520,7 @@
     });
   }
 
-  function openExtracurricularTaskModal(task) {
+  function openExtracurricularTaskModal(task, preset) {
     const modal = document.getElementById("extracurricularTaskModal");
     const title = document.getElementById("extracurricularTaskModalTitle");
     const form = document.getElementById("extracurricularTaskModalForm");
@@ -522,6 +532,7 @@
     const descInput = document.getElementById("extracurricularTaskDescription");
     const gameSelect = document.getElementById("extracurricularTaskGame");
 
+    const presetGameId = !task && preset && preset.gameId ? preset.gameId : null;
     if (title) title.textContent = task ? "Edit task" : "Add task";
     const currencyInput = document.getElementById("extracurricularTaskCurrency");
     const excludeFromDataInput = document.getElementById("extracurricularTaskExcludeFromData");
@@ -542,7 +553,7 @@
         const opt = document.createElement("option");
         opt.value = g.id;
         opt.textContent = g.name || g.id;
-        if (task && task.gameId === g.id) opt.selected = true;
+        if ((task && task.gameId === g.id) || (!task && presetGameId === g.id)) opt.selected = true;
         gameSelect.appendChild(opt);
       });
     }
@@ -575,7 +586,7 @@
 
     if (typeof setActiveBannerUi === "function") setActiveBannerUi("extra");
     taskModal.bannerTarget = "home";
-    taskModal.gameId = (task && task.gameId) || null;
+    taskModal.gameId = (task && task.gameId) || presetGameId || null;
     const loaded = typeof loadTaskBannersFromTask === "function"
       ? loadTaskBannersFromTask(task)
       : { source: null, views: emptyTaskBannerViews() };
@@ -670,12 +681,21 @@
     "current revenue",
     "current phase",
     "time remaining",
+    "rewards preview",
+    "trial resonators",
     "ridu chronicles",
     "summer vibes",
     "select all",
     "unselect all",
     "fill from screenshot",
   ];
+  const OCR_BADGE_WORDS = {
+    featured: 1, combat: 1, story: 1, casual: 1, event: 1, details: 1,
+    challenge: 1, rewards: 1, preview: 1, remaining: 1, trial: 1, resonators: 1,
+    resonator: 1, available: 1, limited: 1, login: 1, outfit: 1, demo: 1,
+    phase: 1, revenue: 1, current: 1
+  };
+  const OCR_TITLE_STOP = { the: 1, a: 1, an: 1, of: 1, and: 1, will: 1, be: 1, to: 1, for: 1, in: 1, on: 1, with: 1 };
 
   function loadScriptOnce(src, globalName) {
     return new Promise((resolve, reject) => {
@@ -722,6 +742,47 @@
     return s;
   }
 
+  function tidyOcrLine(line) {
+    let s = String(line || "").replace(/\s+/g, " ").trim();
+    s = s.replace(/[;|)(]+/g, " ");
+    s = s.replace(/\s+/g, " ").trim();
+    s = s.replace(/\bofthe\b/gi, "of the");
+    s = s.replace(/\bwillbe\b/gi, "will be");
+    s = s.replace(/([A-Za-z])\.(?=[A-Za-z])/g, "$1");
+    s = s.replace(/([a-z])i([A-Z])/g, "$1 $2");
+    s = s.replace(/^[\s|©®•·\-—~=\\/@#$%^&*()]+/, "");
+    s = s.replace(/[\s|©®•·\-—~=]+$/g, "");
+    return s.trim();
+  }
+
+  function ocrLineWords(line) {
+    return tidyOcrLine(line).toLowerCase().split(/[^a-z0-9']+/).filter(Boolean);
+  }
+
+  function isOcrBadgeLine(line) {
+    const low = tidyOcrLine(line).toLowerCase();
+    if (!low) return false;
+    if (OCR_UI_NOISE.some((n) => low === n || low.includes(n))) return true;
+    const words = ocrLineWords(line).filter((w) => !OCR_TITLE_STOP[w] && w.length >= 3);
+    if (!words.length) return false;
+    const badges = words.filter((w) => OCR_BADGE_WORDS[w]);
+    return badges.length / words.length >= 0.5;
+  }
+
+  function isOcrTimerLine(line) {
+    const low = tidyOcrLine(line).toLowerCase();
+    if (!low) return false;
+    if (/\b(remaining|left|ends?\s+in)\b/.test(low)) return true;
+    return /^\d{1,3}\s*d(?:ays?)?(?:\s+\d{1,2}\s*h(?:rs?|ours?)?)?(?:\s+\d{1,2}\s*m(?:in(?:ute)?s?)?)?$/.test(low);
+  }
+
+  function isOcrTitleContinuation(line) {
+    if (isOcrBadgeLine(line) || isOcrTimerLine(line)) return false;
+    const words = tidyOcrLine(line).split(/\s+/).filter(Boolean);
+    if (words.length < 1 || words.length > 2) return false;
+    return words.every((word) => word.length >= 3 && /^[A-Z0-9][A-Za-z0-9'’&-]*$/.test(word));
+  }
+
   /**
    * Pull event countdown from noisy OCR. Prefers 1–120 day values (typical event length).
    * Returns e.g. "37d" or "6d 7hr" or "".
@@ -745,7 +806,8 @@
       let out = d + "d";
       if (h) out += " " + h + "hr";
       if (m) out += " " + m + "m";
-      candidates.push({ out, days: d, score: score + (d >= 7 && d <= 60 ? 2 : 0), source });
+      const fuller = (h ? 6 : 0) + (m ? 3 : 0);
+      candidates.push({ out, days: d, score: score + fuller + (d >= 7 && d <= 60 ? 2 : 0), source });
     };
 
     haystacks.forEach((chunk, idx) => {
@@ -760,10 +822,10 @@
       while ((m = reGlued.exec(chunk)) !== null) {
         push(m[1], null, null, 9 + lineBonus, m[0]);
       }
-      // "37 days left", "Ends in 37 days"
-      const reEnds = /(?:ends?\s+in|remaining|left)\s*:?\s*(\d{1,3})\s*d(?:ays?)?/gi;
+      // "Remaining: 16d 6h", "Ends in 37 days"
+      const reEnds = /(?:ends?\s+in|remaining|left)\s*:?\s*(\d{1,3})\s*d(?:ays?)?(?:\s*(\d{1,2})\s*(?:h|hr|hrs|hours?))?(?:\s*(\d{1,2})\s*(?:m|min|mins|minutes?))?/gi;
       while ((m = reEnds.exec(chunk)) !== null) {
-        push(m[1], null, null, 12 + lineBonus, m[0]);
+        push(m[1], m[2], m[3], 12 + lineBonus, m[0]);
       }
       // Short line that is only a plausible day count (clock badge OCR dropped the "d")
       if (idx > 0 && /^(\d{1,3})$/.test(chunk)) {
@@ -796,18 +858,21 @@
     const timeRemaining = extractEventTimeRemainingFromOcr(raw);
 
     const isNoise = (line) => {
-      const low = line.toLowerCase();
-      if (OCR_UI_NOISE.some((n) => low === n || low.includes(n))) return true;
-      if (/^\d+([./,]\d+)*$/.test(line)) return true;
-      if (/^\d+\s*\/\s*[\d,]+$/.test(line)) return true;
-      if (!/[A-Za-z\u00C0-\u024F]/.test(line)) return true;
-      if (line.length < 4) return true;
+      const cleaned = tidyOcrLine(line);
+      const low = cleaned.toLowerCase();
+      if (!cleaned) return true;
+      if (isOcrBadgeLine(cleaned) || isOcrTimerLine(cleaned)) return true;
+      if (/^\d+([./,]\d+)*$/.test(cleaned)) return true;
+      if (/^\d+\s*\/\s*[\d,]+$/.test(cleaned)) return true;
+      if (!/[A-Za-z\u00C0-\u024F]/.test(cleaned)) return true;
+      if (cleaned.length < 4) return true;
+      if (low === "challenge") return true;
       return false;
     };
 
     const titleCandidates = lines
       .map((line, idx) => {
-        let cleaned = line.replace(/\s*\(([ivx]+)\)\s*$/i, "").trim();
+        let cleaned = tidyOcrLine(line).replace(/\s*\(([ivx]+)\)\s*$/i, "").trim();
         cleaned = cleaned.replace(/^["'“”]+|["'“”]+$/g, "").trim();
         return { line: cleaned, idx };
       })
@@ -820,18 +885,27 @@
           const words = c.line.split(/\s+/).length;
           const early = Math.max(0, 12 - c.idx);
           const mixed = /[a-z]/.test(c.line) && /[A-Z]/.test(c.line) ? 3 : 0;
-          return early * 2 + Math.min(words, 6) + mixed;
+          const pipes = /[|©®]/.test(c.line) ? 6 : 0;
+          const junk = /[^A-Za-z0-9'’&,.\-\s]/.test(c.line) ? 10 : 0;
+          return early * 2 + Math.min(words, 6) + mixed - pipes - junk;
         };
         return score(b) - score(a);
       });
-      label = titleCandidates[0].line;
+      const chosen = titleCandidates[0];
+      label = chosen.line;
+      const next = lines[chosen.idx + 1] ? tidyOcrLine(lines[chosen.idx + 1]) : "";
+      if (next && isOcrTitleContinuation(next)) label = tidyOcrLine(label + " " + next);
+      const prev = chosen.idx > 0 ? tidyOcrLine(lines[chosen.idx - 1]) : "";
+      if (prev && isOcrTitleContinuation(label) && !isOcrBadgeLine(prev) && !isOcrTimerLine(prev) && prev.length > label.length) {
+        label = tidyOcrLine(prev + " " + label);
+      }
     }
 
     const descLines = lines.filter((line) => {
       if (isNoise(line)) return false;
       if (label && line.toLowerCase().includes(label.toLowerCase().slice(0, Math.min(12, label.length)))) return false;
       if (timeRemaining && line.toLowerCase().includes(timeRemaining.toLowerCase())) return false;
-      return line.length >= 40 && /[a-z]/i.test(line);
+      return line.length >= 60 && /[a-z]/i.test(line);
     });
     const description = descLines.slice(0, 3).join(" ").trim();
 
@@ -840,7 +914,7 @@
     if (/\bzzz\b|zenless|ridu chronicles|hollow zero|new eridu/.test(lowAll)) gameHint = "zzz";
     else if (/\bhsr\b|honkai star rail|trailblaze|divergent universe/.test(lowAll)) gameHint = "hsr";
     else if (/\bhi3\b|honkai impact|superstring|memorial arena/.test(lowAll)) gameHint = "hi3";
-    else if (/\bwuthering|whimpering wastes|tower of adversity/.test(lowAll)) gameHint = "ww";
+    else if (/\bwuthering|whimpering wastes|tower of adversity|\bresonators?\b/.test(lowAll)) gameHint = "ww";
     else if (/\bpgr\b|punishing gray|punishing grey|pain cage|warzone/.test(lowAll)) gameHint = "pgr";
     else if (/\bendfield|arknights/.test(lowAll)) gameHint = "akendfield";
 
@@ -914,62 +988,186 @@
     });
   }
 
+  function ocrTitleScore(label) {
+    const text = tidyOcrLine(label);
+    const letters = (text.match(/[A-Za-z]/g) || []).length;
+    let score = 0;
+    if (letters >= 4 && !isOcrBadgeLine(text)) score += 20 + Math.min(letters, 40);
+    if (/\b(ofthe|willbe)\b/i.test(text) || /[a-z]i[A-Z]/.test(text)) score -= 6;
+    if (/[^A-Za-z0-9'’&,.\-\s]/.test(text)) score -= 10;
+    text.split(/\s+/).forEach((word) => {
+      const core = word.replace(/[^A-Za-z']/g, "");
+      if (!core || core === "&") return;
+      if (core.length < 2) score -= 8;
+      else if (/^[a-z]/.test(core) && !OCR_TITLE_STOP[core.toLowerCase()]) score -= 8;
+    });
+    return score;
+  }
+
+  function ocrTimeScore(time) {
+    const t = String(time || "");
+    if (!t) return 0;
+    let score = 12;
+    if (/\dhr/.test(t)) score += 4;
+    const days = parseInt(t, 10);
+    if (days >= 7 && days <= 60) score += 2;
+    return score;
+  }
+
+  /** Longest run of title-case words, skipping badge chips and the countdown. */
+  function leadingTitleRun(text) {
+    let best = "";
+    let bestScore = 0;
+    String(text || "").split(/\n/).forEach((raw) => {
+      const words = tidyOcrLine(raw).split(/\s+/).filter(Boolean);
+      let cur = [];
+      const commit = () => {
+        const run = cur.join(" ").trim();
+        const score = ocrTitleScore(run);
+        if (score > bestScore) {
+          bestScore = score;
+          best = run;
+        }
+        cur = [];
+      };
+      words.forEach((word) => {
+        const core = word.replace(/[^A-Za-z0-9'’&]/g, "");
+        const lower = core.toLowerCase();
+        const stop = !!OCR_TITLE_STOP[lower];
+        const badge = !!OCR_BADGE_WORDS[lower] || /^\d{1,3}d$/i.test(core) || /^\d{1,2}h$/i.test(core);
+        const titleWord = core === "&" || (!badge && !stop && /^[A-Z0-9]/.test(core) && core.length >= 2);
+        const keep = titleWord || (stop && cur.length);
+        if (keep) cur.push(core === "&" ? "&" : core);
+        else commit();
+      });
+      commit();
+    });
+    return best;
+  }
+
+  function assembleOcrWordsText(words) {
+    const items = (words || []).map((word) => ({
+      text: String(word.text || "").trim(),
+      conf: Number(word.confidence) || 0,
+      x: word.bbox ? word.bbox.x0 : 0,
+      y: word.bbox ? (word.bbox.y0 + word.bbox.y1) / 2 : 0,
+      h: word.bbox ? Math.max(1, word.bbox.y1 - word.bbox.y0) : 1,
+    })).filter((word) => {
+      if (!word.text) return false;
+      if (/^\d{1,3}d$/i.test(word.text) || /^\d{1,2}h$/i.test(word.text)) return word.conf >= 30;
+      if (/^(of|the|a|an|&|and)$/i.test(word.text)) return word.conf >= 20;
+      return word.conf >= 45;
+    });
+    items.sort((a, b) => a.y - b.y || a.x - b.x);
+    const grouped = [];
+    items.forEach((word) => {
+      const last = grouped[grouped.length - 1];
+      if (!last || Math.abs(word.y - last.y) > Math.max(last.h, word.h) * 0.5) {
+        grouped.push({ y: word.y, h: word.h, words: [word] });
+        return;
+      }
+      last.words.push(word);
+      last.h = Math.max(last.h, word.h);
+    });
+    return grouped.map((line) => {
+      line.words.sort((a, b) => a.x - b.x);
+      return tidyOcrLine(line.words.map((word) => word.text).join(" "));
+    }).filter(Boolean).join("\n");
+  }
+
   /**
-   * Upscale + contrast boost; optional top-band crop for event timers in the header.
-   * Returns a canvas (Tesseract accepts canvas/HTMLImageElement).
+   * Upscale the banner. The mask pass keeps near-white outlined title text.
    */
   function preprocessScreenshotForOcr(img, opts) {
     const o = opts || {};
-    const topFraction = o.topFraction != null ? o.topFraction : 1;
     const scale = o.scale != null ? o.scale : 2;
     const srcW = img.naturalWidth || img.width;
     const srcH = img.naturalHeight || img.height;
-    const cropH = Math.max(1, Math.round(srcH * Math.min(1, Math.max(0.15, topFraction))));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(srcW * scale));
-    canvas.height = Math.max(1, Math.round(cropH * scale));
+    canvas.height = Math.max(1, Math.round(srcH * scale));
     const ctx = canvas.getContext("2d");
     if (!ctx) return canvas;
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(img, 0, 0, srcW, cropH, 0, 0, canvas.width, canvas.height);
-    try {
-      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const d = frame.data;
-      for (let i = 0; i < d.length; i += 4) {
-        // luma + contrast stretch toward black/white (helps white outlined UI text)
-        let y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        y = (y - 128) * 1.35 + 128;
-        y = y < 0 ? 0 : y > 255 ? 255 : y;
-        // Soft threshold: keep midtones but punch text
-        const v = y > 170 ? 255 : y < 90 ? 0 : y;
-        d[i] = d[i + 1] = d[i + 2] = v;
-      }
-      ctx.putImageData(frame, 0, 0);
-    } catch (_) {
-      // tainted canvas / security — return unprocessed draw
+    ctx.imageSmoothingEnabled = o.smooth !== false;
+    ctx.drawImage(img, 0, 0, srcW, srcH, 0, 0, canvas.width, canvas.height);
+    if (o.mask) {
+      try {
+        const cutoff = o.cutoff != null ? o.cutoff : 208;
+        const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = frame.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          const v = y >= cutoff ? 0 : 255;
+          d[i] = d[i + 1] = d[i + 2] = v;
+        }
+        ctx.putImageData(frame, 0, 0);
+      } catch (_) {}
     }
     return canvas;
   }
 
+  function textVariantsFromOcrResult(result) {
+    const data = result && result.data ? result.data : {};
+    const fromWords = assembleOcrWordsText(data.words || []);
+    const plain = String(data.text || "").trim();
+    return [fromWords, plain].filter(Boolean);
+  }
+
   async function recognizeScreenshotText(Tesseract, fileOrBlob) {
     const img = await loadImageElement(fileOrBlob);
-    const full = preprocessScreenshotForOcr(img, { topFraction: 1, scale: 2 });
-    const top = preprocessScreenshotForOcr(img, { topFraction: 0.42, scale: 2.5 });
+    const plain = preprocessScreenshotForOcr(img, { scale: 2 });
+    const mask = preprocessScreenshotForOcr(img, { scale: 2, mask: true });
     const worker = await Tesseract.createWorker("eng", 1, {
       logger: () => {},
     });
     try {
-      // Sparse UI text helps timers/titles on busy art
       if (worker.setParameters) {
         await worker.setParameters({
           tessedit_pageseg_mode: "11",
           preserve_interword_spaces: "1",
         });
       }
-      const [fullRes, topRes] = await Promise.all([worker.recognize(full), worker.recognize(top)]);
-      const a = (fullRes && fullRes.data && fullRes.data.text) || "";
-      const b = (topRes && topRes.data && topRes.data.text) || "";
-      return (a + "\n" + b).trim();
+      const sharp = preprocessScreenshotForOcr(img, { scale: 2, mask: true, cutoff: 220, smooth: false });
+      const plainRes = await worker.recognize(plain);
+      const maskRes = await worker.recognize(mask);
+      const sharpRes = await worker.recognize(sharp);
+      const plainVariants = textVariantsFromOcrResult(plainRes);
+      const variants = plainVariants.concat(textVariantsFromOcrResult(maskRes), textVariantsFromOcrResult(sharpRes));
+      let bestLabel = "";
+      let bestTitleScore = 0;
+      let bestDescription = "";
+      let bestTime = "";
+      let bestTimeScore = 0;
+      const considerTime = (text) => {
+        const time = parseExtracurricularScreenshotText(text).timeRemaining;
+        const score = ocrTimeScore(time);
+        if (score > bestTimeScore) {
+          bestTimeScore = score;
+          bestTime = time;
+        }
+      };
+      variants.forEach((text) => {
+        const parsed = parseExtracurricularScreenshotText(text);
+        [{ label: parsed.label, description: parsed.description }, { label: leadingTitleRun(text), description: "" }].forEach((candidate) => {
+          const score = ocrTitleScore(candidate.label);
+          if (score > bestTitleScore) {
+            bestTitleScore = score;
+            bestLabel = candidate.label;
+            bestDescription = candidate.description || "";
+          }
+        });
+      });
+      plainVariants.forEach(considerTime);
+      if (!bestTime) variants.forEach(considerTime);
+      const hintBlob = variants.join("\n").toLowerCase();
+      let hintLine = "";
+      if (/\bzzz\b|zenless|ridu chronicles|hollow zero|new eridu/.test(hintBlob)) hintLine = "event details zenless";
+      else if (/\bhsr\b|honkai star rail|trailblaze|divergent universe/.test(hintBlob)) hintLine = "event details honkai star rail";
+      else if (/\bhi3\b|honkai impact|superstring|memorial arena/.test(hintBlob)) hintLine = "event details honkai impact";
+      else if (/\bwuthering|whimpering wastes|tower of adversity|\bresonators?\b/.test(hintBlob)) hintLine = "event details resonators";
+      else if (/\bpgr\b|punishing gray|punishing grey|pain cage|warzone/.test(hintBlob)) hintLine = "event details punishing gray";
+      else if (/\bendfield|arknights/.test(hintBlob)) hintLine = "event details endfield";
+      return [bestLabel, bestTime, bestDescription, hintLine].filter(Boolean).join("\n");
     } finally {
       await worker.terminate();
     }

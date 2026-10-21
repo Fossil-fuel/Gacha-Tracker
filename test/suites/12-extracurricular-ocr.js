@@ -69,6 +69,34 @@ module.exports = {
         assert.equal(ocr.extractEventTimeRemainingFromOcr("Ends in 37 days\nfoo"), "37d", "Ends in 37 days");
         assert.equal(ocr.extractEventTimeRemainingFromOcr("badge\n37\nOutfit Reward"), "37d", "bare 37 line");
         assert.equal(ocr.extractEventTimeRemainingFromOcr("6d 7hr left"), "6d 7hr", "days+hours");
+        assert.equal(ocr.extractEventTimeRemainingFromOcr("Remaining: 16d 6h"), "16d 6hr", "remaining keeps hours");
+      })
+    );
+
+    checks.push(
+      check("Parse: event banners keep the large title and the countdown", () => {
+        const artisan = ocr.parseExtracurricularScreenshotText(
+          "Artisan's Search\nFeatured | Combat\nRemaining: 16d 6h\nTrial Resonators will be available"
+        );
+        assert.equal(artisan.label, "Artisan's Search", "wuwa title");
+        assert.equal(artisan.timeRemaining, "16d 6hr", "wuwa timer");
+        assert.equal(artisan.description, "", "status chip is not a description");
+
+        const crow = ocr.parseExtracurricularScreenshotText(
+          "Chronicles ofthe Hobbling\nCrow\n15d | Event Details"
+        );
+        assert.equal(crow.label, "Chronicles of the Hobbling Crow", "wrapped zzz title");
+        assert.equal(crow.timeRemaining, "15d", "zzz days");
+
+        const angels = ocr.parseExtracurricularScreenshotText("Angels SupportiOperation\n39d\nEvent Details");
+        assert.equal(angels.label, "Angels Support Operation", "outlined title split");
+        assert.equal(angels.timeRemaining, "39d", "39d");
+
+        const love = ocr.parseExtracurricularScreenshotText(
+          "Event Details\nLove, Ghosts & Robots\nStory | Casual 20d 6h"
+        );
+        assert.equal(love.label, "Love, Ghosts & Robots", "hsr title");
+        assert.equal(love.timeRemaining, "20d 6hr", "hsr timer");
       })
     );
 

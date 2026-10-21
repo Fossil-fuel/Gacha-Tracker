@@ -70,6 +70,7 @@ const files = [
   "09-page-data.js",
   "10-page-games.js",
   "11-page-home.js",
+  "13-extra-scan.js",
   "12-main.js",
   "mobile-integration.js",
 ];

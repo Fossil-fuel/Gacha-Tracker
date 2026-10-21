@@ -7446,3 +7446,116 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   background: var(--bg-panel);
   color: var(--text);
 }
+
+.extra-scan-reminder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+}
+
+.extra-scan-reminder-text {
+  margin: 0;
+  color: var(--text);
+}
+
+.extra-scan-dialog {
+  width: min(720px, calc(100vw - 1.5rem));
+}
+
+.extra-scan-status {
+  margin: 0 0 0.75rem;
+  color: var(--text-muted);
+}
+
+.extra-scan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: min(52vh, 28rem);
+  overflow: auto;
+  margin-bottom: 0.25rem;
+}
+
+.extra-scan-item .fill-toggle {
+  margin-top: 0.15rem;
+}
+
+.extra-scan-item {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.extra-scan-item-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.extra-scan-kind {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.extra-scan-item-title {
+  color: var(--text);
+}
+
+.extra-scan-item-meta {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.extra-scan-game-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.extra-scan-game-btn {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.games-extra-scan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.extra-scan-urls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0.75rem;
+}
+
+.extra-scan-url-hint {
+  margin: 0;
+}
+
+.extra-scan-url-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.extra-scan-url-row input {
+  flex: 1;
+  min-width: 0;
+}

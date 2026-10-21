@@ -154,6 +154,7 @@
     initClearTimeTrendsModal();
     initSettingsModal();
     initExtracurricularTaskModal();
+    if (typeof initExtraScanModal === "function") initExtraScanModal();
     document.addEventListener("keydown", (e) => {
       if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== "z") return;
       if (e.altKey || e.shiftKey) return;

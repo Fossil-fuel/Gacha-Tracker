@@ -23554,6 +23554,15 @@ function syncTaskCycleEndTimeUI() {
         renderActiveTab();
       });
       headerRow.appendChild(historyBtn);
+      const scanBtn = document.createElement("button");
+      scanBtn.type = "button";
+      scanBtn.className = "btn btn-ghost";
+      scanBtn.textContent = "Scan updates";
+      scanBtn.title = "Look up new story and event tasks for one game";
+      scanBtn.addEventListener("click", () => {
+        if (typeof openExtraScanGamePicker === "function") openExtraScanGamePicker();
+      });
+      headerRow.appendChild(scanBtn);
     } else {
       const tasksBtn = document.createElement("button");
       tasksBtn.type = "button";
@@ -23598,6 +23607,7 @@ function syncTaskCycleEndTimeUI() {
     );
     headerRow.appendChild(controls);
     container.appendChild(headerRow);
+    if (typeof renderExtraScanReminders === "function") renderExtraScanReminders(container);
 
     const tasksRaw = viewMode === "history" ? getArchivedExtracurricularTasks() : getActiveExtracurricularTasks();
     const tasks = sortExtracurricularByStartDate(tasksRaw, getExtracurricularDateOrder());
@@ -23690,7 +23700,7 @@ function syncTaskCycleEndTimeUI() {
     });
   }
 
-  function openExtracurricularTaskModal(task) {
+  function openExtracurricularTaskModal(task, preset) {
     const modal = document.getElementById("extracurricularTaskModal");
     const title = document.getElementById("extracurricularTaskModalTitle");
     const form = document.getElementById("extracurricularTaskModalForm");
@@ -23702,6 +23712,7 @@ function syncTaskCycleEndTimeUI() {
     const descInput = document.getElementById("extracurricularTaskDescription");
     const gameSelect = document.getElementById("extracurricularTaskGame");
 
+    const presetGameId = !task && preset && preset.gameId ? preset.gameId : null;
     if (title) title.textContent = task ? "Edit task" : "Add task";
     const currencyInput = document.getElementById("extracurricularTaskCurrency");
     const excludeFromDataInput = document.getElementById("extracurricularTaskExcludeFromData");
@@ -23722,7 +23733,7 @@ function syncTaskCycleEndTimeUI() {
         const opt = document.createElement("option");
         opt.value = g.id;
         opt.textContent = g.name || g.id;
-        if (task && task.gameId === g.id) opt.selected = true;
+        if ((task && task.gameId === g.id) || (!task && presetGameId === g.id)) opt.selected = true;
         gameSelect.appendChild(opt);
       });
     }
@@ -23755,7 +23766,7 @@ function syncTaskCycleEndTimeUI() {
 
     if (typeof setActiveBannerUi === "function") setActiveBannerUi("extra");
     taskModal.bannerTarget = "home";
-    taskModal.gameId = (task && task.gameId) || null;
+    taskModal.gameId = (task && task.gameId) || presetGameId || null;
     const loaded = typeof loadTaskBannersFromTask === "function"
       ? loadTaskBannersFromTask(task)
       : { source: null, views: emptyTaskBannerViews() };
@@ -23850,12 +23861,21 @@ function syncTaskCycleEndTimeUI() {
     "current revenue",
     "current phase",
     "time remaining",
+    "rewards preview",
+    "trial resonators",
     "ridu chronicles",
     "summer vibes",
     "select all",
     "unselect all",
     "fill from screenshot",
   ];
+  const OCR_BADGE_WORDS = {
+    featured: 1, combat: 1, story: 1, casual: 1, event: 1, details: 1,
+    challenge: 1, rewards: 1, preview: 1, remaining: 1, trial: 1, resonators: 1,
+    resonator: 1, available: 1, limited: 1, login: 1, outfit: 1, demo: 1,
+    phase: 1, revenue: 1, current: 1
+  };
+  const OCR_TITLE_STOP = { the: 1, a: 1, an: 1, of: 1, and: 1, will: 1, be: 1, to: 1, for: 1, in: 1, on: 1, with: 1 };
 
   function loadScriptOnce(src, globalName) {
     return new Promise((resolve, reject) => {
@@ -23902,6 +23922,47 @@ function syncTaskCycleEndTimeUI() {
     return s;
   }
 
+  function tidyOcrLine(line) {
+    let s = String(line || "").replace(/\s+/g, " ").trim();
+    s = s.replace(/[;|)(]+/g, " ");
+    s = s.replace(/\s+/g, " ").trim();
+    s = s.replace(/\bofthe\b/gi, "of the");
+    s = s.replace(/\bwillbe\b/gi, "will be");
+    s = s.replace(/([A-Za-z])\.(?=[A-Za-z])/g, "$1");
+    s = s.replace(/([a-z])i([A-Z])/g, "$1 $2");
+    s = s.replace(/^[\s|©®•·\-—~=\\/@#$%^&*()]+/, "");
+    s = s.replace(/[\s|©®•·\-—~=]+$/g, "");
+    return s.trim();
+  }
+
+  function ocrLineWords(line) {
+    return tidyOcrLine(line).toLowerCase().split(/[^a-z0-9']+/).filter(Boolean);
+  }
+
+  function isOcrBadgeLine(line) {
+    const low = tidyOcrLine(line).toLowerCase();
+    if (!low) return false;
+    if (OCR_UI_NOISE.some((n) => low === n || low.includes(n))) return true;
+    const words = ocrLineWords(line).filter((w) => !OCR_TITLE_STOP[w] && w.length >= 3);
+    if (!words.length) return false;
+    const badges = words.filter((w) => OCR_BADGE_WORDS[w]);
+    return badges.length / words.length >= 0.5;
+  }
+
+  function isOcrTimerLine(line) {
+    const low = tidyOcrLine(line).toLowerCase();
+    if (!low) return false;
+    if (/\b(remaining|left|ends?\s+in)\b/.test(low)) return true;
+    return /^\d{1,3}\s*d(?:ays?)?(?:\s+\d{1,2}\s*h(?:rs?|ours?)?)?(?:\s+\d{1,2}\s*m(?:in(?:ute)?s?)?)?$/.test(low);
+  }
+
+  function isOcrTitleContinuation(line) {
+    if (isOcrBadgeLine(line) || isOcrTimerLine(line)) return false;
+    const words = tidyOcrLine(line).split(/\s+/).filter(Boolean);
+    if (words.length < 1 || words.length > 2) return false;
+    return words.every((word) => word.length >= 3 && /^[A-Z0-9][A-Za-z0-9'’&-]*$/.test(word));
+  }
+
   /**
    * Pull event countdown from noisy OCR. Prefers 1–120 day values (typical event length).
    * Returns e.g. "37d" or "6d 7hr" or "".
@@ -23925,7 +23986,8 @@ function syncTaskCycleEndTimeUI() {
       let out = d + "d";
       if (h) out += " " + h + "hr";
       if (m) out += " " + m + "m";
-      candidates.push({ out, days: d, score: score + (d >= 7 && d <= 60 ? 2 : 0), source });
+      const fuller = (h ? 6 : 0) + (m ? 3 : 0);
+      candidates.push({ out, days: d, score: score + fuller + (d >= 7 && d <= 60 ? 2 : 0), source });
     };
 
     haystacks.forEach((chunk, idx) => {
@@ -23940,10 +24002,10 @@ function syncTaskCycleEndTimeUI() {
       while ((m = reGlued.exec(chunk)) !== null) {
         push(m[1], null, null, 9 + lineBonus, m[0]);
       }
-      // "37 days left", "Ends in 37 days"
-      const reEnds = /(?:ends?\s+in|remaining|left)\s*:?\s*(\d{1,3})\s*d(?:ays?)?/gi;
+      // "Remaining: 16d 6h", "Ends in 37 days"
+      const reEnds = /(?:ends?\s+in|remaining|left)\s*:?\s*(\d{1,3})\s*d(?:ays?)?(?:\s*(\d{1,2})\s*(?:h|hr|hrs|hours?))?(?:\s*(\d{1,2})\s*(?:m|min|mins|minutes?))?/gi;
       while ((m = reEnds.exec(chunk)) !== null) {
-        push(m[1], null, null, 12 + lineBonus, m[0]);
+        push(m[1], m[2], m[3], 12 + lineBonus, m[0]);
       }
       // Short line that is only a plausible day count (clock badge OCR dropped the "d")
       if (idx > 0 && /^(\d{1,3})$/.test(chunk)) {
@@ -23976,18 +24038,21 @@ function syncTaskCycleEndTimeUI() {
     const timeRemaining = extractEventTimeRemainingFromOcr(raw);
 
     const isNoise = (line) => {
-      const low = line.toLowerCase();
-      if (OCR_UI_NOISE.some((n) => low === n || low.includes(n))) return true;
-      if (/^\d+([./,]\d+)*$/.test(line)) return true;
-      if (/^\d+\s*\/\s*[\d,]+$/.test(line)) return true;
-      if (!/[A-Za-z\u00C0-\u024F]/.test(line)) return true;
-      if (line.length < 4) return true;
+      const cleaned = tidyOcrLine(line);
+      const low = cleaned.toLowerCase();
+      if (!cleaned) return true;
+      if (isOcrBadgeLine(cleaned) || isOcrTimerLine(cleaned)) return true;
+      if (/^\d+([./,]\d+)*$/.test(cleaned)) return true;
+      if (/^\d+\s*\/\s*[\d,]+$/.test(cleaned)) return true;
+      if (!/[A-Za-z\u00C0-\u024F]/.test(cleaned)) return true;
+      if (cleaned.length < 4) return true;
+      if (low === "challenge") return true;
       return false;
     };
 
     const titleCandidates = lines
       .map((line, idx) => {
-        let cleaned = line.replace(/\s*\(([ivx]+)\)\s*$/i, "").trim();
+        let cleaned = tidyOcrLine(line).replace(/\s*\(([ivx]+)\)\s*$/i, "").trim();
         cleaned = cleaned.replace(/^["'“”]+|["'“”]+$/g, "").trim();
         return { line: cleaned, idx };
       })
@@ -24000,18 +24065,27 @@ function syncTaskCycleEndTimeUI() {
           const words = c.line.split(/\s+/).length;
           const early = Math.max(0, 12 - c.idx);
           const mixed = /[a-z]/.test(c.line) && /[A-Z]/.test(c.line) ? 3 : 0;
-          return early * 2 + Math.min(words, 6) + mixed;
+          const pipes = /[|©®]/.test(c.line) ? 6 : 0;
+          const junk = /[^A-Za-z0-9'’&,.\-\s]/.test(c.line) ? 10 : 0;
+          return early * 2 + Math.min(words, 6) + mixed - pipes - junk;
         };
         return score(b) - score(a);
       });
-      label = titleCandidates[0].line;
+      const chosen = titleCandidates[0];
+      label = chosen.line;
+      const next = lines[chosen.idx + 1] ? tidyOcrLine(lines[chosen.idx + 1]) : "";
+      if (next && isOcrTitleContinuation(next)) label = tidyOcrLine(label + " " + next);
+      const prev = chosen.idx > 0 ? tidyOcrLine(lines[chosen.idx - 1]) : "";
+      if (prev && isOcrTitleContinuation(label) && !isOcrBadgeLine(prev) && !isOcrTimerLine(prev) && prev.length > label.length) {
+        label = tidyOcrLine(prev + " " + label);
+      }
     }
 
     const descLines = lines.filter((line) => {
       if (isNoise(line)) return false;
       if (label && line.toLowerCase().includes(label.toLowerCase().slice(0, Math.min(12, label.length)))) return false;
       if (timeRemaining && line.toLowerCase().includes(timeRemaining.toLowerCase())) return false;
-      return line.length >= 40 && /[a-z]/i.test(line);
+      return line.length >= 60 && /[a-z]/i.test(line);
     });
     const description = descLines.slice(0, 3).join(" ").trim();
 
@@ -24020,7 +24094,7 @@ function syncTaskCycleEndTimeUI() {
     if (/\bzzz\b|zenless|ridu chronicles|hollow zero|new eridu/.test(lowAll)) gameHint = "zzz";
     else if (/\bhsr\b|honkai star rail|trailblaze|divergent universe/.test(lowAll)) gameHint = "hsr";
     else if (/\bhi3\b|honkai impact|superstring|memorial arena/.test(lowAll)) gameHint = "hi3";
-    else if (/\bwuthering|whimpering wastes|tower of adversity/.test(lowAll)) gameHint = "ww";
+    else if (/\bwuthering|whimpering wastes|tower of adversity|\bresonators?\b/.test(lowAll)) gameHint = "ww";
     else if (/\bpgr\b|punishing gray|punishing grey|pain cage|warzone/.test(lowAll)) gameHint = "pgr";
     else if (/\bendfield|arknights/.test(lowAll)) gameHint = "akendfield";
 
@@ -24094,62 +24168,186 @@ function syncTaskCycleEndTimeUI() {
     });
   }
 
+  function ocrTitleScore(label) {
+    const text = tidyOcrLine(label);
+    const letters = (text.match(/[A-Za-z]/g) || []).length;
+    let score = 0;
+    if (letters >= 4 && !isOcrBadgeLine(text)) score += 20 + Math.min(letters, 40);
+    if (/\b(ofthe|willbe)\b/i.test(text) || /[a-z]i[A-Z]/.test(text)) score -= 6;
+    if (/[^A-Za-z0-9'’&,.\-\s]/.test(text)) score -= 10;
+    text.split(/\s+/).forEach((word) => {
+      const core = word.replace(/[^A-Za-z']/g, "");
+      if (!core || core === "&") return;
+      if (core.length < 2) score -= 8;
+      else if (/^[a-z]/.test(core) && !OCR_TITLE_STOP[core.toLowerCase()]) score -= 8;
+    });
+    return score;
+  }
+
+  function ocrTimeScore(time) {
+    const t = String(time || "");
+    if (!t) return 0;
+    let score = 12;
+    if (/\dhr/.test(t)) score += 4;
+    const days = parseInt(t, 10);
+    if (days >= 7 && days <= 60) score += 2;
+    return score;
+  }
+
+  /** Longest run of title-case words, skipping badge chips and the countdown. */
+  function leadingTitleRun(text) {
+    let best = "";
+    let bestScore = 0;
+    String(text || "").split(/\n/).forEach((raw) => {
+      const words = tidyOcrLine(raw).split(/\s+/).filter(Boolean);
+      let cur = [];
+      const commit = () => {
+        const run = cur.join(" ").trim();
+        const score = ocrTitleScore(run);
+        if (score > bestScore) {
+          bestScore = score;
+          best = run;
+        }
+        cur = [];
+      };
+      words.forEach((word) => {
+        const core = word.replace(/[^A-Za-z0-9'’&]/g, "");
+        const lower = core.toLowerCase();
+        const stop = !!OCR_TITLE_STOP[lower];
+        const badge = !!OCR_BADGE_WORDS[lower] || /^\d{1,3}d$/i.test(core) || /^\d{1,2}h$/i.test(core);
+        const titleWord = core === "&" || (!badge && !stop && /^[A-Z0-9]/.test(core) && core.length >= 2);
+        const keep = titleWord || (stop && cur.length);
+        if (keep) cur.push(core === "&" ? "&" : core);
+        else commit();
+      });
+      commit();
+    });
+    return best;
+  }
+
+  function assembleOcrWordsText(words) {
+    const items = (words || []).map((word) => ({
+      text: String(word.text || "").trim(),
+      conf: Number(word.confidence) || 0,
+      x: word.bbox ? word.bbox.x0 : 0,
+      y: word.bbox ? (word.bbox.y0 + word.bbox.y1) / 2 : 0,
+      h: word.bbox ? Math.max(1, word.bbox.y1 - word.bbox.y0) : 1,
+    })).filter((word) => {
+      if (!word.text) return false;
+      if (/^\d{1,3}d$/i.test(word.text) || /^\d{1,2}h$/i.test(word.text)) return word.conf >= 30;
+      if (/^(of|the|a|an|&|and)$/i.test(word.text)) return word.conf >= 20;
+      return word.conf >= 45;
+    });
+    items.sort((a, b) => a.y - b.y || a.x - b.x);
+    const grouped = [];
+    items.forEach((word) => {
+      const last = grouped[grouped.length - 1];
+      if (!last || Math.abs(word.y - last.y) > Math.max(last.h, word.h) * 0.5) {
+        grouped.push({ y: word.y, h: word.h, words: [word] });
+        return;
+      }
+      last.words.push(word);
+      last.h = Math.max(last.h, word.h);
+    });
+    return grouped.map((line) => {
+      line.words.sort((a, b) => a.x - b.x);
+      return tidyOcrLine(line.words.map((word) => word.text).join(" "));
+    }).filter(Boolean).join("\n");
+  }
+
   /**
-   * Upscale + contrast boost; optional top-band crop for event timers in the header.
-   * Returns a canvas (Tesseract accepts canvas/HTMLImageElement).
+   * Upscale the banner. The mask pass keeps near-white outlined title text.
    */
   function preprocessScreenshotForOcr(img, opts) {
     const o = opts || {};
-    const topFraction = o.topFraction != null ? o.topFraction : 1;
     const scale = o.scale != null ? o.scale : 2;
     const srcW = img.naturalWidth || img.width;
     const srcH = img.naturalHeight || img.height;
-    const cropH = Math.max(1, Math.round(srcH * Math.min(1, Math.max(0.15, topFraction))));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(srcW * scale));
-    canvas.height = Math.max(1, Math.round(cropH * scale));
+    canvas.height = Math.max(1, Math.round(srcH * scale));
     const ctx = canvas.getContext("2d");
     if (!ctx) return canvas;
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(img, 0, 0, srcW, cropH, 0, 0, canvas.width, canvas.height);
-    try {
-      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const d = frame.data;
-      for (let i = 0; i < d.length; i += 4) {
-        // luma + contrast stretch toward black/white (helps white outlined UI text)
-        let y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        y = (y - 128) * 1.35 + 128;
-        y = y < 0 ? 0 : y > 255 ? 255 : y;
-        // Soft threshold: keep midtones but punch text
-        const v = y > 170 ? 255 : y < 90 ? 0 : y;
-        d[i] = d[i + 1] = d[i + 2] = v;
-      }
-      ctx.putImageData(frame, 0, 0);
-    } catch (_) {
-      // tainted canvas / security — return unprocessed draw
+    ctx.imageSmoothingEnabled = o.smooth !== false;
+    ctx.drawImage(img, 0, 0, srcW, srcH, 0, 0, canvas.width, canvas.height);
+    if (o.mask) {
+      try {
+        const cutoff = o.cutoff != null ? o.cutoff : 208;
+        const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = frame.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          const v = y >= cutoff ? 0 : 255;
+          d[i] = d[i + 1] = d[i + 2] = v;
+        }
+        ctx.putImageData(frame, 0, 0);
+      } catch (_) {}
     }
     return canvas;
   }
 
+  function textVariantsFromOcrResult(result) {
+    const data = result && result.data ? result.data : {};
+    const fromWords = assembleOcrWordsText(data.words || []);
+    const plain = String(data.text || "").trim();
+    return [fromWords, plain].filter(Boolean);
+  }
+
   async function recognizeScreenshotText(Tesseract, fileOrBlob) {
     const img = await loadImageElement(fileOrBlob);
-    const full = preprocessScreenshotForOcr(img, { topFraction: 1, scale: 2 });
-    const top = preprocessScreenshotForOcr(img, { topFraction: 0.42, scale: 2.5 });
+    const plain = preprocessScreenshotForOcr(img, { scale: 2 });
+    const mask = preprocessScreenshotForOcr(img, { scale: 2, mask: true });
     const worker = await Tesseract.createWorker("eng", 1, {
       logger: () => {},
     });
     try {
-      // Sparse UI text helps timers/titles on busy art
       if (worker.setParameters) {
         await worker.setParameters({
           tessedit_pageseg_mode: "11",
           preserve_interword_spaces: "1",
         });
       }
-      const [fullRes, topRes] = await Promise.all([worker.recognize(full), worker.recognize(top)]);
-      const a = (fullRes && fullRes.data && fullRes.data.text) || "";
-      const b = (topRes && topRes.data && topRes.data.text) || "";
-      return (a + "\n" + b).trim();
+      const sharp = preprocessScreenshotForOcr(img, { scale: 2, mask: true, cutoff: 220, smooth: false });
+      const plainRes = await worker.recognize(plain);
+      const maskRes = await worker.recognize(mask);
+      const sharpRes = await worker.recognize(sharp);
+      const plainVariants = textVariantsFromOcrResult(plainRes);
+      const variants = plainVariants.concat(textVariantsFromOcrResult(maskRes), textVariantsFromOcrResult(sharpRes));
+      let bestLabel = "";
+      let bestTitleScore = 0;
+      let bestDescription = "";
+      let bestTime = "";
+      let bestTimeScore = 0;
+      const considerTime = (text) => {
+        const time = parseExtracurricularScreenshotText(text).timeRemaining;
+        const score = ocrTimeScore(time);
+        if (score > bestTimeScore) {
+          bestTimeScore = score;
+          bestTime = time;
+        }
+      };
+      variants.forEach((text) => {
+        const parsed = parseExtracurricularScreenshotText(text);
+        [{ label: parsed.label, description: parsed.description }, { label: leadingTitleRun(text), description: "" }].forEach((candidate) => {
+          const score = ocrTitleScore(candidate.label);
+          if (score > bestTitleScore) {
+            bestTitleScore = score;
+            bestLabel = candidate.label;
+            bestDescription = candidate.description || "";
+          }
+        });
+      });
+      plainVariants.forEach(considerTime);
+      if (!bestTime) variants.forEach(considerTime);
+      const hintBlob = variants.join("\n").toLowerCase();
+      let hintLine = "";
+      if (/\bzzz\b|zenless|ridu chronicles|hollow zero|new eridu/.test(hintBlob)) hintLine = "event details zenless";
+      else if (/\bhsr\b|honkai star rail|trailblaze|divergent universe/.test(hintBlob)) hintLine = "event details honkai star rail";
+      else if (/\bhi3\b|honkai impact|superstring|memorial arena/.test(hintBlob)) hintLine = "event details honkai impact";
+      else if (/\bwuthering|whimpering wastes|tower of adversity|\bresonators?\b/.test(hintBlob)) hintLine = "event details resonators";
+      else if (/\bpgr\b|punishing gray|punishing grey|pain cage|warzone/.test(hintBlob)) hintLine = "event details punishing gray";
+      else if (/\bendfield|arknights/.test(hintBlob)) hintLine = "event details endfield";
+      return [bestLabel, bestTime, bestDescription, hintLine].filter(Boolean).join("\n");
     } finally {
       await worker.terminate();
     }
@@ -25402,7 +25600,7 @@ function syncTaskCycleEndTimeUI() {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "games-sub-tab" + (state.gamesSubTab === sub ? " active" : "");
-      btn.textContent = sub === "currency" ? "Currency" : sub.charAt(0).toUpperCase() + sub.slice(1);
+      btn.textContent = sub === "currency" ? "Data" : sub.charAt(0).toUpperCase() + sub.slice(1);
       btn.addEventListener("click", () => {
         state.gamesSubTab = sub;
         renderGames();
@@ -25561,6 +25759,29 @@ function syncTaskCycleEndTimeUI() {
       syncRow.appendChild(addCompletionBtn);
       content.appendChild(syncRow);
     } else if (state.gamesSubTab === "extracurricular") {
+      const extraActions = document.createElement("div");
+      extraActions.className = "games-extra-scan-actions";
+      const addExtraBtn = document.createElement("button");
+      addExtraBtn.type = "button";
+      addExtraBtn.className = "btn btn-add";
+      addExtraBtn.textContent = "+ Add task";
+      addExtraBtn.addEventListener("click", () => {
+        if (typeof openExtracurricularTaskModal === "function") {
+          openExtracurricularTaskModal(null, { gameId: selected.id });
+        }
+      });
+      const scanExtraBtn = document.createElement("button");
+      scanExtraBtn.type = "button";
+      scanExtraBtn.className = "btn btn-ghost";
+      scanExtraBtn.textContent = "Scan updates";
+      scanExtraBtn.title = "Scan this game's pages for new story and event tasks";
+      scanExtraBtn.addEventListener("click", () => {
+        if (typeof openExtraScanForGame === "function") openExtraScanForGame(selected.id);
+      });
+      extraActions.appendChild(addExtraBtn);
+      extraActions.appendChild(scanExtraBtn);
+      content.appendChild(extraActions);
+      if (typeof renderExtraScanReminders === "function") renderExtraScanReminders(content, selected.id);
       const gameTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === selected.id);
       const activeTasks = sortExtracurricularByDueDate(gameTasks.filter((t) => !isExtracurricularArchived(t)));
       const archivedTasks = gameTasks.filter((t) => isExtracurricularArchived(t));
@@ -25671,6 +25892,9 @@ function syncTaskCycleEndTimeUI() {
       calcWrap.appendChild(calcResult);
       calcRow.appendChild(calcWrap);
       content.appendChild(calcRow);
+      if (typeof appendExtraScanCurrencySettings === "function") {
+        appendExtraScanCurrencySettings(content, selected);
+      }
     } else if (state.gamesSubTab === "weeklies") {
       const list = selected.weeklies || [];
       const addBtn = document.createElement("button");
@@ -25797,6 +26021,7 @@ function syncTaskCycleEndTimeUI() {
     const container = document.getElementById("homeContainer");
     if (!container) return;
     container.innerHTML = "";
+    if (typeof renderExtraScanReminders === "function") renderExtraScanReminders(container);
     const games = getAllGames();
     const todayStr = getDateStr();
     const now = getSimulatedNow();
@@ -26022,6 +26247,432 @@ function syncTaskCycleEndTimeUI() {
   }
 
 
+  /**
+   * Manual Game8 scan for extracurricular story/event tasks.
+   * Does not remove or edit tasks that are already saved.
+   */
+  const EXTRA_SCAN_PRESET_URLS = {
+    hsr: [
+      "https://game8.co/games/Honkai-Star-Rail",
+      "https://game8.co/games/Honkai-Star-Rail/archives/408749",
+    ],
+    zzz: [
+      "https://game8.co/games/Zenless-Zone-Zero",
+      "https://game8.co/games/Zenless-Zone-Zero/archives/614559",
+    ],
+    ww: [
+      "https://game8.co/games/Wuthering-Waves",
+      "https://game8.co/games/Wuthering-Waves/archives/616859",
+      "https://game8.co/games/Wuthering-Waves/archives/453473",
+    ],
+    akendfield: [
+      "https://game8.co/games/Arknights-Endfield",
+      "https://game8.co/games/Arknights-Endfield/archives/618761",
+      "https://game8.co/games/Arknights-Endfield/archives/535443",
+    ],
+  };
+
+  function extraScanPresetUrls(game) {
+    const id = game && game.presetId ? String(game.presetId) : "";
+    return (EXTRA_SCAN_PRESET_URLS[id] || []).slice();
+  }
+
+  function ensureExtraScan(game) {
+    if (!game.extraScan || typeof game.extraScan !== "object") game.extraScan = {};
+    const scan = game.extraScan;
+    if (typeof scan.enabled !== "boolean") scan.enabled = false;
+    if (!Array.isArray(scan.urls)) scan.urls = [];
+    scan.urls = scan.urls.map((u) => String(u || "").trim()).filter(Boolean);
+    if (scan.enabled && !scan.urls.length) scan.urls = extraScanPresetUrls(game);
+    if (!scan.versionLabel) scan.versionLabel = "";
+    if (!scan.updateEndDate) scan.updateEndDate = null;
+    return scan;
+  }
+
+  function extraScanNorm(s) {
+    return String(s || "")
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function extraScanLabelsMatch(a, b) {
+    if (!a || !b) return false;
+    const core = (value) => String(value || "").replace(/^\d+\s+\d+\s+/, "").trim();
+    return core(a) === core(b);
+  }
+
+  function extraScanUpdateEnded(game) {
+    const scan = ensureExtraScan(game);
+    if (!scan.enabled || !scan.updateEndDate) return false;
+    return getDateStr() >= scan.updateEndDate;
+  }
+
+  function filterExtraScanProposals(game, tasks) {
+    const existing = (state.extracurricularTasks || [])
+      .filter((t) => t && t.gameId === game.id)
+      .map((t) => extraScanNorm(t.label));
+    const list = Array.isArray(tasks) ? tasks : [];
+    return list.filter((task) => {
+      const key = extraScanNorm(task.label);
+      return key && !existing.some((have) => extraScanLabelsMatch(have, key));
+    });
+  }
+
+  function renderExtraScanReminders(parent, onlyGameId) {
+    if (!parent) return;
+    getAllGames().forEach((game) => {
+      if (onlyGameId && game.id !== onlyGameId) return;
+      if (!extraScanUpdateEnded(game)) return;
+      const scan = ensureExtraScan(game);
+      const bar = document.createElement("div");
+      bar.className = "extra-scan-reminder";
+      const text = document.createElement("p");
+      text.className = "extra-scan-reminder-text";
+      const name = document.createElement("strong");
+      name.textContent = game.name || "Game";
+      text.appendChild(name);
+      text.appendChild(document.createTextNode(
+        " update" + (scan.versionLabel ? " " + scan.versionLabel : "") + " ended — scan for the next extracurricular tasks."
+      ));
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-ghost btn-sm";
+      btn.textContent = "Scan now";
+      btn.addEventListener("click", () => openExtraScanForGame(game.id));
+      bar.appendChild(text);
+      bar.appendChild(btn);
+      parent.appendChild(bar);
+    });
+  }
+
+  function closeExtraScanModal() {
+    const modal = document.getElementById("extraScanModal");
+    if (!modal) return;
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+  }
+
+  function openExtraScanModal(title, bodyNode, actions) {
+    const modal = document.getElementById("extraScanModal");
+    const titleEl = document.getElementById("extraScanModalTitle");
+    const body = document.getElementById("extraScanModalBody");
+    const actionRow = document.getElementById("extraScanModalActions");
+    if (!modal || !body || !actionRow) return;
+    if (titleEl) titleEl.textContent = title || "Update scan";
+    body.innerHTML = "";
+    if (bodyNode) body.appendChild(bodyNode);
+    actionRow.innerHTML = "";
+    (actions || []).forEach((action) => actionRow.appendChild(action));
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+  }
+
+  function extraScanStatusNode(message) {
+    const p = document.createElement("p");
+    p.className = "extra-scan-status";
+    p.textContent = message;
+    return p;
+  }
+
+  async function runExtraScan(game) {
+    const scan = ensureExtraScan(game);
+    if (!scan.enabled) {
+      openExtraScanModal(
+        game.name || "Update scan",
+        extraScanStatusNode("Turn on Auto task queue for this game under Games → Data, then scan again."),
+        [extraScanCloseButton()]
+      );
+      return;
+    }
+    const urls = scan.urls.filter(Boolean);
+    if (!urls.length) {
+      openExtraScanModal(
+        game.name || "Update scan",
+        extraScanStatusNode("Add at least one Game8 page under Games → Data."),
+        [extraScanCloseButton()]
+      );
+      return;
+    }
+    openExtraScanModal(
+      (game.name || "Game") + " — scanning",
+      extraScanStatusNode("Reading the pages you set for " + (game.name || "this game") + "…"),
+      []
+    );
+    let payload;
+    try {
+      const res = await fetch("/api/extra-scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls }),
+      });
+      payload = await res.json();
+      if (!res.ok || !payload || payload.ok === false) {
+        throw new Error((payload && payload.error) || "Scan failed");
+      }
+    } catch (err) {
+      const msg = err && err.message ? err.message : "Scan failed";
+      const hint = /failed to fetch|networkerror/i.test(msg)
+        ? " Start the tracker with npm run dev so the local scan server is running."
+        : "";
+      openExtraScanModal(
+        (game.name || "Game") + " — scan failed",
+        extraScanStatusNode(msg + hint),
+        [extraScanCloseButton()]
+      );
+      return;
+    }
+    scan.versionLabel = payload.version || scan.versionLabel || "";
+    scan.updateEndDate = payload.updateEndDate || null;
+    scan.releasedOn = payload.releasedOn || null;
+    scan.lastScanAt = new Date().toISOString();
+    save();
+    const proposals = filterExtraScanProposals(game, payload.tasks || []);
+    showExtraScanReview(game, proposals, payload);
+  }
+
+  function extraScanCloseButton() {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-ghost";
+    btn.textContent = "Close";
+    btn.addEventListener("click", closeExtraScanModal);
+    return btn;
+  }
+
+  function showExtraScanReview(game, proposals, payload) {
+    const wrap = document.createElement("div");
+    const intro = document.createElement("p");
+    intro.className = "extra-scan-status";
+    const ver = payload.version ? "Version " + payload.version : "This update";
+    intro.textContent = proposals.length
+      ? ver + " for " + (game.name || "this game") + ". Nothing already saved is removed. Pick what to add. Story tasks stay open (end TBD), start on the update date, and name the banner character in the description. Event tasks use the event name only. The description says login bonus, gameplay, spending, reward bonus, returnee, or character trial."
+      : ver + " did not find any new story or event tasks after your latest matching extracurricular task.";
+    wrap.appendChild(intro);
+    if (payload.updateEndDate) {
+      const endNote = document.createElement("p");
+      endNote.className = "extra-scan-status";
+      endNote.textContent = "Update window ends " + payload.updateEndDate + ". After that date, Home and Extracurricular show a reminder to scan again.";
+      wrap.appendChild(endNote);
+    }
+    if (payload.warnings && payload.warnings.length) {
+      const warn = document.createElement("p");
+      warn.className = "extra-scan-status";
+      warn.textContent = payload.warnings[0];
+      wrap.appendChild(warn);
+    }
+    const checks = [];
+    if (proposals.length) {
+      const list = document.createElement("div");
+      list.className = "extra-scan-list";
+      proposals.forEach((task, index) => {
+        const row = document.createElement("label");
+        row.className = "extra-scan-item";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.className = "fill-toggle";
+        box.checked = task.checked !== false;
+        checks.push({ box, task, index });
+        const copy = document.createElement("span");
+        copy.className = "extra-scan-item-copy";
+        const kind = document.createElement("span");
+        kind.className = "extra-scan-kind";
+        kind.textContent = task.kind === "STORY" ? "STORY" : "EVENT";
+        const title = document.createElement("span");
+        title.className = "extra-scan-item-title";
+        title.textContent = task.label || "Untitled";
+        const meta = document.createElement("span");
+        meta.className = "extra-scan-item-meta";
+        const endBit = task.endDateTBD || !task.endDate ? "end TBD" : "ends " + task.endDate;
+        meta.textContent = (task.startDate ? "starts " + task.startDate + " · " : "") + endBit + (task.description ? " · " + task.description : "");
+        copy.appendChild(kind);
+        copy.appendChild(title);
+        copy.appendChild(meta);
+        row.appendChild(box);
+        row.appendChild(copy);
+        list.appendChild(row);
+      });
+      wrap.appendChild(list);
+    }
+    const actions = [extraScanCloseButton()];
+    if (proposals.length) {
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "btn";
+      addBtn.textContent = "Add selected";
+      addBtn.addEventListener("click", () => {
+        const chosen = checks.filter((row) => row.box.checked).map((row) => row.task);
+        if (!chosen.length) return;
+        commitExtraScanTasks(game, chosen);
+        closeExtraScanModal();
+      });
+      actions.push(addBtn);
+    }
+    openExtraScanModal((game.name || "Game") + " — found tasks", wrap, actions);
+  }
+
+  function commitExtraScanTasks(game, tasks) {
+    state.extracurricularTasks = state.extracurricularTasks || [];
+    const stamp = Date.now();
+    tasks.forEach((task, i) => {
+      const endTbd = task.endDateTBD !== false || !task.endDate;
+      state.extracurricularTasks.push({
+        id: "ex_" + stamp + "_" + i,
+        label: task.label,
+        startDate: task.startDate || getDateStr(),
+        endDateTBD: endTbd,
+        endDate: endTbd ? null : task.endDate,
+        endTime: endTbd ? undefined : "23:59",
+        description: task.description || null,
+        gameId: game.id,
+        bannerOverlayText: task.kind === "STORY" ? "STORY" : "EVENT",
+        bannerOverlayTextSize: 3,
+      });
+    });
+    save();
+    renderActiveTab();
+  }
+
+  function openExtraScanForGame(gameId) {
+    const game = getGame(gameId);
+    if (!game) return;
+    runExtraScan(game);
+  }
+
+  function openExtraScanGamePicker() {
+    const games = getAllGames();
+    const wrap = document.createElement("div");
+    const intro = document.createElement("p");
+    intro.className = "extra-scan-status";
+    intro.textContent = "Pick a game. The scan only reads that game’s pages and only adds tasks you check.";
+    wrap.appendChild(intro);
+    if (!games.length) {
+      wrap.appendChild(extraScanStatusNode("Add a game first."));
+      openExtraScanModal("Scan updates", wrap, [extraScanCloseButton()]);
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "extra-scan-game-list";
+    games.forEach((game) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-ghost extra-scan-game-btn";
+      const scan = ensureExtraScan(game);
+      btn.textContent = (game.name || "Game") + (scan.enabled ? "" : " — queue off");
+      btn.addEventListener("click", () => openExtraScanForGame(game.id));
+      list.appendChild(btn);
+    });
+    wrap.appendChild(list);
+    openExtraScanModal("Scan updates", wrap, [extraScanCloseButton()]);
+  }
+
+  function appendExtraScanCurrencySettings(content, game) {
+    const scan = ensureExtraScan(game);
+    const row = document.createElement("div");
+    row.className = "endgame-currency-row endgame-currency-row-with-desc";
+    const label = document.createElement("label");
+    label.textContent = "Auto task queue";
+    const info = document.createElement("span");
+    info.className = "currency-info-icon";
+    info.title = "Off by default. When on, a manual scan can propose new story and event tasks from the pages below. Saved tasks are never removed.";
+    info.setAttribute("aria-label", "More information");
+    info.textContent = "ⓘ";
+    label.appendChild(info);
+    row.appendChild(label);
+    const inner = document.createElement("div");
+    inner.className = "endgame-currency-row-inner";
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.className = "settings-toggle";
+    toggle.checked = !!scan.enabled;
+    toggle.setAttribute("aria-label", "Auto task queue");
+    const desc = document.createElement("span");
+    desc.className = "endgame-currency-desc";
+    desc.textContent = "Manual scan only. On arms the update-ended reminder and lets Scan updates create new extracurricular tasks.";
+    inner.appendChild(toggle);
+    inner.appendChild(desc);
+    row.appendChild(inner);
+    content.appendChild(row);
+
+    const pagesWrap = document.createElement("div");
+    pagesWrap.className = "extra-scan-urls";
+    pagesWrap.hidden = !scan.enabled;
+
+    function paintUrls() {
+      pagesWrap.innerHTML = "";
+      const hint = document.createElement("p");
+      hint.className = "endgame-currency-desc extra-scan-url-hint";
+      hint.textContent = "Pages to compare. The scan combines them. Game roots also follow that page’s current version and events links.";
+      pagesWrap.appendChild(hint);
+      const list = scan.urls.length ? scan.urls.slice() : [""];
+      list.forEach((url, index) => {
+        const line = document.createElement("div");
+        line.className = "extra-scan-url-row";
+        const input = document.createElement("input");
+        input.type = "url";
+        input.placeholder = "https://game8.co/games/…";
+        input.value = url;
+        input.setAttribute("aria-label", "Scan page " + (index + 1));
+        input.addEventListener("change", () => {
+          scan.urls[index] = input.value.trim();
+          scan.urls = scan.urls.filter(Boolean);
+          save();
+          paintUrls();
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "btn btn-ghost btn-sm";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => {
+          scan.urls.splice(index, 1);
+          save();
+          paintUrls();
+        });
+        line.appendChild(input);
+        line.appendChild(remove);
+        pagesWrap.appendChild(line);
+      });
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "btn btn-ghost btn-sm";
+      add.textContent = "Add page";
+      add.addEventListener("click", () => {
+        scan.urls.push("");
+        save();
+        paintUrls();
+      });
+      pagesWrap.appendChild(add);
+    }
+
+    toggle.addEventListener("change", () => {
+      scan.enabled = toggle.checked;
+      if (scan.enabled && !scan.urls.filter(Boolean).length) {
+        scan.urls = extraScanPresetUrls(game);
+      }
+      save();
+      pagesWrap.hidden = !scan.enabled;
+      paintUrls();
+      renderActiveTab();
+    });
+    paintUrls();
+    content.appendChild(pagesWrap);
+  }
+
+  function initExtraScanModal() {
+    const modal = document.getElementById("extraScanModal");
+    const closeBtn = document.getElementById("extraScanModalClose");
+    if (!modal) return;
+    modal.addEventListener("click", (e) => {
+      if (e.target && e.target.getAttribute && e.target.getAttribute("data-close") === "true") closeExtraScanModal();
+    });
+    if (closeBtn) closeBtn.addEventListener("click", closeExtraScanModal);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && modal && !modal.hidden) closeExtraScanModal();
+    });
+  }
+
   function renderSharedChrome() {
     setDateLabels();
     renderTabs();
@@ -26178,6 +26829,7 @@ function syncTaskCycleEndTimeUI() {
     initClearTimeTrendsModal();
     initSettingsModal();
     initExtracurricularTaskModal();
+    if (typeof initExtraScanModal === "function") initExtraScanModal();
     document.addEventListener("keydown", (e) => {
       if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== "z") return;
       if (e.altKey || e.shiftKey) return;

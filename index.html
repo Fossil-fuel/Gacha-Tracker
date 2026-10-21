@@ -82,10 +82,10 @@
                 <li><strong>Dailies</strong> — Track daily tasks per game, with server reset times and optional currency tracking.</li>
                 <li><strong>Weeklies</strong> — Track weekly content with configurable reset schedules, or Manual Reset/Start when the game doesn't use a fixed timer.</li>
                 <li><strong>Endgame</strong> — Track endgame modes with partial credit and currency earned per completion. Same scheduled or Manual Reset options as weeklies.</li>
-                <li><strong>Extracurricular</strong> — Custom tasks for events, story, or other reminders with start/end dates. Optional screenshot OCR fill when creating a task.</li>
-                <li><strong>Attendance</strong> — Weekly view with completion pies (hover or click a pie for skipped tasks by game), History calendar, and Time Trends.</li>
+                <li><strong>Extracurricular</strong> — Custom tasks for events, story, or other reminders with start/end dates. Optional screenshot OCR fill when creating a task. The board can use 4 or 5 columns and order tasks by oldest or newest start date. Scan updates (also on a game’s Extracurricular tab) reads the pages you set and lets you check which new story and event tasks to add. Tasks you already saved stay as they are. With Auto task queue on, Home, Extracurricular, and that game’s Extracurricular tab remind you to scan again after the saved update end date.</li>
+                <li><strong>Attendance</strong> — Weekly view with completion pies (hover or click a pie for skipped tasks by game), History calendar, and Time Trends. The endgame task list in Time Trends includes every game.</li>
                 <li><strong>Data</strong> — Breakdown of currency earned across games and task types.</li>
-                <li><strong>Games</strong> — Add, edit, or remove games. Start from presets (with Official icons) or build custom. Edit game identity, completion history, Add Attempt (completed/skipped), Sync with Calendar, and manual Edit current / Reset from each card.</li>
+                <li><strong>Games</strong> — Add, edit, or remove games. Start from presets (with Official icons) or build custom. Edit game identity, completion history, Add Attempt (completed/skipped), Sync with Calendar, and Edit current / Reset from each card. Edit current also adjusts a scheduled endgame cycle without starting a new one. The Data sub-tab holds the currency name, currency per pull, and Auto task queue (off by default).</li>
               </ul>
             </section>
             <section class="about-section">
@@ -94,14 +94,16 @@
                 <li>Server regions (America, Asia, Europe) and DST handling for reset times</li>
                 <li>Manual Reset/Start — set start/due (or TBD), edit the live window, and log past completions without clobbering the current cycle</li>
                 <li>Add Attempt from Games (weeklies/endgame) — choose Completed (date/time) or Skipped; updates calendar, tallies, Data, and Time Trends. Dailies still use Add completion.</li>
+                <li>Completion History — Mark completed turns a skipped weekly or endgame cycle into a finish with date and time (and endgame currency). The cycle range stays. Changes apply on Save.</li>
                 <li>Unlock windows on weeklies/endgame (e.g. earliest day/time you can mark complete)</li>
                 <li>Fill-remaining: finishing a weekly/endgame marks the rest of that cycle complete in History</li>
                 <li>Stop cycles on a Games card when a mode retires, while keeping history</li>
-                <li>Stock Image picker for task banners; Official stock PFPs for game icons (presets apply theirs automatically)</li>
-                <li>My Images — personal banner/PFP library (stored once; tasks keep short refs; included in Export)</li>
+                <li>Stock Image picker for task banners; Official stock PFPs for game icons (presets apply theirs automatically). Stock Assets show how often each image is used.</li>
+                <li>My Images — personal banner and profile-picture library (stored once; tasks keep short refs; included in Export). Sort by custom order, name, most used, or newest, and group banners into categories. Each image shows how often it is used. Profile pictures stay in one list.</li>
+                <li>Keep full image — on by default when cropping a banner, so the full upload stays available to re-frame. Turn it off to trim unused edges to the Home, Games, and Board frames on save.</li>
                 <li>Game identity — name, subtitle, and icon shape/crop</li>
                 <li>Custom themes (presets and custom colors)</li>
-                <li>Local saves in IndexedDB with a slim daily localStorage backup; export/import JSON; Markdown/CSV summary; Settings → Data / Debug repair tools</li>
+                <li>Local saves in IndexedDB with a slim daily localStorage backup; export/import JSON; Markdown/CSV summary; Settings → Data / Debug repair tools. If browser storage is full, the app warns you and keeps an emergency local backup until the next successful save.</li>
                 <li>Undo last completion (Ctrl+Z) for complete/incomplete this session</li>
                 <li>Share card export (Draft 1 hero + icon; pick hero from that game’s task/extracurricular art, or None) and completion-time prompts for History / Trends</li>
                 <li>Game presets as JSON (`presets/`) — contribute a file without editing core JS</li>
@@ -1666,6 +1668,20 @@
           <button type="button" class="btn btn-ghost" id="deleteTaskCancel">Cancel</button>
           <button type="button" class="btn btn-danger" id="deleteTaskConfirm">Delete</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="extraScanModal" class="modal" hidden aria-hidden="true">
+    <div class="modal-backdrop" data-close="true"></div>
+    <div class="modal-dialog extra-scan-dialog" role="dialog" aria-modal="true" aria-labelledby="extraScanModalTitle">
+      <div class="modal-header">
+        <h3 id="extraScanModalTitle" class="modal-title">Update scan</h3>
+        <button type="button" class="icon-btn" id="extraScanModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="extraScanModalBody"></div>
+        <div class="modal-actions" id="extraScanModalActions"></div>
       </div>
     </div>
   </div>

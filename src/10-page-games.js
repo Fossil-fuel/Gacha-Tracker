@@ -592,7 +592,7 @@
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "games-sub-tab" + (state.gamesSubTab === sub ? " active" : "");
-      btn.textContent = sub === "currency" ? "Currency" : sub.charAt(0).toUpperCase() + sub.slice(1);
+      btn.textContent = sub === "currency" ? "Data" : sub.charAt(0).toUpperCase() + sub.slice(1);
       btn.addEventListener("click", () => {
         state.gamesSubTab = sub;
         renderGames();
@@ -751,6 +751,29 @@
       syncRow.appendChild(addCompletionBtn);
       content.appendChild(syncRow);
     } else if (state.gamesSubTab === "extracurricular") {
+      const extraActions = document.createElement("div");
+      extraActions.className = "games-extra-scan-actions";
+      const addExtraBtn = document.createElement("button");
+      addExtraBtn.type = "button";
+      addExtraBtn.className = "btn btn-add";
+      addExtraBtn.textContent = "+ Add task";
+      addExtraBtn.addEventListener("click", () => {
+        if (typeof openExtracurricularTaskModal === "function") {
+          openExtracurricularTaskModal(null, { gameId: selected.id });
+        }
+      });
+      const scanExtraBtn = document.createElement("button");
+      scanExtraBtn.type = "button";
+      scanExtraBtn.className = "btn btn-ghost";
+      scanExtraBtn.textContent = "Scan updates";
+      scanExtraBtn.title = "Scan this game's pages for new story and event tasks";
+      scanExtraBtn.addEventListener("click", () => {
+        if (typeof openExtraScanForGame === "function") openExtraScanForGame(selected.id);
+      });
+      extraActions.appendChild(addExtraBtn);
+      extraActions.appendChild(scanExtraBtn);
+      content.appendChild(extraActions);
+      if (typeof renderExtraScanReminders === "function") renderExtraScanReminders(content, selected.id);
       const gameTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === selected.id);
       const activeTasks = sortExtracurricularByDueDate(gameTasks.filter((t) => !isExtracurricularArchived(t)));
       const archivedTasks = gameTasks.filter((t) => isExtracurricularArchived(t));
@@ -861,6 +884,9 @@
       calcWrap.appendChild(calcResult);
       calcRow.appendChild(calcWrap);
       content.appendChild(calcRow);
+      if (typeof appendExtraScanCurrencySettings === "function") {
+        appendExtraScanCurrencySettings(content, selected);
+      }
     } else if (state.gamesSubTab === "weeklies") {
       const list = selected.weeklies || [];
       const addBtn = document.createElement("button");

@@ -2,6 +2,7 @@
     const container = document.getElementById("homeContainer");
     if (!container) return;
     container.innerHTML = "";
+    if (typeof renderExtraScanReminders === "function") renderExtraScanReminders(container);
     const games = getAllGames();
     const todayStr = getDateStr();
     const now = getSimulatedNow();
