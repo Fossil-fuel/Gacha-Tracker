@@ -3,7 +3,31 @@ A manual tracker for gacha games, built to help you manage daily, weekly, and en
 
 **Website:** [Gacha Tracker](https://fossil-fuel.github.io/Gacha-Tracker/)
 
+**Scan updates** (Extracurricular → Scan updates, and the same button on a game’s Extracurricular tab) only works on a local hub. The public site cannot read Game8 from your browser. Everything else on the public site works as usual.
+
 See [docs/CORE_LOGIC.md](docs/CORE_LOGIC.md) for the product/logic contract (what the site is for and which core functions must stay correct). See [docs/TASK_FLOW.md](docs/TASK_FLOW.md) for attempt/completion flow details.
+
+## Run a local hub
+
+Use this if you want Scan updates. The rest of the tracker does not need it.
+
+You need:
+
+- [Node.js 18 or newer](https://nodejs.org/). The installer includes npm. Use the LTS download for your system (Windows, macOS, or Linux).
+- A web browser.
+- Python is not required. No extra packages need to be installed.
+
+Steps:
+
+1. Download the project. On this GitHub page, choose **Code → Download ZIP**, then unzip it. Or, if you already have Git, run `git clone https://github.com/Fossil-fuel/Gacha-Tracker.git`.
+2. Open a terminal in that folder.
+   - Windows: open the unzipped folder, click the address bar, type `powershell`, and press Enter.
+   - macOS: right-click the folder and choose New Terminal at Folder, or open Terminal and `cd` into the folder.
+3. Run `npm run dev`.
+4. Open http://127.0.0.1:4000 in your browser.
+5. Leave that terminal window open while you use the tracker. Closing it stops the local hub, and Scan updates will stop working until you run `npm run dev` again.
+
+Your saves stay in the browser you have open. The public site and the local hub do not share data automatically. To bring your public-site tracker over, use Settings → Data → Export there, then Import on the local hub.
 
 **Dev:** `npm run dev` (http://localhost:4000), `node build.js` to rebuild `app.js` from `src/` + `presets/`, `npm test` for regression suites.
 

@@ -378,11 +378,15 @@
       scanBtn.type = "button";
       scanBtn.className = "btn btn-ghost";
       scanBtn.textContent = "Scan updates";
-      scanBtn.title = "Look up new story and event tasks for one game";
+      scanBtn.title = "Only works on a local hub. The public site cannot read Game8.";
+      const scanNote = document.createElement("span");
+      scanNote.className = "extra-scan-local-note";
+      scanNote.textContent = "Local hub only";
       scanBtn.addEventListener("click", () => {
         if (typeof openExtraScanGamePicker === "function") openExtraScanGamePicker();
       });
       headerRow.appendChild(scanBtn);
+      headerRow.appendChild(scanNote);
     } else {
       const tasksBtn = document.createElement("button");
       tasksBtn.type = "button";

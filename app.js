@@ -23558,11 +23558,15 @@ function syncTaskCycleEndTimeUI() {
       scanBtn.type = "button";
       scanBtn.className = "btn btn-ghost";
       scanBtn.textContent = "Scan updates";
-      scanBtn.title = "Look up new story and event tasks for one game";
+      scanBtn.title = "Only works on a local hub. The public site cannot read Game8.";
+      const scanNote = document.createElement("span");
+      scanNote.className = "extra-scan-local-note";
+      scanNote.textContent = "Local hub only";
       scanBtn.addEventListener("click", () => {
         if (typeof openExtraScanGamePicker === "function") openExtraScanGamePicker();
       });
       headerRow.appendChild(scanBtn);
+      headerRow.appendChild(scanNote);
     } else {
       const tasksBtn = document.createElement("button");
       tasksBtn.type = "button";
@@ -25774,12 +25778,16 @@ function syncTaskCycleEndTimeUI() {
       scanExtraBtn.type = "button";
       scanExtraBtn.className = "btn btn-ghost";
       scanExtraBtn.textContent = "Scan updates";
-      scanExtraBtn.title = "Scan this game's pages for new story and event tasks";
+      scanExtraBtn.title = "Only works on a local hub. The public site cannot read Game8.";
+      const scanExtraNote = document.createElement("span");
+      scanExtraNote.className = "extra-scan-local-note";
+      scanExtraNote.textContent = "Local hub only";
       scanExtraBtn.addEventListener("click", () => {
         if (typeof openExtraScanForGame === "function") openExtraScanForGame(selected.id);
       });
       extraActions.appendChild(addExtraBtn);
       extraActions.appendChild(scanExtraBtn);
+      extraActions.appendChild(scanExtraNote);
       content.appendChild(extraActions);
       if (typeof renderExtraScanReminders === "function") renderExtraScanReminders(content, selected.id);
       const gameTasks = (state.extracurricularTasks || []).filter((t) => t.gameId === selected.id);
@@ -26415,7 +26423,7 @@ function syncTaskCycleEndTimeUI() {
     } catch (err) {
       const msg = err && err.message ? err.message : "Scan failed";
       const hint = /failed to fetch|networkerror/i.test(msg)
-        ? " Start the tracker with npm run dev so the local scan server is running."
+        ? " Scan updates only works on a local hub. Install Node.js 18 or newer (npm is included; Python is not required), download this project from GitHub, and run npm run dev. Then open http://127.0.0.1:4000. The public site cannot read Game8."
         : "";
       openExtraScanModal(
         (game.name || "Game") + " — scan failed",
@@ -26546,7 +26554,7 @@ function syncTaskCycleEndTimeUI() {
     const wrap = document.createElement("div");
     const intro = document.createElement("p");
     intro.className = "extra-scan-status";
-    intro.textContent = "Pick a game. The scan only reads that game’s pages and only adds tasks you check.";
+    intro.textContent = "Local hub only. The public site cannot read Game8. Pick a game. The scan only reads that game’s pages and only adds tasks you check.";
     wrap.appendChild(intro);
     if (!games.length) {
       wrap.appendChild(extraScanStatusNode("Add a game first."));
@@ -26590,7 +26598,7 @@ function syncTaskCycleEndTimeUI() {
     toggle.setAttribute("aria-label", "Auto task queue");
     const desc = document.createElement("span");
     desc.className = "endgame-currency-desc";
-    desc.textContent = "Manual scan only. On arms the update-ended reminder and lets Scan updates create new extracurricular tasks.";
+    desc.textContent = "Manual scan only, and only on a local hub. The public site cannot read Game8. On arms the update-ended reminder and lets Scan updates create new extracurricular tasks.";
     inner.appendChild(toggle);
     inner.appendChild(desc);
     row.appendChild(inner);

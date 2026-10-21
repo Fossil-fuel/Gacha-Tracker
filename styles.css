@@ -7536,6 +7536,13 @@ input[type="time"]::-webkit-calendar-picker-indicator {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.85rem;
+  align-items: center;
+}
+
+.extra-scan-local-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  align-self: center;
 }
 
 .extra-scan-urls {

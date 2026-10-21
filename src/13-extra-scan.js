@@ -166,7 +166,7 @@
     } catch (err) {
       const msg = err && err.message ? err.message : "Scan failed";
       const hint = /failed to fetch|networkerror/i.test(msg)
-        ? " Start the tracker with npm run dev so the local scan server is running."
+        ? " Scan updates only works on a local hub. Install Node.js 18 or newer (npm is included; Python is not required), download this project from GitHub, and run npm run dev. Then open http://127.0.0.1:4000. The public site cannot read Game8."
         : "";
       openExtraScanModal(
         (game.name || "Game") + " — scan failed",
@@ -297,7 +297,7 @@
     const wrap = document.createElement("div");
     const intro = document.createElement("p");
     intro.className = "extra-scan-status";
-    intro.textContent = "Pick a game. The scan only reads that game’s pages and only adds tasks you check.";
+    intro.textContent = "Local hub only. The public site cannot read Game8. Pick a game. The scan only reads that game’s pages and only adds tasks you check.";
     wrap.appendChild(intro);
     if (!games.length) {
       wrap.appendChild(extraScanStatusNode("Add a game first."));
@@ -341,7 +341,7 @@
     toggle.setAttribute("aria-label", "Auto task queue");
     const desc = document.createElement("span");
     desc.className = "endgame-currency-desc";
-    desc.textContent = "Manual scan only. On arms the update-ended reminder and lets Scan updates create new extracurricular tasks.";
+    desc.textContent = "Manual scan only, and only on a local hub. The public site cannot read Game8. On arms the update-ended reminder and lets Scan updates create new extracurricular tasks.";
     inner.appendChild(toggle);
     inner.appendChild(desc);
     row.appendChild(inner);
