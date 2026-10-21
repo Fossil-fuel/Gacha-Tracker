@@ -48,6 +48,8 @@ module.exports = {
       "function getScheduledEndgameBoundsForMoment",
       "function getCalendarDatesInCycleRange",
       "function findCompletionDateInBounds",
+      "function completionTimestampTimezone",
+      "function completionTimestampMs",
       "function cleanupCycleBoundaryBleedMarks",
       "function getDailyPeriodDateStr",
       "function recordCompletion",

@@ -4608,15 +4608,39 @@
   }
 
   /**
-   * Parse a completion timestamp to local ms. Returns NaN when unusable.
+   * Timezone the stored finish clock belongs to: the game's reset timezone.
+   * dateStr is the game period day, so the hour must be read on that same clock.
+   * Falls back to the recording timezone when the game is gone.
+   */
+  function completionTimestampTimezone(t) {
+    const fallback = typeof getRecordingTimezone === "function" ? getRecordingTimezone() : "Etc/GMT+6";
+    if (!t || !t.gameId || typeof getGame !== "function") return fallback;
+    const game = getGame(t.gameId);
+    if (!game) return fallback;
+    let subject = game;
+    if (t.taskType === "weeklies" || t.taskType === "endgame") {
+      const list = t.taskType === "weeklies" ? game.weeklies : game.endgame;
+      const task = (list || []).find((x) => (x.id || x.label) === t.taskId);
+      if (task) subject = task;
+    }
+    const base = getResetTimezoneForGame(game);
+    return getTimezoneForTaskDst(subject, base);
+  }
+
+  /**
+   * Instant of a stored finish (dateStr + hour + minute) on the game reset clock.
+   * Returns NaN when unusable. Does not use the computer's local timezone.
    */
   function completionTimestampMs(t) {
     if (!t || !isValidDateStr(t.dateStr)) return NaN;
-    const h = Number.isFinite(t.hour) ? t.hour : 12;
-    const m = Number.isFinite(t.minute) ? t.minute : 0;
-    return new Date(
-      t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
-    ).getTime();
+    const h = Number.isFinite(t.hour) ? Math.max(0, Math.min(23, Math.round(t.hour))) : 12;
+    const m = Number.isFinite(t.minute) ? Math.max(0, Math.min(59, Math.round(t.minute))) : 0;
+    const y = parseInt(t.dateStr.slice(0, 4), 10);
+    const mo = parseInt(t.dateStr.slice(5, 7), 10) - 1;
+    const d = parseInt(t.dateStr.slice(8, 10), 10);
+    const tz = completionTimestampTimezone(t);
+    const instant = createDateInTimezone(y, mo, d, h, m, tz, getOffsetRefDateForTask(null, tz));
+    return instant.getTime();
   }
 
   /**
