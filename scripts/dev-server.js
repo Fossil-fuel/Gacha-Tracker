@@ -10,11 +10,12 @@ const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
-const { mergeGame8Pages, discoverFollowUps } = require("./extra-scan-parse");
+const { mergeGame8Pages, discoverFollowUps, discoverEventPages } = require("./extra-scan-parse");
 
 const PORT = Number(process.env.PORT) || 4000;
 const ROOT = path.join(__dirname, "..");
 const MAX_URLS = 6;
+const MAX_EVENT_PAGES = 24;
 const MAX_BYTES = 2 * 1024 * 1024;
 
 const MIME = {
@@ -96,6 +97,23 @@ function fetchText(url, redirectsLeft) {
   });
 }
 
+async function mapPool(items, limit, fn) {
+  const out = new Array(items.length);
+  let cursor = 0;
+  const workers = [];
+  const count = Math.min(limit, items.length);
+  for (let w = 0; w < count; w++) {
+    workers.push((async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        out[index] = await fn(items[index], index);
+      }
+    })());
+  }
+  await Promise.all(workers);
+  return out;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -156,14 +174,31 @@ async function handleScan(req, res) {
     sendJson(res, 502, { ok: false, error: warnings[0] || "Could not read those pages.", warnings });
     return;
   }
-  const merged = mergeGame8Pages(pages.map((p) => p.html));
+  const eventLinks = [];
+  pages.forEach((page) => {
+    discoverEventPages(page.html, page.url).forEach((link) => {
+      if (eventLinks.length >= MAX_EVENT_PAGES) return;
+      if (!eventLinks.some((have) => have.href === link.href)) eventLinks.push(link);
+    });
+  });
+  const eventPages = (await mapPool(eventLinks, 4, async (link) => {
+    try {
+      const html = await fetchText(link.href, 4);
+      return { title: link.title, html, url: link.href };
+    } catch (err) {
+      warnings.push((err && err.message) || String(err));
+      return null;
+    }
+  })).filter(Boolean);
+  const merged = mergeGame8Pages(pages.map((p) => p.html), eventPages);
   sendJson(res, 200, {
     ok: true,
     version: merged.version || "",
     releasedOn: merged.releasedOn || null,
     updateEndDate: merged.updateEndDate || null,
     tasks: merged.tasks || [],
-    sources: pages.map((p) => p.url),
+    sources: pages.map((p) => p.url).concat(eventPages.map((p) => p.url)),
+    eventPages: eventPages.length,
     warnings,
   });
 }

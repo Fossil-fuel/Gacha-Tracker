@@ -227,6 +227,7 @@ function parseGame8Html(html) {
   const characters = [];
   let lastEvent = null;
   let pendingRange = null;
+  let lastLabel = "";
   const fallbackYear = releasedOn ? Number(String(releasedOn).slice(0, 4)) : new Date().getUTCFullYear();
 
   function isChromeHeading(text) {
@@ -278,6 +279,7 @@ function parseGame8Html(html) {
   chunks.forEach((chunk) => {
     const text = chunk.text;
     if (chunk.tag === "h2" || chunk.tag === "h3" || chunk.tag === "th") {
+      lastLabel = text;
       const named = text.match(/(?:released on|releases on)\s+(.+)$/i);
       if (named) {
         const d = parseOneDate(named[1]);
@@ -320,7 +322,13 @@ function parseGame8Html(html) {
         } else {
           const range = parseRange(text, fallbackYear);
           const note = eventNoteFromCell(text);
-          if (range.start && lastEvent && !lastEvent.startDate) {
+          const endOnly = lastEvent && lastEvent.startDate && !lastEvent.endDate
+            && /^end\b/i.test(lastLabel) && range.start && !range.end;
+          if (endOnly) {
+            lastEvent.endDate = range.start;
+            lastEvent.endDateTBD = false;
+            if (note) lastEvent.note = note;
+          } else if (range.start && lastEvent && !lastEvent.startDate) {
             lastEvent.startDate = range.start;
             if (range.end) {
               lastEvent.endDate = range.end;
@@ -585,9 +593,208 @@ function storyTask(verPrefix, title, character, releasedOn) {
   };
 }
 
-function mergeGame8Pages(htmlList) {
+function eventSectionMode(text, pageVersion) {
+  const heading = String(text || "").replace(/\s+/g, " ").trim();
+  if (!heading) return null;
+  if (/past events|permanent events|beginner event|related guides|tips and tricks|event guides|redeem code/i.test(heading)) return "off";
+  if (/\b(quests?|missions?|banners?|characters?|agents?|resonators?|operators?|w-engines?|outfits?)\b/i.test(heading) && !/event/i.test(heading)) return "off";
+  if (/(ongoing|upcoming|current|featured)\b/i.test(heading) && /event/i.test(heading)) return "on";
+  if (/list of all (upcoming|ongoing|current)/i.test(heading)) return "on";
+  const ver = heading.match(/\b(\d+\.\d+)\b/);
+  if (ver && /events?\b/i.test(heading) && !/guide|banner|quest|mission|calendar/i.test(heading)) {
+    if (!pageVersion || cmpVer(ver[1], pageVersion) >= 0) return "on";
+    return "off";
+  }
+  return null;
+}
+
+function isEventColumnHeader(text) {
+  return /^(events?|duration|start|end|event description|name|date|dates)$/i.test(String(text || "").trim());
+}
+
+/**
+ * Links to individual event articles under ongoing, upcoming, or current-version
+ * event sections. Past and permanent sections are skipped.
+ */
+function discoverEventPages(html, pageUrl) {
+  let base;
+  try {
+    base = new URL(pageUrl);
+  } catch (_) {
+    return [];
+  }
+  const gamePath = (base.pathname.match(/\/games\/[^/]+/) || [""])[0];
+  if (!gamePath) return [];
+  const pageVersion = parseGame8Html(html).version || "";
+  const article = articleHtml(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "");
+  const tagRe = /<(h2|h3|th|a)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
+  const out = [];
+  const seen = new Set();
+  let mode = "off";
+  let m;
+  while ((m = tagRe.exec(article))) {
+    const tag = m[1].toLowerCase();
+    const text = cleanText(m[3]).replace(/\s+(NEW|UP)$/i, "").trim();
+    if (tag === "h2" || tag === "h3") {
+      mode = eventSectionMode(text, pageVersion) || "off";
+      continue;
+    }
+    if (tag === "th") {
+      if (isEventColumnHeader(text)) continue;
+      const next = eventSectionMode(text, pageVersion);
+      if (next) mode = next;
+      else mode = "off";
+      continue;
+    }
+    if (mode !== "on" || !text || !headingIsTask(text, "event")) continue;
+    const hrefAttr = String(m[2] || "").match(/href\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
+    const rawHref = hrefAttr && (hrefAttr[1] || hrefAttr[2] || hrefAttr[3]);
+    if (!rawHref) continue;
+    let href;
+    try {
+      href = new URL(rawHref, pageUrl).href;
+    } catch (_) {
+      continue;
+    }
+    let target;
+    try {
+      target = new URL(href);
+    } catch (_) {
+      continue;
+    }
+    if (!/(^|\.)game8\.co$/i.test(target.hostname)) continue;
+    if (!target.pathname.startsWith(gamePath + "/archives/")) continue;
+    if (seen.has(href)) continue;
+    seen.add(href);
+    out.push({ title: text, href });
+    if (out.length >= 24) break;
+  }
+  return out;
+}
+
+/**
+ * Event Start / Event End rows on one event's article.
+ */
+function parseEventDetail(html) {
+  const article = articleHtml(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "");
+  const pairRe = /<th\b[^>]*>(?:\s*<[^>]+>\s*)*(event\s+start|start\s+date|starts|start|event\s+end|end\s+date|ends|end|event\s+duration|duration|event\s+period|period)(?:\s*<[^>]+>\s*)*<\/th>\s*<td\b[^>]*>([\s\S]*?)<\/td>/gi;
+  let startDate = null;
+  let endDate = null;
+  let sawEnd = false;
+  let m;
+  while ((m = pairRe.exec(article))) {
+    const label = m[1].toLowerCase().replace(/\s+/g, " ");
+    const value = cleanText(m[2]);
+    const kind = /start/.test(label) ? "start" : (/duration|period/.test(label) ? "duration" : "end");
+    if (kind === "start" && !startDate) {
+      const range = parseRange(value);
+      startDate = range.start || parseOneDate(value);
+      if (!endDate && range.end) endDate = range.end;
+    } else if (kind === "end" && !sawEnd) {
+      sawEnd = true;
+      if (/permanent|tbd|tba|to be|end of (the )?(version|patch)|until further/i.test(value)) {
+        endDate = null;
+      } else {
+        endDate = parseOneDate(value) || parseRange(value).end || parseRange(value).start;
+      }
+    } else if (kind === "duration" && !startDate && !endDate) {
+      const range = parseRange(value);
+      if (range.start) startDate = range.start;
+      if (range.end) endDate = range.end;
+    }
+  }
+  return { startDate, endDate, sawEnd, endDateTBD: !endDate };
+}
+
+function applyEventPageDates(built, eventPages, today) {
+  const result = {
+    version: built.version || "",
+    releasedOn: built.releasedOn || null,
+    updateEndDate: built.updateEndDate || null,
+    tasks: (built.tasks || []).map((task) => ({ ...task })),
+  };
+  const todayIso = today || new Date().toISOString().slice(0, 10);
+  const details = [];
+  (eventPages || []).forEach((entry) => {
+    if (!entry || !entry.title) return;
+    const dates = entry.html ? parseEventDetail(entry.html) : entry;
+    if (!dates.startDate && !dates.endDate && !dates.sawEnd) return;
+    details.push({
+      title: eventLabel(entry.title),
+      startDate: dates.startDate || null,
+      endDate: dates.endDate || null,
+      sawEnd: !!dates.sawEnd,
+    });
+  });
+  const byLabel = new Map();
+  details.forEach((detail) => {
+    const key = normLabel(detail.title);
+    if (!key) return;
+    const prev = byLabel.get(key);
+    if (!prev) {
+      byLabel.set(key, detail);
+      return;
+    }
+    const prevEnd = prev.endDate || "";
+    const nextEnd = detail.endDate || "";
+    if (nextEnd > prevEnd || (!prev.startDate && detail.startDate && nextEnd === prevEnd)) byLabel.set(key, detail);
+  });
+  const seen = new Set();
+  result.tasks.forEach((task) => {
+    if (task.kind !== "EVENT") return;
+    const detail = byLabel.get(normLabel(eventLabel(task.label))) || byLabel.get(normLabel(task.label));
+    if (!detail) return;
+    seen.add(normLabel(detail.title));
+    if (detail.startDate) task.startDate = detail.startDate;
+    if (detail.endDate) {
+      task.endDate = detail.endDate;
+      task.endDateTBD = false;
+    } else if (detail.sawEnd) {
+      task.endDate = null;
+      task.endDateTBD = true;
+    }
+  });
+  byLabel.forEach((detail) => {
+    const key = normLabel(detail.title);
+    if (!key || seen.has(key)) return;
+    if (!headingIsTask(detail.title, "event")) return;
+    seen.add(key);
+    result.tasks.push({
+      kind: "EVENT",
+      label: detail.title,
+      startDate: detail.startDate,
+      endDate: detail.endDate,
+      endDateTBD: !detail.endDate,
+      description: eventDescription(detail.title, ""),
+      checked: !SKIP_EVENT.test(detail.title),
+    });
+  });
+  result.tasks.forEach((task) => {
+    if (task.kind === "EVENT" && task.endDate && task.endDate < todayIso) task.checked = false;
+  });
+  result.tasks.forEach((task) => {
+    if (task.kind === "EVENT" && task.endDate && (!result.updateEndDate || task.endDate > result.updateEndDate)) {
+      result.updateEndDate = task.endDate;
+    }
+  });
+  return result;
+}
+
+function mergeGame8Pages(htmlList, eventPages) {
   const parsed = (htmlList || []).map((html) => parseGame8Html(html));
-  return buildTasksFromParsed(parsed);
+  const fromTables = parsed.flatMap((page) => page.events || [])
+    .filter((ev) => ev.startDate || ev.endDate)
+    .map((ev) => ({
+      title: ev.title,
+      startDate: ev.startDate || null,
+      endDate: ev.endDate || null,
+      sawEnd: !!ev.endDate,
+    }));
+  return applyEventPageDates(buildTasksFromParsed(parsed), fromTables.concat(eventPages || []));
 }
 
 function discoverFollowUps(html, pageUrl) {
@@ -606,12 +813,12 @@ function discoverFollowUps(html, pageUrl) {
   let rm;
   while ((rm = relRe.exec(plain))) released.add(rm[1]);
   const links = [];
-  const re = /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const re = /<a\b[^>]*href\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi;
   let m;
   while ((m = re.exec(html))) {
-    const text = cleanText(m[2]);
+    const text = cleanText(m[4]);
     if (!text || text.length > 90) continue;
-    let href = m[1];
+    let href = m[1] || m[2] || m[3];
     try {
       href = new URL(href, pageUrl).href;
     } catch (_) {
@@ -636,5 +843,8 @@ module.exports = {
   parseGame8Html,
   mergeGame8Pages,
   discoverFollowUps,
+  discoverEventPages,
+  parseEventDetail,
+  applyEventPageDates,
   normLabel,
 };

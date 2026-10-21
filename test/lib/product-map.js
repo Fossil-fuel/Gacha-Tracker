@@ -43,6 +43,7 @@ const MODALS = [
   "stockBannerPickerModal",
   "myImagesCategoriesModal",
   "manualResetModal",
+  "extraScanModal",
   "manualCompletionModal",
   "colorWheelModal",
   "savePresetModal",

@@ -26406,7 +26406,7 @@ function syncTaskCycleEndTimeUI() {
     }
     openExtraScanModal(
       (game.name || "Game") + " — scanning",
-      extraScanStatusNode("Reading the pages you set for " + (game.name || "this game") + "…"),
+      extraScanStatusNode("Reading each event page for " + (game.name || "this game") + " to get start and end dates…"),
       []
     );
     let payload;
@@ -26456,7 +26456,7 @@ function syncTaskCycleEndTimeUI() {
     intro.className = "extra-scan-status";
     const ver = payload.version ? "Version " + payload.version : "This update";
     intro.textContent = proposals.length
-      ? ver + " for " + (game.name || "this game") + ". Nothing already saved is removed. Pick what to add. Story tasks stay open (end TBD), start on the update date, and name the banner character in the description. Event tasks use the event name only. The description says login bonus, gameplay, spending, reward bonus, returnee, or character trial."
+      ? ver + " for " + (game.name || "this game") + ". Nothing already saved is removed. Pick what to add. Story tasks stay open (end TBD), start on the update date, and name the banner character in the description. Event tasks use the event name only. Start and end dates are read from each event's own page. The description says login bonus, gameplay, spending, reward bonus, returnee, or character trial."
       : ver + " did not find any new story or event tasks after your latest matching extracurricular task.";
     wrap.appendChild(intro);
     if (payload.updateEndDate) {

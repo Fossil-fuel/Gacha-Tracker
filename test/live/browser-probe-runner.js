@@ -301,6 +301,7 @@
           "settingsModal",
           "stockBannerPickerModal",
           "manualResetModal",
+          "extraScanModal",
           "manualCompletionModal",
           "colorWheelModal",
           "savePresetModal",
