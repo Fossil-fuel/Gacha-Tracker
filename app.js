@@ -2998,11 +2998,7 @@
       if (!t || t.taskType !== type || t.gameId !== gameId || t.taskId !== taskId) return true;
       if (!isValidDateStr(t.dateStr)) return true;
       if (owned.includes(t.dateStr)) return false;
-      const th = Number.isFinite(t.hour) ? t.hour : 12;
-      const tm = Number.isFinite(t.minute) ? t.minute : 0;
-      const ms = new Date(
-        t.dateStr + "T" + String(th).padStart(2, "0") + ":" + String(tm).padStart(2, "0") + ":00"
-      ).getTime();
+      const ms = completionTimestampMs(t);
       if (!Number.isFinite(ms)) return true;
       return !(ms >= startMs && ms < endMs);
     });
@@ -3363,12 +3359,9 @@
         if (!t || t.taskType !== type || t.gameId !== gameId) return true;
         if (type !== "dailies" && (t.taskId || t.taskLabel) !== taskId && t.taskId !== taskId) return true;
         if (!isValidDateStr(t.dateStr)) return true;
-        const h = Number.isFinite(t.hour) ? t.hour : 12;
-        const m = Number.isFinite(t.minute) ? t.minute : 0;
-        const ms = new Date(
-          t.dateStr + "T" + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":00"
-        ).getTime();
-        // Time-window match: catches end-afternoon stamps on the shared boundary day.
+        const ms = completionTimestampMs(t);
+        // Time-window match: catches end-afternoon stamps on the shared boundary day,
+        // and overnight finish-now stamps whose atMs is in-range while dateStr is period day.
         if (Number.isFinite(ms) && ms >= startMs && ms < endMs) return false;
         if (dateSet.has(t.dateStr)) return false;
         return true;
@@ -4628,11 +4621,15 @@
   }
 
   /**
-   * Instant of a stored finish (dateStr + hour + minute) on the game reset clock.
-   * Returns NaN when unusable. Does not use the computer's local timezone.
+   * Instant of a stored finish on the game reset clock.
+   * Prefers atMs (real finish-now instant) when present so a period-day stamp
+   * (still "Tuesday" at 3am Wednesday) is not paired with a pre-reset wall hour.
+   * Otherwise dateStr + hour + minute. Does not use the computer's local timezone.
    */
   function completionTimestampMs(t) {
-    if (!t || !isValidDateStr(t.dateStr)) return NaN;
+    if (!t) return NaN;
+    if (Number.isFinite(t.atMs)) return t.atMs;
+    if (!isValidDateStr(t.dateStr)) return NaN;
     const h = Number.isFinite(t.hour) ? Math.max(0, Math.min(23, Math.round(t.hour))) : 12;
     const m = Number.isFinite(t.minute) ? Math.max(0, Math.min(59, Math.round(t.minute))) : 0;
     const y = parseInt(t.dateStr.slice(0, 4), 10);
@@ -5680,9 +5677,8 @@
         if (t.skipped) {
           pct = 0;
         } else {
-          const completionMs = new Date(
-            t.dateStr + "T" + String(t.hour).padStart(2, "0") + ":00:00"
-          ).getTime();
+          const completionMs = completionTimestampMs(t);
+          if (!Number.isFinite(completionMs)) return;
           const cycleLen = cycleEndMs - cycleStartMs;
           if (cycleLen <= 0) return;
           pct = ((cycleEndMs - completionMs) / cycleLen) * 100;
@@ -6841,9 +6837,43 @@
     if (!state.completionTimestamps) state.completionTimestamps = [];
     const o = opts || {};
     const now = getSimulatedNow();
-    const tz = getAppTimezone ? getAppTimezone() : Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let gameId = key,
+      taskId = "",
+      taskLabel = "",
+      task = null,
+      game = null;
+    if (type !== "dailies") {
+      const dot = key.indexOf(".");
+      gameId = dot >= 0 ? key.slice(0, dot) : key;
+      taskId = dot >= 0 ? key.slice(dot + 1) : "";
+      if (type === "extracurricular") {
+        task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
+        taskLabel = task ? task.label || taskId : taskId;
+        if (task && task.gameId) gameId = task.gameId;
+        game = typeof getGame === "function" ? getGame(gameId) : null;
+      } else {
+        game = typeof getGame === "function" ? getGame(gameId) : null;
+        task =
+          type === "weeklies"
+            ? (game?.weeklies || []).find((t) => (t.id || t.label) === taskId)
+            : (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
+        taskLabel = task ? task.label || taskId : taskId;
+      }
+    } else {
+      game = typeof getGame === "function" ? getGame(gameId) : null;
+      taskLabel = game ? game.name : gameId;
+    }
+    // History / Attendance finish day stays on the game period day (still Tuesday at
+    // 3am Wednesday). Finish-now also stores atMs = real instant so proof is not
+    // "period Monday + wall hour 1" inventing a pre-reset time.
+    const hasExplicitHour = Number.isFinite(Number(o.hour));
+    const stampTz = game
+      ? getTimezoneForTaskDst(task || game, getResetTimezoneForGame(game))
+      : typeof getAppTimezone === "function"
+        ? getAppTimezone()
+        : Intl.DateTimeFormat().resolvedOptions().timeZone;
     const parts = getDatePartsInTimezone
-      ? getDatePartsInTimezone(now, tz)
+      ? getDatePartsInTimezone(now, stampTz)
       : {
           year: now.getFullYear(),
           month: now.getMonth(),
@@ -6852,14 +6882,14 @@
           hour: now.getHours(),
           minute: now.getMinutes(),
         };
-    const dateStr = isValidDateStr(o.dateStr)
-      ? o.dateStr
-      : String(parts.year) +
-        "-" +
-        String(parts.month + 1).padStart(2, "0") +
-        "-" +
-        String(parts.day).padStart(2, "0");
-    const hour = Number.isFinite(Number(o.hour))
+    const nowDateStr =
+      String(parts.year) +
+      "-" +
+      String(parts.month + 1).padStart(2, "0") +
+      "-" +
+      String(parts.day).padStart(2, "0");
+    const dateStr = isValidDateStr(o.dateStr) ? o.dateStr : nowDateStr;
+    const hour = hasExplicitHour
       ? Math.max(0, Math.min(23, Math.round(Number(o.hour))))
       : parts.hour;
     const minute = Number.isFinite(Number(o.minute))
@@ -6867,28 +6897,14 @@
       : Number.isFinite(parts.minute)
         ? parts.minute
         : 0;
-    let gameId = key,
-      taskId = "",
-      taskLabel = "";
-    if (type !== "dailies") {
-      const dot = key.indexOf(".");
-      gameId = dot >= 0 ? key.slice(0, dot) : key;
-      taskId = dot >= 0 ? key.slice(dot + 1) : "";
-      if (type === "extracurricular") {
-        const task = (state.extracurricularTasks || []).find((t) => t.id === taskId);
-        taskLabel = task ? task.label || taskId : taskId;
-        if (task && task.gameId) gameId = task.gameId;
-      } else {
-        const game = getGame(gameId);
-        const task =
-          type === "weeklies"
-            ? (game?.weeklies || []).find((t) => (t.id || t.label) === taskId)
-            : (game?.endgame || []).find((t) => (t.id || t.label) === taskId);
-        taskLabel = task ? task.label || taskId : taskId;
-      }
-    } else {
-      const game = getGame(gameId);
-      taskLabel = game ? game.name : gameId;
+    let atMs = NaN;
+    if (!hasExplicitHour) {
+      atMs = now.getTime();
+    } else if (isValidDateStr(dateStr)) {
+      const y = parseInt(dateStr.slice(0, 4), 10);
+      const mo = parseInt(dateStr.slice(5, 7), 10) - 1;
+      const d = parseInt(dateStr.slice(8, 10), 10);
+      atMs = createDateInTimezone(y, mo, d, hour, minute, stampTz, getOffsetRefDateForTask(null, stampTz)).getTime();
     }
     const already = state.completionTimestamps.some(
       (t) =>
@@ -6898,7 +6914,7 @@
         (type === "dailies" || t.taskId === taskId)
     );
     if (already) return;
-    state.completionTimestamps.push({
+    const row = {
       dateStr,
       hour,
       minute,
@@ -6906,7 +6922,9 @@
       taskType: type,
       taskId,
       taskLabel,
-    });
+    };
+    if (Number.isFinite(atMs)) row.atMs = atMs;
+    state.completionTimestamps.push(row);
   }
 
   /**
@@ -7444,11 +7462,9 @@
   function unrecordCompletion(dateStr, type, key, skipTimestamp) {
     let datesToRemove;
     if (type === "weeklies" || type === "endgame") {
-      // Clear the cycle containing dateStr (not only the live "current" cycle).
-      const completionDate = getCompletionDateInCycle(key, type, dateStr);
-      datesToRemove = completionDate
-        ? getRemainingDatesInPeriod(type, key, completionDate)
-        : getAllDatesInPeriod(type, key, dateStr);
+      // Clear every owned day in the cycle containing dateStr (not only fill-from-finish
+      // forward), so incomplete drops the period-day finish and all carried fill marks.
+      datesToRemove = getAllDatesInPeriod(type, key, dateStr);
     } else {
       datesToRemove = [dateStr];
     }

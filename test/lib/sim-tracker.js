@@ -904,7 +904,7 @@ function markIncomplete(state, type, key, dateStr) {
   if (type !== "dailies") {
     const task = findTask(game, type, key);
     if (!task) return;
-    // Clear from earliest marked day in cycle (or provided date) through end
+    // Mirror app unrecordCompletion: clear every owned day in the cycle containing dateStr.
     let cycle = math.getDatesInCycle(task, dateStr);
     if (task.manualReset) {
       let bounds = getManualPeriodBoundsForDateStr(task, type, dateStr);
@@ -917,17 +917,7 @@ function markIncomplete(state, type, key, dateStr) {
         );
       }
     }
-    let first = null;
-    for (const ds of cycle) {
-      if ((state.completionByDate[ds] && state.completionByDate[ds][type] || []).includes(key)) {
-        first = ds;
-        break;
-      }
-    }
-    if (!first) first = dateStr;
-    dates = task.manualReset && cycle.length
-      ? cycle.filter((ds) => ds >= first)
-      : math.getRemainingDatesFrom(task, first);
+    dates = cycle.length ? cycle.slice() : [dateStr];
   }
   dates.forEach((ds) => {
     const day = state.completionByDate[ds];

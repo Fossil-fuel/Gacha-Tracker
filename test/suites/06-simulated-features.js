@@ -283,6 +283,53 @@ module.exports = {
     );
 
     checks.push(
+      check("Incomplete: whole cycle clears, sibling weekly and later cycle stay", () => {
+        const state = sim.createFixture({ today: "2026-08-03" });
+        const game = sim.getGame(state);
+        const a = sim.taskKey(game, game.weeklies[0]);
+        const bTask = game.weeklies.find((t) => t.id === "currency") || game.weeklies[1];
+        const b = sim.taskKey(game, bTask);
+        // Older + newer week for A; B completed in the older week only.
+        sim.markComplete(state, "weeklies", a, "2026-07-22", 12);
+        sim.markComplete(state, "weeklies", a, "2026-07-29", 15);
+        sim.markComplete(state, "weeklies", b, "2026-07-22", 12);
+        // Plant a pre-finish orphan mark in A's older week (before 7/22 finish).
+        if (!state.completionByDate["2026-07-21"]) {
+          state.completionByDate["2026-07-21"] = { dailies: [], weeklies: [], endgame: [] };
+        }
+        if (!(state.completionByDate["2026-07-21"].weeklies || []).includes(a)) {
+          state.completionByDate["2026-07-21"].weeklies.push(a);
+        }
+
+        sim.markIncomplete(state, "weeklies", a, "2026-07-22");
+
+        assert.equal(
+          sim.historyMarksInMonth(state, "weeklies", a, 2026, 7).filter((ds) => ds >= "2026-07-21" && ds < "2026-07-28").length,
+          0,
+          "older week for A fully cleared including pre-finish orphan"
+        );
+        assert.ok(
+          sim.historyMarksInMonth(state, "weeklies", a, 2026, 7).some((ds) => ds >= "2026-07-29"),
+          "newer week for A still marked"
+        );
+        assert.ok(
+          sim.historyMarksInMonth(state, "weeklies", b, 2026, 7).length > 0,
+          "sibling weekly B untouched"
+        );
+        assert.equal(
+          state.completionTimestamps.filter((t) => t.taskType === "weeklies" && t.taskId === "weekly_a").length,
+          1,
+          "only the older-cycle stamp for A removed"
+        );
+        assert.equal(
+          state.completionTimestamps.filter((t) => t.taskType === "weeklies" && t.taskId === "currency").length,
+          1,
+          "sibling B stamp kept"
+        );
+      })
+    );
+
+    checks.push(
       check("Undo: restores calendar, timestamp, and tallies after complete", () => {
         const state = sim.createFixture({ today: "2026-07-31" });
         const game = sim.getGame(state);

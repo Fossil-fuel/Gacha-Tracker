@@ -218,7 +218,9 @@ function timestampProvesCycleCompletion(t, bounds, firstOwned) {
   const endMs = bounds.cycleEnd.getTime();
   const h = Number.isFinite(t.hour) ? t.hour : 12;
   const m = Number.isFinite(t.minute) ? t.minute : 0;
-  const ms = new Date(t.dateStr + "T" + pad2(h) + ":" + pad2(m) + ":00").getTime();
+  const ms = Number.isFinite(t.atMs)
+    ? t.atMs
+    : new Date(t.dateStr + "T" + pad2(h) + ":" + pad2(m) + ":00").getTime();
   if (!Number.isFinite(ms) || ms < startMs || ms >= endMs) return false;
   const adjacent = bounds.nextCycleStart instanceof Date && bounds.nextCycleStart.getTime() === endMs;
   const startDateStr = formatLocalDate(bounds.cycleStart);

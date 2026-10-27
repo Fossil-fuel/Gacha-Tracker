@@ -155,6 +155,107 @@ module.exports = {
     );
 
     checks.push(
+      check("Simulation: overnight before next daily reset — period day kept; atMs proves", () => {
+        // Monday 4am weekly reset. Tuesday 1:30am is still Monday's period day. History
+        // stays Monday; proof needs the real instant (atMs), not Monday+1:30.
+        const tueBefore4 = new Date(2026, 7, 4, 1, 30, 0);
+        const state = sim.createFixture({ today: "2026-08-04" });
+        const game = sim.getGame(state);
+        const key = sim.taskKey(game, game.weeklies[0]);
+        const membership = math.getCycleMembershipMoment(tueBefore4, 4, 0);
+        const bounds = math.getCycleBoundsForMoment(game.weeklies[0], membership);
+        assert.ok(bounds, "in the Monday-started week");
+        const startYmd =
+          bounds.cycleStart.getFullYear() +
+          "-" +
+          String(bounds.cycleStart.getMonth() + 1).padStart(2, "0") +
+          "-" +
+          String(bounds.cycleStart.getDate()).padStart(2, "0");
+        assert.equal(startYmd, "2026-08-03", "week started Monday");
+
+        const bad = { dateStr: "2026-08-03", hour: 1, minute: 30 };
+        assert.equal(
+          math.timestampProvesCycleCompletion(bad, bounds, "2026-08-03"),
+          false,
+          "period Monday + wall hour 1 without atMs looks before reset"
+        );
+
+        const good = { dateStr: "2026-08-03", hour: 1, minute: 30, atMs: tueBefore4.getTime() };
+        assert.equal(
+          math.timestampProvesCycleCompletion(good, bounds, "2026-08-03"),
+          true,
+          "period Monday + atMs (Tue 1:30) still after Monday 4am reset"
+        );
+
+        // Wed 3am is still Tuesday's period — Attendance finish day should be Tuesday.
+        const wedBefore4 = new Date(2026, 7, 5, 3, 0, 0);
+        const wedPeriod = {
+          dateStr: "2026-08-04",
+          hour: 3,
+          minute: 0,
+          atMs: wedBefore4.getTime(),
+        };
+        const wedMembership = math.getCycleMembershipMoment(wedBefore4, 4, 0);
+        const wedBounds = math.getCycleBoundsForMoment(game.weeklies[0], wedMembership);
+        assert.equal(
+          math.timestampProvesCycleCompletion(wedPeriod, wedBounds, "2026-08-03"),
+          true,
+          "Wed 3am finish proves on Tuesday period day"
+        );
+
+        sim.markComplete(state, "weeklies", key, "2026-08-03", 1);
+        const stamp = (state.completionTimestamps || []).find(
+          (t) => t.taskType === "weeklies" && t.taskId === (game.weeklies[0].id || game.weeklies[0].label)
+        );
+        if (stamp) {
+          stamp.dateStr = "2026-08-03";
+          stamp.hour = 1;
+          stamp.minute = 30;
+          stamp.atMs = tueBefore4.getTime();
+        }
+        assert.equal(
+          !!(state.completionByDate["2026-08-03"] && (state.completionByDate["2026-08-03"].weeklies || []).includes(key)),
+          true,
+          "period Monday is the Attendance finish day"
+        );
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "weeklies", key, tueBefore4),
+          true,
+          "atMs keeps the weekly complete overnight"
+        );
+        sim.cleanupCycleBoundaryBleedMarks(state, tueBefore4);
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "weeklies", key, tueBefore4),
+          true,
+          "cleanup keeps a real overnight finish"
+        );
+
+        // Incomplete must clear period-day marks, carried fill, and the atMs stamp.
+        const beforeTally = Number(state.weekliesCompleted[key]) || 0;
+        sim.markIncomplete(state, "weeklies", key, "2026-08-03");
+        assert.equal(
+          sim.isCompletedInCurrentCycle(state, "weeklies", key, tueBefore4),
+          false,
+          "incomplete after overnight finish leaves the cycle empty"
+        );
+        assert.equal(
+          !!(state.completionByDate["2026-08-03"] && (state.completionByDate["2026-08-03"].weeklies || []).includes(key)),
+          false,
+          "period Monday mark cleared"
+        );
+        const left = (state.completionTimestamps || []).filter(
+          (t) => t.taskType === "weeklies" && t.taskId === (game.weeklies[0].id || game.weeklies[0].label)
+        );
+        assert.equal(left.length, 0, "atMs stamp removed on incomplete");
+        assert.equal(
+          Number(state.weekliesCompleted[key]) || 0,
+          Math.max(0, beforeTally - 1),
+          "completed tally decrements"
+        );
+      })
+    );
+
+    checks.push(
       check("Simulation: all weeklies+Pure Fiction legacy bleed → cleanup → sync seamless", () => {
         const state = sim.createFixture({ today: "2026-08-03" });
         const game = sim.getGame(state);
